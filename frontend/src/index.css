@@ -68,6 +68,48 @@ body {
   margin: 0;
 }
 
+.board-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+}
+
+.board-column {
+  min-height: 10rem;
+}
+
+.board-column-tasks {
+  flex: none;
+  overflow: visible;
+}
+
+.board-main {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+@media (min-width: 768px) {
+  .board-main {
+    overflow: hidden;
+  }
+
+  .board-columns {
+    height: 100%;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .board-column {
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .board-column-tasks {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+}
+
 h1,
 h2 {
   font-family: var(--heading);

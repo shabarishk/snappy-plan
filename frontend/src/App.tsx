@@ -54,18 +54,14 @@ function SortableTask({ task }: { task: Task }) {
 function Column({ column, tasks }: { column: ColumnType; tasks: Task[] }) {
   return (
     <>
-    {/* 
-      MOBILE: 85vw width, snaps to center. 
-      DESKTOP: auto width (controlled by parent grid), no snapping.
-      max-h-full ensures the column doesn't stretch past the screen.
-    */}
-    <div className="bg-gray-50 flex flex-col rounded-xl w-[85vw] md:w-auto max-h-full shrink-0 snap-center md:snap-align-none border border-gray-200 overflow-hidden">
+    {/* Columns stack and scroll with the page on mobile, then fill desktop grid cells. */}
+    <div className="board-column bg-gray-50 flex flex-col rounded-xl max-h-full border border-gray-200 overflow-hidden">
       <div className="p-4 border-b border-gray-200 bg-gray-100">
         <h2 className="font-bold text-gray-700">{column.title}</h2>
         <span className="text-xs text-gray-500">{tasks.length} tasks</span>
       </div>
       
-      <div className="flex-1 p-3 overflow-y-auto">
+      <div className="board-column-tasks flex-1 p-3 overflow-y-auto">
         <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
           {tasks.map((task) => (
             <SortableTask key={task.id} task={task} />
@@ -148,7 +144,7 @@ export default function App() {
       </header>
 
       {/* Main content area takes up remaining height */}
-      <main className="flex-1 overflow-hidden p-4">
+      <main className="board-main flex-1 p-4">
         <DndContext
           sensors={sensors}
           collisionDetection={closestCorners}
@@ -156,11 +152,8 @@ export default function App() {
           onDragOver={onDragOver}
           onDragEnd={onDragEnd}
         >
-          {/* 
-            MOBILE: Flex container, horizontal scroll.
-            DESKTOP: CSS Grid, 4 columns, no horizontal scroll.
-          */}
-          <div className="flex md:grid md:grid-cols-4 gap-4 h-full overflow-x-auto md:overflow-visible pb-4 snap-x snap-mandatory md:snap-none hide-scrollbar">
+          {/* Mobile lanes stack vertically; desktop uses four columns. */}
+          <div className="board-columns gap-4 pb-4">
             {COLUMNS.map((col) => (
               <Column key={col.id} column={col} tasks={tasks.filter((t) => t.columnId === col.id)} />
             ))}
