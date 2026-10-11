@@ -10,6 +10,15 @@ RETURNING *;
 SELECT * FROM users
 WHERE email = $1 LIMIT 1;
 
+-- name: CreateSession :one
+INSERT INTO sessions (token, user_id, expires_at)
+VALUES ($1, $2, $3)
+RETURNING *;
+
+-- name: GetSession :one
+SELECT * FROM sessions
+WHERE token = $1 AND expires_at > NOW();
+
 -- name: CreateBoard :one
 INSERT INTO boards (title, owner_id)
 VALUES ($1, $2)

@@ -71,6 +71,25 @@ func (q *Queries) CreateColumn(ctx context.Context, arg CreateColumnParams) (Col
 	return i, err
 }
 
+const createSession = `-- name: CreateSession :one
+INSERT INTO sessions (token, user_id, expires_at)
+VALUES ($1, $2, $3)
+RETURNING token, user_id, expires_at
+`
+
+type CreateSessionParams struct {
+	Token     string             `json:"token"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+}
+
+func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
+	row := q.db.QueryRow(ctx, createSession, arg.Token, arg.UserID, arg.ExpiresAt)
+	var i Session
+	err := row.Scan(&i.Token, &i.UserID, &i.ExpiresAt)
+	return i, err
+}
+
 const createTask = `-- name: CreateTask :one
 INSERT INTO tasks (column_id, title, description, position, assigned_to_id)
 VALUES ($1, $2, $3, $4, $5)
@@ -182,6 +201,18 @@ func (q *Queries) GetBoardWithColumns(ctx context.Context, id pgtype.UUID) ([]Ge
 		return nil, err
 	}
 	return items, nil
+}
+
+const getSession = `-- name: GetSession :one
+SELECT token, user_id, expires_at FROM sessions
+WHERE token = $1 AND expires_at > NOW()
+`
+
+func (q *Queries) GetSession(ctx context.Context, token string) (Session, error) {
+	row := q.db.QueryRow(ctx, getSession, token)
+	var i Session
+	err := row.Scan(&i.Token, &i.UserID, &i.ExpiresAt)
+	return i, err
 }
 
 const getTasksByColumn = `-- name: GetTasksByColumn :many

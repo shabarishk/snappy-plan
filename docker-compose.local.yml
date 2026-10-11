@@ -12,6 +12,14 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./migrations/000001_init_schema.up.sql:/docker-entrypoint-initdb.d/001_init_schema.sql:ro
+      - ./migrations/000002_add_user_roles.up.sql:/docker-entrypoint-initdb.d/002_add_user_roles.sql:ro
+      - ./migrations/000003_create_sessions_table.up.sql:/docker-entrypoint-initdb.d/003_create_sessions_table.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d snappyplan"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
 
   backend:
     build:
@@ -21,9 +29,11 @@ services:
     ports:
       - "8080:8080"
     environment:
+      - COOKIE_SECURE=false
       - DATABASE_URL=postgres://postgres:password@db:5432/snappyplan?sslmode=disable
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   frontend:
     build:

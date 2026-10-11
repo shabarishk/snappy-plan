@@ -24,6 +24,12 @@ type Column struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type Session struct {
+	Token     string             `json:"token"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+}
+
 type Task struct {
 	ID           pgtype.UUID        `json:"id"`
 	ColumnID     pgtype.UUID        `json:"column_id"`

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   DndContext, DragOverlay, closestCorners, KeyboardSensor, PointerSensor,
   useSensor, useSensors, type DragStartEvent, type DragOverEvent, type DragEndEvent,
@@ -79,6 +79,7 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
+  const handleAuthenticated = useCallback(() => setIsAuthenticated(true), []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -139,7 +140,7 @@ export default function App() {
   };
 
   if (!isAuthenticated) {
-    return <AuthWrapper onAuthenticated={() => setIsAuthenticated(true)} />;
+    return <AuthWrapper onAuthenticated={handleAuthenticated} />;
   }
 
   return (

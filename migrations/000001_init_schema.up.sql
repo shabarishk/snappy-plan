@@ -35,6 +35,12 @@ CREATE TABLE tasks (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE sessions (
+    token TEXT PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL
+);
+
 -- Indexes for performance when querying board hierarchies
 CREATE INDEX idx_boards_owner ON boards(owner_id);
 CREATE INDEX idx_columns_board_position ON columns(board_id, position);

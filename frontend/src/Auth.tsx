@@ -1,24 +1,46 @@
 import { useState, useEffect } from 'react';
 
 export function AuthWrapper({ onAuthenticated }: { onAuthenticated: () => void }) {
-  const [view, setView] = useState<'loading' | 'setup' | 'login'>('loading');
+  const [view, setView] = useState<'loading' | 'setup' | 'login' | 'error'>('loading');
 
   useEffect(() => {
-    fetch('/api/setup/status')
-      .then((res) => res.json())
-      .then((data) => {
-        setView(data.setup_required ? 'setup' : 'login');
-      })
-      .catch((err) => {
-        console.error("Failed to fetch setup status", err);
-        setView('login');
-      });
-  }, []);
+    const checkAuth = async () => {
+      try {
+        const authRes = await fetch('/api/auth/status', { credentials: 'same-origin' });
+        if (!authRes.ok) throw new Error('Failed to check authentication status');
+        const authData: { authenticated: boolean } = await authRes.json();
+        if (authData.authenticated) {
+          onAuthenticated();
+          return;
+        }
+
+        const setupRes = await fetch('/api/setup/status', { credentials: 'same-origin' });
+        if (!setupRes.ok) throw new Error('Failed to check setup status');
+        const setupData: { setup_required: boolean } = await setupRes.json();
+        setView(setupData.setup_required ? 'setup' : 'login');
+      } catch (err) {
+        console.error('Failed to initialize authentication', err);
+        setView('error');
+      }
+    };
+
+    void checkAuth();
+  }, [onAuthenticated]);
 
   if (view === 'loading') {
     return (
       <div className="h-screen bg-gray-200 flex items-center justify-center">
         <div className="animate-pulse text-blue-600 font-bold text-xl">Loading Snappy Plan...</div>
+      </div>
+    );
+  }
+
+  if (view === 'error') {
+    return (
+      <div className="h-screen bg-gray-200 flex items-center justify-center p-4">
+        <div role="alert" className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md text-center text-red-700">
+          Unable to connect to Snappy Plan. Please refresh the page and try again.
+        </div>
       </div>
     );
   }
@@ -35,15 +57,20 @@ function SetupScreen({ onComplete }: { onComplete: () => void }) {
 
   const handleSetup = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch('/api/setup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, full_name: fullName, password }),
-    });
+    try {
+      const res = await fetch('/api/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, full_name: fullName, password }),
+      });
 
-    if (res.ok) {
+      if (!res.ok) {
+        setError('Setup failed. Please try again.');
+        return;
+      }
       onComplete();
-    } else {
+    } catch (err) {
+      console.error('Failed to create admin account', err);
       setError('Setup failed. Please check backend logs.');
     }
   };
@@ -70,7 +97,7 @@ function SetupScreen({ onComplete }: { onComplete: () => void }) {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-            <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="••••••••" />
+            <input type="password" required minLength={8} maxLength={72} value={password} onChange={(e) => setPassword(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="••••••••" />
           </div>
           <button type="submit" className="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors">
             Create Admin Account
@@ -88,16 +115,21 @@ function LoginScreen({ onLoginSuccess }: { onLoginSuccess: () => void }) {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    // We will build this endpoint in the Go backend next
-    const res = await fetch('/api/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ email, password }),
+      });
 
-    if (res.ok) {
+      if (!res.ok) {
+        setError('Invalid email or password');
+        return;
+      }
       onLoginSuccess();
-    } else {
+    } catch (err) {
+      console.error('Failed to log in', err);
       setError('Invalid email or password');
     }
   };
