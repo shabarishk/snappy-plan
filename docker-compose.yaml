@@ -1,15 +1,34 @@
 version: '3.8'
+
 services:
   db:
     image: postgres:15-alpine
+    restart: always
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD: your_secure_password
       POSTGRES_DB: snappyplan
-    ports:
-      - "5432:5432"
     volumes:
-      - snappyplan_data:/var/lib/postgresql/data
+      # Maps the database to Unraid's persistent appdata share
+      - /mnt/user/appdata/snappyplan/db:/var/lib/postgresql/data
 
-volumes:
-  snappyplan_data:
+  backend:
+    build: 
+      context: .
+      dockerfile: Dockerfile.backend
+    restart: always
+    environment:
+      # The Go app connects using the Docker service name 'db' instead of 'localhost'
+      - DATABASE_URL=postgres://postgres:your_secure_password@db:5432/snappyplan?sslmode=disable
+    depends_on:
+      - db
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+    restart: always
+    ports:
+      - "3000:80" # Maps Unraid port 3000 to Nginx port 80
+    depends_on:
+      - backend
