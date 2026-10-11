@@ -47,6 +47,9 @@ func main() { // Read from Docker env, fallback to localhost for manual testing
 	// 4. Set up the HTTP router (Go 1.22+ standard library)
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("GET /api/setup/status", apiCfg.handleSetupStatus)
+	mux.HandleFunc("POST /api/setup", apiCfg.handleInitialSetup)
+
 	// Map the URL endpoint to our handler function
 	mux.HandleFunc("POST /api/boards", apiCfg.handleCreateBoard)
 

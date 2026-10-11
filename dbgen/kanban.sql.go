@@ -11,6 +11,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countUsers = `-- name: CountUsers :one
+SELECT COUNT(*) FROM users
+`
+
+func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countUsers)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createBoard = `-- name: CreateBoard :one
 INSERT INTO boards (title, owner_id)
 VALUES ($1, $2)
@@ -97,25 +108,32 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 }
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (email, password_hash, full_name)
-VALUES ($1, $2, $3)
-RETURNING id, email, password_hash, full_name, created_at, updated_at
+INSERT INTO users (email, password_hash, full_name, role)
+VALUES ($1, $2, $3, $4)
+RETURNING id, email, password_hash, full_name, role, created_at, updated_at
 `
 
 type CreateUserParams struct {
 	Email        string `json:"email"`
 	PasswordHash string `json:"password_hash"`
 	FullName     string `json:"full_name"`
+	Role         string `json:"role"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
-	row := q.db.QueryRow(ctx, createUser, arg.Email, arg.PasswordHash, arg.FullName)
+	row := q.db.QueryRow(ctx, createUser,
+		arg.Email,
+		arg.PasswordHash,
+		arg.FullName,
+		arg.Role,
+	)
 	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
 		&i.PasswordHash,
 		&i.FullName,
+		&i.Role,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -202,7 +220,7 @@ func (q *Queries) GetTasksByColumn(ctx context.Context, columnID pgtype.UUID) ([
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, full_name, created_at, updated_at FROM users
+SELECT id, email, password_hash, full_name, role, created_at, updated_at FROM users
 WHERE email = $1 LIMIT 1
 `
 
@@ -214,6 +232,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Email,
 		&i.PasswordHash,
 		&i.FullName,
+		&i.Role,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
