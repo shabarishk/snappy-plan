@@ -34,11 +34,12 @@ type Task struct {
 	ID           pgtype.UUID        `json:"id"`
 	ColumnID     pgtype.UUID        `json:"column_id"`
 	Title        string             `json:"title"`
-	Description  string             `json:"description"`
+	Description  pgtype.Text        `json:"description"`
 	Position     int32              `json:"position"`
 	AssignedToID pgtype.UUID        `json:"assigned_to_id"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
 }
 
 type User struct {

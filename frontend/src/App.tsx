@@ -10,7 +10,13 @@ import { CSS } from '@dnd-kit/utilities';
 import { AuthWrapper } from './Auth';
 
 // --- Types ---
-type Task = { id: string; columnId: string; title: string };
+type Task = {
+  id: string;
+  columnId: string;
+  title: string;
+  description?: string | null;
+  completedAt?: string | null;
+};
 type ColumnType = { id: string; title: string };
 
 const COLUMNS: ColumnType[] = [
@@ -21,7 +27,7 @@ const COLUMNS: ColumnType[] = [
 ];
 
 const INITIAL_TASKS: Task[] = [
-  { id: '1', columnId: 'backlog', title: 'Setup Unraid Docker' },
+  { id: '1', columnId: 'backlog', title: 'Setup Unraid Docker', description: 'Configure and verify the production container.' },
   { id: '2', columnId: 'todo', title: 'Configure iOS PWA settings' },
   { id: '3', columnId: 'in-progress', title: 'Build React UI' },
 ];
@@ -48,8 +54,23 @@ function SortableTask({ task }: { task: Task }) {
       className="bg-white p-4 mb-3 rounded-lg shadow-sm border border-gray-100 cursor-grab active:cursor-grabbing touch-manipulation hover:shadow-md transition-shadow"
     >
       <p className="text-gray-800 text-sm font-medium">{task.title}</p>
+      {task.description && <p className="mt-1 text-xs text-gray-600">{task.description}</p>}
+      {task.completedAt && (
+        <p className="mt-2 text-xs text-gray-500">
+          Completed <time dateTime={task.completedAt}>{new Date(task.completedAt).toLocaleString()}</time>
+        </p>
+      )}
     </div>
   );
+}
+
+function moveTaskToColumn(task: Task, columnId: string): Task {
+  if (task.columnId === columnId) return task;
+  return {
+    ...task,
+    columnId,
+    completedAt: columnId === 'complete' ? task.completedAt ?? new Date().toISOString() : null,
+  };
 }
 
 function Column({ column, tasks }: { column: ColumnType; tasks: Task[] }) {
@@ -108,7 +129,7 @@ export default function App() {
         const overIndex = prev.findIndex((t) => t.id === overId);
         if (prev[activeIndex].columnId !== prev[overIndex].columnId) {
           const newTasks = [...prev];
-          newTasks[activeIndex].columnId = newTasks[overIndex].columnId;
+          newTasks[activeIndex] = moveTaskToColumn(newTasks[activeIndex], newTasks[overIndex].columnId);
           return arrayMove(newTasks, activeIndex, overIndex);
         }
         return prev;
@@ -120,7 +141,7 @@ export default function App() {
       setTasks((prev) => {
         const activeIndex = prev.findIndex((t) => t.id === activeId);
         const newTasks = [...prev];
-        newTasks[activeIndex].columnId = overId.toString();
+        newTasks[activeIndex] = moveTaskToColumn(newTasks[activeIndex], overId.toString());
         return arrayMove(newTasks, activeIndex, activeIndex);
       });
     }
