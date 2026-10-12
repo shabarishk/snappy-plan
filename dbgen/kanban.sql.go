@@ -93,13 +93,13 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 const createTask = `-- name: CreateTask :one
 INSERT INTO tasks (column_id, title, description, position, assigned_to_id)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, column_id, title, description, position, assigned_to_id, created_at, updated_at
+RETURNING id, column_id, title, description, position, assigned_to_id, created_at, updated_at, completed_at
 `
 
 type CreateTaskParams struct {
 	ColumnID     pgtype.UUID `json:"column_id"`
 	Title        string      `json:"title"`
-	Description  string      `json:"description"`
+	Description  pgtype.Text `json:"description"`
 	Position     int32       `json:"position"`
 	AssignedToID pgtype.UUID `json:"assigned_to_id"`
 }
@@ -122,6 +122,7 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 		&i.AssignedToID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CompletedAt,
 	)
 	return i, err
 }
@@ -216,7 +217,7 @@ func (q *Queries) GetSession(ctx context.Context, token string) (Session, error)
 }
 
 const getTasksByColumn = `-- name: GetTasksByColumn :many
-SELECT id, column_id, title, description, position, assigned_to_id, created_at, updated_at FROM tasks
+SELECT id, column_id, title, description, position, assigned_to_id, created_at, updated_at, completed_at FROM tasks
 WHERE column_id = $1
 ORDER BY position ASC
 `
@@ -239,6 +240,7 @@ func (q *Queries) GetTasksByColumn(ctx context.Context, columnID pgtype.UUID) ([
 			&i.AssignedToID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CompletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -271,10 +273,20 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 }
 
 const moveTask = `-- name: MoveTask :one
-UPDATE tasks
-SET column_id = $1, position = $2, updated_at = NOW()
-WHERE id = $3
-RETURNING id, column_id, title, description, position, assigned_to_id, created_at, updated_at
+UPDATE tasks AS task
+SET column_id = $1,
+    position = $2,
+    updated_at = NOW(),
+    completed_at = CASE
+        WHEN EXISTS (
+            SELECT 1
+            FROM columns AS destination
+            WHERE destination.id = $1 AND LOWER(TRIM(destination.title)) = 'complete'
+        ) THEN COALESCE(task.completed_at, NOW())
+        ELSE NULL
+    END
+WHERE task.id = $3
+RETURNING task.id, task.column_id, task.title, task.description, task.position, task.assigned_to_id, task.created_at, task.updated_at, task.completed_at
 `
 
 type MoveTaskParams struct {
@@ -295,6 +307,7 @@ func (q *Queries) MoveTask(ctx context.Context, arg MoveTaskParams) (Task, error
 		&i.AssignedToID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CompletedAt,
 	)
 	return i, err
 }

@@ -49,7 +49,17 @@ WHERE column_id = $1
 ORDER BY position ASC;
 
 -- name: MoveTask :one
-UPDATE tasks
-SET column_id = $1, position = $2, updated_at = NOW()
-WHERE id = $3
-RETURNING *;
+UPDATE tasks AS task
+SET column_id = $1,
+    position = $2,
+    updated_at = NOW(),
+    completed_at = CASE
+        WHEN EXISTS (
+            SELECT 1
+            FROM columns AS destination
+            WHERE destination.id = $1 AND LOWER(TRIM(destination.title)) = 'complete'
+        ) THEN COALESCE(task.completed_at, NOW())
+        ELSE NULL
+    END
+WHERE task.id = $3
+RETURNING task.*;

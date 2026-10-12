@@ -98,6 +98,7 @@ describe('App board', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Snappy Plan' })).toBeTruthy());
     expect(screen.getByText('Setup Unraid Docker')).toBeTruthy();
+    expect(screen.getByText('Configure and verify the production container.')).toBeTruthy();
     expect(screen.getAllByText('1 tasks')).toHaveLength(3);
 
     fireEvent.click(screen.getByRole('button', { name: 'Start drag' }));
@@ -112,6 +113,10 @@ describe('App board', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Drag over column' }));
     expect(screen.getByText('Complete')).toBeTruthy();
     expect(screen.getAllByText('1 tasks')).toHaveLength(3);
+    expect(screen.getByText('Completed', { exact: false })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Drag over task' }));
+    expect(screen.queryByText('Completed', { exact: false })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Drag non-task' }));
     fireEvent.click(screen.getByRole('button', { name: 'Drag without target' }));

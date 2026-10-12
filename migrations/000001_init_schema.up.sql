@@ -28,11 +28,12 @@ CREATE TABLE tasks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     column_id UUID NOT NULL REFERENCES columns(id) ON DELETE CASCADE,
     title VARCHAR(255) NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
+    description TEXT,
     position INT NOT NULL, -- Order of tasks within a column
     assigned_to_id UUID REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ
 );
 
 CREATE TABLE sessions (
