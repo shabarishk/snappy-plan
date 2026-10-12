@@ -1,2 +1,4 @@
 /coverage.out
 /frontend/coverage/
+/backend/web/dist/*
+!/backend/web/dist/.gitkeep
