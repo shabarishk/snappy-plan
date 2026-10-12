@@ -1,4 +1,4 @@
-package main
+package backend
 
 import (
 	"context"
@@ -14,15 +14,35 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 )
 
-// ApiConfig acts like a C++ class holding our database pointer
+type SetupTransaction interface {
+	dbgen.DBTX
+	Commit(context.Context) error
+	Rollback(context.Context) error
+}
+
+var _ SetupTransaction = (pgx.Tx)(nil)
+
 type ApiConfig struct {
 	DB           *dbgen.Queries
-	Pool         *pgxpool.Pool
+	BeginTx      func(context.Context) (SetupTransaction, error)
 	SecureCookie bool
+}
+
+func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, error), secureCookie bool) http.Handler {
+	api := &ApiConfig{DB: dbgen.New(db), BeginTx: beginTx, SecureCookie: secureCookie}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/setup/status", api.handleSetupStatus)
+	mux.HandleFunc("POST /api/setup", api.handleInitialSetup)
+	mux.HandleFunc("POST /api/login", api.handleLogin)
+	mux.HandleFunc("GET /api/auth/status", api.handleAuthStatus)
+	mux.HandleFunc("POST /api/boards", api.handleCreateBoard)
+	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("Snappy Plan Backend is running!"))
+	})
+	return mux
 }
 
 // Check if the application requires first-time setup
@@ -68,7 +88,7 @@ func (api *ApiConfig) handleInitialSetup(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Serialize first-run requests so only one can observe an empty users table.
-	tx, err := api.Pool.Begin(r.Context())
+	tx, err := api.BeginTx(r.Context())
 	if err != nil {
 		http.Error(w, "Failed to initialize setup", http.StatusInternalServerError)
 		return
@@ -78,12 +98,13 @@ func (api *ApiConfig) handleInitialSetup(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Failed to initialize setup", http.StatusInternalServerError)
 		return
 	}
-	txQueries := api.DB.WithTx(tx)
+	txQueries := dbgen.New(tx)
 	count, err := txQueries.CountUsers(r.Context())
 	if err != nil {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
+
 	if count > 0 {
 		http.Error(w, "Setup already complete. Please log in.", http.StatusForbidden)
 		return
