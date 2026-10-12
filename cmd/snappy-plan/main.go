@@ -40,9 +40,13 @@ func main() { // Read from Docker env, fallback to localhost for manual testing
 
 	log.Println("Successfully connected to PostgreSQL!")
 
+	frontendFiles, err := backend.FrontendFiles()
+	if err != nil {
+		log.Fatalf("Unable to load frontend assets: %v\n", err)
+	}
 	handler := backend.NewHandler(pool, func(ctx context.Context) (backend.SetupTransaction, error) {
 		return pool.Begin(ctx)
-	}, os.Getenv("COOKIE_SECURE") == "true")
+	}, os.Getenv("COOKIE_SECURE") == "true", frontendFiles)
 
 	// 5. Start the server
 	log.Println("Server starting on port 8080...")

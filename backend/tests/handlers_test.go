@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"snappy-plan/backend"
@@ -155,7 +156,10 @@ func newUser(password string) dbgen.User {
 }
 
 func newHandler(db *fakeDB, beginTx func(context.Context) (backend.SetupTransaction, error), secureCookie bool) http.Handler {
-	return backend.NewHandler(db, beginTx, secureCookie)
+	return backend.NewHandler(db, beginTx, secureCookie, fstest.MapFS{
+		"index.html":    &fstest.MapFile{Data: []byte("<main>Snappy Plan</main>")},
+		"assets/app.js": &fstest.MapFile{Data: []byte("console.log('app')")},
+	})
 }
 
 func send(handler http.Handler, method, target, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
@@ -400,5 +404,43 @@ func TestHealthEndpoint(t *testing.T) {
 	response := send(newHandler(&fakeDB{}, nil, false), http.MethodGet, "/api/health", "", nil)
 	if response.Code != http.StatusOK || response.Body.String() != "Snappy Plan Backend is running!" {
 		t.Fatalf("health response = %d %q", response.Code, response.Body.String())
+	}
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("health cache control = %q, want no-store", response.Header().Get("Cache-Control"))
+	}
+}
+
+func TestFrontendEndpoints(t *testing.T) {
+	handler := newHandler(&fakeDB{}, nil, false)
+	for _, test := range []struct {
+		name       string
+		path       string
+		wantBody   string
+		wantCache  string
+		wantStatus int
+	}{
+		{name: "index", path: "/", wantBody: "<main>Snappy Plan</main>", wantCache: "no-cache, no-store, must-revalidate", wantStatus: http.StatusOK},
+		{name: "spa route", path: "/setup/welcome", wantBody: "<main>Snappy Plan</main>", wantCache: "no-cache, no-store, must-revalidate", wantStatus: http.StatusOK},
+		{name: "static asset", path: "/assets/app.js", wantBody: "console.log('app')", wantStatus: http.StatusOK},
+		{name: "missing static asset", path: "/assets/missing.js", wantStatus: http.StatusNotFound},
+		{name: "unknown API route", path: "/api/missing", wantCache: "no-store", wantStatus: http.StatusNotFound},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := send(handler, http.MethodGet, test.path, "", nil)
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d", response.Code, test.wantStatus)
+			}
+			if test.wantBody != "" && !strings.Contains(response.Body.String(), test.wantBody) {
+				t.Fatalf("body = %q, want it to contain %q", response.Body.String(), test.wantBody)
+			}
+			if got := response.Header().Get("Cache-Control"); got != test.wantCache {
+				t.Fatalf("cache-control = %q, want %q", got, test.wantCache)
+			}
+		})
+	}
+
+	response := send(handler, http.MethodPost, "/", "", nil)
+	if response.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("static POST status = %d, want %d", response.Code, http.StatusMethodNotAllowed)
 	}
 }

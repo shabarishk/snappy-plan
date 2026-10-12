@@ -11,13 +11,13 @@
 
 ## Run locally
 
-Start the local stack from the repository root:
+The React frontend is built into the Go server image and served by the same application container. Start the database and application from the repository root:
 
 ```powershell
 docker compose -f docker-compose.local.yml up --build
 ```
 
-The frontend is available at `http://localhost:3000`.
+The application (frontend and API) is available at `http://localhost:3000`.
 
 ## Run tests and coverage
 
