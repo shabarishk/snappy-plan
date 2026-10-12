@@ -1,4 +1,5 @@
 /coverage.out
 /frontend/coverage/
+/dbgen/
 /backend/web/dist/*
 !/backend/web/dist/.gitkeep
