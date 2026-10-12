@@ -27,12 +27,6 @@ const COLUMNS: ColumnType[] = [
 ];
 const BOARD_COLUMNS = COLUMNS.filter((column) => column.id !== 'backlog');
 
-const INITIAL_TASKS: Task[] = [
-  { id: '1', columnId: 'backlog', title: 'Setup Unraid Docker', description: 'Configure and verify the production container.' },
-  { id: '2', columnId: 'todo', title: 'Configure iOS PWA settings' },
-  { id: '3', columnId: 'in-progress', title: 'Build React UI' },
-];
-
 // --- Sub-Components ---
 function SortableTask({ task, onMoveToTodo }: { task: Task; onMoveToTodo?: (taskId: string) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -120,7 +114,7 @@ function Column({
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentPage, setCurrentPage] = useState<'board' | 'backlog'>('board');
-  const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const handleAuthenticated = useCallback(() => setIsAuthenticated(true), []);
 
