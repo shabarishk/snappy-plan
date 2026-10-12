@@ -6,7 +6,7 @@
 - `backend/tests/` contains backend HTTP unit tests.
 - `cmd/snappy-plan/` contains the server executable.
 - `dbgen/`, `queries/`, and `migrations/` contain generated database access, SQL queries, and schema migrations.
-- `frontend/src/` contains the React application.
+- `frontend/src/` contains the React application, including the three-column Kanban board and the separate Backlog page.
 - `frontend/tests/` contains frontend unit tests.
 
 ## Run locally

@@ -97,16 +97,32 @@ describe('App board', () => {
     render(<App />);
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Snappy Plan' })).toBeTruthy());
+    expect(screen.getByRole('heading', { name: 'To Do' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'In Progress' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Complete' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Backlog' })).toBeNull();
+    expect(screen.getAllByText('1 tasks')).toHaveLength(2);
+    expect(screen.getByRole('region', { name: 'Kanban board columns' }).getAttribute('style'))
+      .toContain('repeat(3, minmax(0, 1fr))');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
+    expect(screen.getByRole('heading', { name: 'Backlog' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Backlog tasks' }).getAttribute('style'))
+      .toContain('minmax(0, 1fr)');
     expect(screen.getByText('Setup Unraid Docker')).toBeTruthy();
     expect(screen.getByText('Configure and verify the production container.')).toBeTruthy();
-    expect(screen.getAllByText('1 tasks')).toHaveLength(3);
+    fireEvent.click(screen.getByRole('button', { name: 'Move to To Do' }));
+    expect(screen.getByText('0 tasks')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Kanban board' }));
+    expect(screen.getByRole('heading', { name: 'To Do' })).toBeTruthy();
+    expect(screen.getByText('Setup Unraid Docker')).toBeTruthy();
+    expect(screen.getByText('2 tasks')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Start drag' }));
     expect(screen.getAllByText('Setup Unraid Docker')).toHaveLength(2);
 
     fireEvent.click(screen.getByRole('button', { name: 'Drag over task' }));
-    expect(screen.getByText('Backlog')).toBeTruthy();
-    expect(screen.getAllByText('0 tasks')).toHaveLength(2);
     expect(screen.getByText('To Do')).toBeTruthy();
     expect(screen.getByText('2 tasks')).toBeTruthy();
 
