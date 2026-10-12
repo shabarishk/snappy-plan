@@ -6,7 +6,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { AuthWrapper } from './Auth';
 import { sortTasksByPriority, type TaskPriority } from './taskPriority';
-import { createTask as persistTask, getTaskAssignees, getTasks, type ApiTask, type TaskAssignee } from './api';
+import { createTask as persistTask, getTaskAssignees, getTasks, moveTask as persistMoveTask, type ApiTask, type TaskAssignee } from './api';
 
 // --- Types ---
 type TaskState = 'Backlog' | 'ToDo' | 'InProgress' | 'Complete';
@@ -258,6 +258,7 @@ export function AuthenticatedBoard({
   const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
   const [loadError, setLoadError] = useState('');
+  const [moveError, setMoveError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -310,14 +311,36 @@ export function AuthenticatedBoard({
     }
   };
 
+  const persistTaskMove = async (task: Task, destination: ColumnId) => {
+    if (task.columnId === destination) return;
+    setMoveError('');
+    try {
+      await persistMoveTask(task.id, COLUMN_STATES[destination]);
+    } catch (err) {
+      setTasks((previous) => previous.map((current) =>
+        current.id === task.id && current.columnId === destination
+          ? task
+          : current
+      ));
+      setMoveError(err instanceof Error ? err.message : 'Failed to move task');
+    }
+  };
+
   const onDragEnd = () => {
+    const movedTask = activeTask && tasks.find((task) => task.id === activeTask.id);
+    if (activeTask && movedTask && movedTask.columnId !== activeTask.columnId) {
+      void persistTaskMove(activeTask, movedTask.columnId);
+    }
     setActiveTask(null);
   };
 
   const moveBacklogTaskToTodo = (taskId: string) => {
-    setTasks((previous) => previous.map((task) =>
-      task.id === taskId ? moveTaskToColumn(task, 'todo') : task
+    const task = tasks.find((current) => current.id === taskId);
+    if (!task) return;
+    setTasks((previous) => previous.map((current) =>
+      current.id === taskId ? moveTaskToColumn(current, 'todo') : current
     ));
+    void persistTaskMove(task, 'todo');
   };
 
   return (
@@ -363,7 +386,7 @@ export function AuthenticatedBoard({
 
       {/* Main content area takes up remaining height */}
       <main className="board-main flex-1 p-4">
-        {loadError && <p role="alert" className="mb-3 rounded bg-red-100 p-3 text-sm text-red-700">{loadError}</p>}
+        {(loadError || moveError) && <p role="alert" className="mb-3 rounded bg-red-100 p-3 text-sm text-red-700">{loadError || moveError}</p>}
         <DndContext
           sensors={sensors}
           collisionDetection={closestCorners}

@@ -34,11 +34,13 @@ type fakeDB struct {
 	task               dbgen.Task
 	createTaskErr      error
 	createColumnErr    error
+	moveTaskErr        error
 	assignees          []dbgen.GetUsersForAssignmentRow
 	tasks              []dbgen.Task
 	boardArgs          []any
 	columnArgs         []any
 	taskArgs           []any
+	moveTaskArgs       []any
 	sessionArgs        []any
 	createUserArgs     []any
 	createBoardErr     error
@@ -83,6 +85,10 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 			db.user.ID, db.user.Email, db.user.PasswordHash, db.user.FullName,
 			db.user.Role, db.user.CreatedAt, db.user.UpdatedAt,
 		}, err: db.userErr}
+	case strings.Contains(query, "FROM tasks AS task") && strings.Contains(query, "WHERE task.id"):
+		return fakeRow{values: []any{
+			db.board.ID, db.board.Title, db.board.OwnerID, db.board.CreatedAt, db.board.UpdatedAt,
+		}, err: db.boardErr}
 	case strings.Contains(query, "FROM boards") && strings.Contains(query, "WHERE owner_id"):
 		return fakeRow{values: []any{
 			db.board.ID, db.board.Title, db.board.OwnerID, db.board.CreatedAt, db.board.UpdatedAt,
@@ -128,6 +134,24 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 		db.task.Priority = args[4].(string)
 		db.task.AssignedToID = args[5].(pgtype.UUID)
 		db.task.CompleteBy = args[6].(pgtype.Timestamptz)
+		return fakeRow{values: taskValues(db.task)}
+	case strings.Contains(query, "UPDATE tasks AS task"):
+		db.moveTaskArgs = args
+		if db.moveTaskErr != nil {
+			return fakeRow{err: db.moveTaskErr}
+		}
+		db.task.ColumnID = args[0].(pgtype.UUID)
+		db.task.State = map[string]string{
+			"Backlog":     "Backlog",
+			"To Do":       "ToDo",
+			"In Progress": "InProgress",
+			"Complete":    "Complete",
+		}[db.column.Title]
+		if db.task.State == "Complete" {
+			db.task.CompletedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
+		} else {
+			db.task.CompletedAt = pgtype.Timestamptz{}
+		}
 		return fakeRow{values: taskValues(db.task)}
 	case strings.Contains(query, "INSERT INTO users"):
 		db.createUserArgs = args
@@ -591,6 +615,64 @@ func TestCreateTaskEndpoint(t *testing.T) {
 		if db.task.Description.String != "Compare dates" || db.task.AssignedToID != db.user.ID ||
 			db.task.Priority != "High" || !db.task.CompleteBy.Time.Equal(due) {
 			t.Fatalf("created task fields = %#v", db.task)
+		}
+	})
+}
+
+func TestMoveTaskEndpoint(t *testing.T) {
+	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
+	t.Run("requires authentication", func(t *testing.T) {
+		response := send(newHandler(&fakeDB{}, nil, false), http.MethodPatch,
+			"/api/tasks/"+newUUID(2).String(), `{"state":"InProgress"}`, nil)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("persists a move to the requested state", func(t *testing.T) {
+		ownerID := newUUID(1)
+		taskID := newUUID(2)
+		destinationColumnID := newUUID(3)
+		db := &fakeDB{
+			session: dbgen.Session{Token: "token", UserID: ownerID},
+			board:   dbgen.Board{ID: newUUID(4), OwnerID: ownerID},
+			column: dbgen.Column{
+				ID: destinationColumnID, BoardID: newUUID(4), Title: "In Progress", Position: 2,
+			},
+			task: dbgen.Task{ID: taskID, Title: "Persist this move", State: "ToDo", Priority: "Medium"},
+		}
+		tx := &fakeTx{fakeDB: db}
+		handler := newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false)
+
+		response := send(handler, http.MethodPatch, "/api/tasks/"+taskID.String(),
+			`{"state":"InProgress"}`, cookie)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+		}
+		if !tx.committed {
+			t.Fatal("task move transaction was not committed")
+		}
+		if len(db.moveTaskArgs) != 3 || db.moveTaskArgs[0] != destinationColumnID ||
+			db.moveTaskArgs[1] != taskID || db.moveTaskArgs[2] != ownerID {
+			t.Fatalf("move task args = %#v", db.moveTaskArgs)
+		}
+		var movedTask dbgen.Task
+		if err := json.Unmarshal(response.Body.Bytes(), &movedTask); err != nil {
+			t.Fatalf("decode moved task: %v", err)
+		}
+		if movedTask.State != "InProgress" || movedTask.ColumnID != destinationColumnID {
+			t.Fatalf("moved task = %#v", movedTask)
+		}
+	})
+
+	t.Run("rejects an unsupported state", func(t *testing.T) {
+		db := &fakeDB{session: dbgen.Session{Token: "token", UserID: newUUID(1)}}
+		response := send(newHandler(db, nil, false), http.MethodPatch,
+			"/api/tasks/"+newUUID(2).String(), `{"state":"Blocked"}`, cookie)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusBadRequest, response.Body.String())
 		}
 	})
 }

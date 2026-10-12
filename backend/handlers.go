@@ -44,6 +44,7 @@ func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, 
 	mux.HandleFunc("POST /api/boards", api.handleCreateBoard)
 	mux.HandleFunc("GET /api/tasks", api.handleGetTasks)
 	mux.HandleFunc("POST /api/tasks", api.handleCreateTask)
+	mux.HandleFunc("PATCH /api/tasks/{taskID}", api.handleMoveTask)
 	mux.HandleFunc("GET /api/users", api.handleGetUsersForAssignment)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Snappy Plan Backend is running!"))
@@ -414,6 +415,117 @@ func (api *ApiConfig) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(task); err != nil {
 		http.Error(w, "Failed to encode task", http.StatusInternalServerError)
+	}
+}
+
+func (api *ApiConfig) handleMoveTask(w http.ResponseWriter, r *http.Request) {
+	session, ok, err := api.authenticatedSession(r)
+	if err != nil {
+		http.Error(w, "Failed to validate session", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	taskID := pgtype.UUID{}
+	if err := taskID.Scan(r.PathValue("taskID")); err != nil {
+		http.Error(w, "Task ID is invalid", http.StatusBadRequest)
+		return
+	}
+	var params struct {
+		State string `json:"state"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&params); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	columnTitle := ""
+	columnPosition := int32(0)
+	switch params.State {
+	case "Backlog":
+		columnTitle = "Backlog"
+	case "ToDo":
+		columnTitle = "To Do"
+		columnPosition = 1
+	case "InProgress":
+		columnTitle = "In Progress"
+		columnPosition = 2
+	case "Complete":
+		columnTitle = "Complete"
+		columnPosition = 3
+	default:
+		http.Error(w, "State must be Backlog, ToDo, InProgress, or Complete", http.StatusBadRequest)
+		return
+	}
+
+	if api.BeginTx == nil {
+		http.Error(w, "Task moves are unavailable", http.StatusInternalServerError)
+		return
+	}
+	tx, err := api.BeginTx(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to start task move", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback(context.Background())
+	if _, err := tx.Exec(r.Context(), "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", session.UserID.String()); err != nil {
+		http.Error(w, "Failed to prepare task move", http.StatusInternalServerError)
+		return
+	}
+
+	txQueries := dbgen.New(tx)
+	board, err := txQueries.GetBoardByTaskAndOwner(r.Context(), dbgen.GetBoardByTaskAndOwnerParams{
+		TaskID:  taskID,
+		OwnerID: session.UserID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "Task not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "Failed to load task", http.StatusInternalServerError)
+		return
+	}
+	column, err := txQueries.GetColumnByBoardAndTitle(r.Context(), dbgen.GetColumnByBoardAndTitleParams{
+		BoardID: board.ID,
+		Title:   columnTitle,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		column, err = txQueries.CreateColumn(r.Context(), dbgen.CreateColumnParams{
+			BoardID:  board.ID,
+			Title:    columnTitle,
+			Position: columnPosition,
+		})
+	}
+	if err != nil {
+		http.Error(w, "Failed to prepare task lane", http.StatusInternalServerError)
+		return
+	}
+
+	task, err := txQueries.MoveTask(r.Context(), dbgen.MoveTaskParams{
+		ColumnID: column.ID,
+		ID:       taskID,
+		OwnerID:  session.UserID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.Error(w, "Task not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "Failed to move task", http.StatusInternalServerError)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		http.Error(w, "Failed to save task move", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(task); err != nil {
+		http.Error(w, "Failed to encode moved task", http.StatusInternalServerError)
 	}
 }
 
