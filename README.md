@@ -41,3 +41,4 @@ npm run test:coverage
 ```
 
 Coverage reports are generated under `frontend/coverage/`; they are local test artifacts and should not be committed.
+
