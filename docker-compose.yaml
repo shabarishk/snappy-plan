@@ -19,7 +19,7 @@ services:
   backend:
     build: 
       context: .
-      dockerfile: Dockerfile.backend
+      dockerfile: Dockerfile
     restart: always
     environment:
       # Set COOKIE_SECURE=true when serving the app over HTTPS.

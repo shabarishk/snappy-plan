@@ -5,7 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"snappy-plan/dbgen"
+	"snappy-plan/backend"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -40,35 +40,13 @@ func main() { // Read from Docker env, fallback to localhost for manual testing
 
 	log.Println("Successfully connected to PostgreSQL!")
 
-	// 2. Initialize the sqlc queries with the live connection
-	queries := dbgen.New(pool)
-
-	// 3. Create our config struct holding the database pointer
-	apiCfg := &ApiConfig{
-		DB:           queries,
-		Pool:         pool,
-		SecureCookie: os.Getenv("COOKIE_SECURE") == "true",
-	}
-
-	// 4. Set up the HTTP router (Go 1.22+ standard library)
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("GET /api/setup/status", apiCfg.handleSetupStatus)
-	mux.HandleFunc("POST /api/setup", apiCfg.handleInitialSetup)
-	mux.HandleFunc("POST /api/login", apiCfg.handleLogin)
-	mux.HandleFunc("GET /api/auth/status", apiCfg.handleAuthStatus)
-
-	// Map the URL endpoint to our handler function
-	mux.HandleFunc("POST /api/boards", apiCfg.handleCreateBoard)
-
-	// Add a simple health check endpoint
-	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Snappy Plan Backend is running!"))
-	})
+	handler := backend.NewHandler(pool, func(ctx context.Context) (backend.SetupTransaction, error) {
+		return pool.Begin(ctx)
+	}, os.Getenv("COOKIE_SECURE") == "true")
 
 	// 5. Start the server
 	log.Println("Server starting on port 8080...")
-	err = http.ListenAndServe(":8080", mux)
+	err = http.ListenAndServe(":8080", handler)
 	if err != nil {
 		log.Fatal(err)
 	}

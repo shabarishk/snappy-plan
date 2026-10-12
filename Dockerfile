@@ -8,7 +8,7 @@ RUN go mod download
 
 # Copy source and compile statically
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o snappy-api .
+RUN CGO_ENABLED=0 GOOS=linux go build -o snappy-api ./cmd/snappy-plan
 
 # Stage 2: Minimal Runtime
 FROM alpine:latest
