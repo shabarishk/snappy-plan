@@ -17,6 +17,7 @@ RUN go mod download
 
 COPY . .
 COPY --from=frontend-builder /app/frontend/dist ./backend/web/dist
+RUN go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
 RUN CGO_ENABLED=0 GOOS=linux go build -o snappy-api ./cmd/snappy-plan
 
 # Stage 3: Minimal runtime

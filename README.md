@@ -5,7 +5,7 @@
 - `backend/` contains the HTTP handlers and API router.
 - `backend/tests/` contains backend HTTP unit tests.
 - `cmd/snappy-plan/` contains the server executable.
-- `dbgen/`, `queries/`, and `migrations/` contain generated database access, SQL queries, and schema migrations.
+- `dbgen/` is generated database access; `queries/` contains SQL queries and `migrations/` contains schema migrations.
 - `frontend/src/` contains the React application, including the three-column Kanban board and the separate Backlog page.
 - `frontend/tests/` contains frontend unit tests.
 
@@ -21,6 +21,14 @@ The application (frontend and API) is available at `http://localhost:3000`.
 After signing in, use **Create task** to add a task with a title, optional description, assignee, Backlog/ToDo state, priority, and optional completion date. Tasks are stored in PostgreSQL and loaded when the board opens.
 
 ## Run tests and coverage
+
+Generate the database access code after cloning and whenever `sqlc.yaml`, `queries/`, or `migrations/` changes:
+
+```powershell
+go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
+```
+
+The generated files are ignored by Git. The Docker build and CI generate them automatically.
 
 Run backend tests:
 

@@ -15,4 +15,4 @@ jobs:
       - name: Approve Pull Request
         uses: hmarr/auto-approve-action@v4
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.AUTO_APPROVE_TOKEN }}
