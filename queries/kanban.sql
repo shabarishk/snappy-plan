@@ -24,6 +24,12 @@ INSERT INTO boards (title, owner_id)
 VALUES ($1, $2)
 RETURNING *;
 
+-- name: GetBoardByOwner :one
+SELECT * FROM boards
+WHERE owner_id = $1
+ORDER BY created_at ASC, id ASC
+LIMIT 1;
+
 -- name: GetBoardWithColumns :many
 SELECT 
     b.id as board_id, b.title as board_title,
@@ -38,20 +44,62 @@ INSERT INTO columns (board_id, title, position)
 VALUES ($1, $2, $3)
 RETURNING *;
 
+-- name: GetColumnByBoardAndTitle :one
+SELECT * FROM columns
+WHERE board_id = sqlc.arg(board_id) AND LOWER(TRIM(title)) = LOWER(TRIM(sqlc.arg(title)))
+LIMIT 1;
+
 -- name: CreateTask :one
-INSERT INTO tasks (column_id, title, description, position, assigned_to_id)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO tasks (column_id, state, title, description, priority, assigned_to_id, complete_by)
+VALUES (
+       sqlc.arg(column_id),
+       sqlc.arg(state),
+       sqlc.arg(title),
+       sqlc.narg(description),
+       sqlc.arg(priority),
+       sqlc.narg(assigned_to_id),
+       sqlc.narg(complete_by)
+)
 RETURNING *;
+
+-- name: GetTasksByOwner :many
+SELECT task.*
+FROM tasks AS task
+JOIN columns AS task_column ON task_column.id = task.column_id
+JOIN boards AS board ON board.id = task_column.board_id
+WHERE board.owner_id = $1
+ORDER BY CASE task.priority
+    WHEN 'High' THEN 0
+    WHEN 'Medium' THEN 1
+    ELSE 2
+END, task.created_at ASC;
 
 -- name: GetTasksByColumn :many
 SELECT * FROM tasks
 WHERE column_id = $1
-ORDER BY position ASC;
+ORDER BY CASE priority
+    WHEN 'High' THEN 0
+    WHEN 'Medium' THEN 1
+    ELSE 2
+END, created_at ASC;
 
 -- name: MoveTask :one
 UPDATE tasks AS task
 SET column_id = $1,
-    position = $2,
+    state = CASE (
+        SELECT LOWER(TRIM(destination.title))
+        FROM columns AS destination
+        WHERE destination.id = $1
+    )
+        WHEN 'todo' THEN 'ToDo'
+        WHEN 'to do' THEN 'ToDo'
+        WHEN 'to-do' THEN 'ToDo'
+        WHEN 'inprogress' THEN 'InProgress'
+        WHEN 'in progress' THEN 'InProgress'
+        WHEN 'in-progress' THEN 'InProgress'
+        WHEN 'complete' THEN 'Complete'
+        ELSE 'Backlog'
+    END,
     updated_at = NOW(),
     completed_at = CASE
         WHEN EXISTS (
@@ -61,5 +109,15 @@ SET column_id = $1,
         ) THEN COALESCE(task.completed_at, NOW())
         ELSE NULL
     END
-WHERE task.id = $3
+WHERE task.id = $2
 RETURNING task.*;
+
+-- name: GetUsersForAssignment :many
+SELECT id, full_name
+FROM users
+ORDER BY full_name ASC, id ASC;
+
+-- name: GetUserByID :one
+SELECT * FROM users
+WHERE id = $1
+LIMIT 1;

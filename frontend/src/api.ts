@@ -7,6 +7,32 @@ export interface Board {
   owner_id: string;
 }
 
+export interface ApiTask {
+  id: string;
+  title: string;
+  description: string | null;
+  column_id: string;
+  state: 'Backlog' | 'ToDo' | 'InProgress' | 'Complete';
+  priority: 'Low' | 'Medium' | 'High';
+  assigned_to_id: string | null;
+  complete_by: string | null;
+  completed_at: string | null;
+}
+
+export interface TaskAssignee {
+  id: string;
+  full_name: string;
+}
+
+export interface CreateTaskRequest {
+  title: string;
+  description: string;
+  assigned_to_id: string;
+  state: 'Backlog' | 'ToDo';
+  priority: 'Low' | 'Medium' | 'High';
+  complete_by: string | null;
+}
+
 // 2. Wrap standard fetch calls
 export const checkHealth = async () => {
   const res = await fetch('/api/health');
@@ -20,5 +46,28 @@ export const createBoard = async (title: string, ownerId: string): Promise<Board
     body: JSON.stringify({ title, owner_id: ownerId })
   });
   if (!res.ok) throw new Error("Failed to create board");
+  return res.json();
+};
+
+export const getTasks = async (): Promise<ApiTask[]> => {
+  const res = await fetch('/api/tasks', { credentials: 'same-origin' });
+  if (!res.ok) throw new Error('Failed to load tasks');
+  return res.json();
+};
+
+export const getTaskAssignees = async (): Promise<TaskAssignee[]> => {
+  const res = await fetch('/api/users', { credentials: 'same-origin' });
+  if (!res.ok) throw new Error('Failed to load users');
+  return res.json();
+};
+
+export const createTask = async (task: CreateTaskRequest): Promise<ApiTask> => {
+  const res = await fetch('/api/tasks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify(task),
+  });
+  if (!res.ok) throw new Error(await res.text());
   return res.json();
 };

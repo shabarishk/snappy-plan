@@ -28,7 +28,17 @@ type fakeDB struct {
 	session            dbgen.Session
 	sessionErr         error
 	board              dbgen.Board
+	boardErr           error
+	column             dbgen.Column
+	columnErr          error
+	task               dbgen.Task
+	createTaskErr      error
+	createColumnErr    error
+	assignees          []dbgen.GetUsersForAssignmentRow
+	tasks              []dbgen.Task
 	boardArgs          []any
+	columnArgs         []any
+	taskArgs           []any
 	sessionArgs        []any
 	createUserArgs     []any
 	createBoardErr     error
@@ -40,8 +50,23 @@ func (db *fakeDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, erro
 	return pgconn.CommandTag{}, nil
 }
 
-func (db *fakeDB) Query(context.Context, string, ...any) (pgx.Rows, error) {
-	return nil, errors.New("unexpected query")
+func (db *fakeDB) Query(_ context.Context, query string, _ ...any) (pgx.Rows, error) {
+	switch {
+	case strings.Contains(query, "FROM tasks AS task"):
+		rows := make([][]any, len(db.tasks))
+		for i, task := range db.tasks {
+			rows[i] = taskValues(task)
+		}
+		return &fakeRows{values: rows}, nil
+	case strings.Contains(query, "SELECT id, full_name"):
+		rows := make([][]any, len(db.assignees))
+		for i, user := range db.assignees {
+			rows[i] = []any{user.ID, user.FullName}
+		}
+		return &fakeRows{values: rows}, nil
+	default:
+		return nil, errors.New("unexpected query: " + query)
+	}
 }
 
 func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row {
@@ -53,6 +78,19 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 			db.user.ID, db.user.Email, db.user.PasswordHash, db.user.FullName,
 			db.user.Role, db.user.CreatedAt, db.user.UpdatedAt,
 		}, err: db.userErr}
+	case strings.Contains(query, "FROM users") && strings.Contains(query, "WHERE id"):
+		return fakeRow{values: []any{
+			db.user.ID, db.user.Email, db.user.PasswordHash, db.user.FullName,
+			db.user.Role, db.user.CreatedAt, db.user.UpdatedAt,
+		}, err: db.userErr}
+	case strings.Contains(query, "FROM boards") && strings.Contains(query, "WHERE owner_id"):
+		return fakeRow{values: []any{
+			db.board.ID, db.board.Title, db.board.OwnerID, db.board.CreatedAt, db.board.UpdatedAt,
+		}, err: db.boardErr}
+	case strings.Contains(query, "FROM columns") && strings.Contains(query, "WHERE board_id"):
+		return fakeRow{values: []any{
+			db.column.ID, db.column.BoardID, db.column.Title, db.column.Position, db.column.CreatedAt,
+		}, err: db.columnErr}
 	case strings.Contains(query, "FROM sessions"):
 		return fakeRow{values: []any{db.session.Token, db.session.UserID, db.session.ExpiresAt}, err: db.sessionErr}
 	case strings.Contains(query, "INSERT INTO sessions"):
@@ -69,6 +107,28 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 		return fakeRow{values: []any{
 			db.board.ID, db.board.Title, db.board.OwnerID, db.board.CreatedAt, db.board.UpdatedAt,
 		}}
+	case strings.Contains(query, "INSERT INTO columns"):
+		db.columnArgs = args
+		if db.createColumnErr != nil {
+			return fakeRow{err: db.createColumnErr}
+		}
+		return fakeRow{values: []any{
+			db.column.ID, args[0], args[1], args[2], db.column.CreatedAt,
+		}}
+	case strings.Contains(query, "INSERT INTO tasks"):
+		db.taskArgs = args
+		if db.createTaskErr != nil {
+			return fakeRow{err: db.createTaskErr}
+		}
+		db.task.ID = newUUID(9)
+		db.task.ColumnID = args[0].(pgtype.UUID)
+		db.task.State = args[1].(string)
+		db.task.Title = args[2].(string)
+		db.task.Description = args[3].(pgtype.Text)
+		db.task.Priority = args[4].(string)
+		db.task.AssignedToID = args[5].(pgtype.UUID)
+		db.task.CompleteBy = args[6].(pgtype.Timestamptz)
+		return fakeRow{values: taskValues(db.task)}
 	case strings.Contains(query, "INSERT INTO users"):
 		db.createUserArgs = args
 		if db.createUserError != nil {
@@ -101,8 +161,12 @@ func (row fakeRow) Scan(dest ...any) error {
 			*target = value.(int64)
 		case *string:
 			*target = value.(string)
+		case *int32:
+			*target = value.(int32)
 		case *pgtype.UUID:
 			*target = value.(pgtype.UUID)
+		case *pgtype.Text:
+			*target = value.(pgtype.Text)
 		case *pgtype.Timestamptz:
 			*target = value.(pgtype.Timestamptz)
 		default:
@@ -111,6 +175,40 @@ func (row fakeRow) Scan(dest ...any) error {
 	}
 	return nil
 }
+
+func taskValues(task dbgen.Task) []any {
+	return []any{
+		task.ID, task.ColumnID, task.Title, task.Description, task.AssignedToID,
+		task.CreatedAt, task.UpdatedAt, task.CompleteBy, task.CompletedAt, task.State, task.Priority,
+	}
+}
+
+type fakeRows struct {
+	values [][]any
+	index  int
+}
+
+func (rows *fakeRows) Close()                                  {}
+func (rows *fakeRows) Err() error                              { return nil }
+func (*fakeRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
+func (*fakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (rows *fakeRows) Next() bool {
+	if rows.index >= len(rows.values) {
+		return false
+	}
+	rows.index++
+	return true
+}
+func (rows *fakeRows) Scan(dest ...any) error {
+	if rows.index == 0 || rows.index > len(rows.values) {
+		return errors.New("Scan called without a current row")
+	}
+	return (fakeRow{values: rows.values[rows.index-1]}).Scan(dest...)
+}
+func (*fakeRows) Values() ([]any, error) { return nil, errors.New("unexpected Values") }
+func (*fakeRows) RawValues() [][]byte    { return nil }
+func (*fakeRows) Conn() *pgx.Conn        { return nil }
+func (*fakeRows) TypeMap() *pgtype.Map   { return nil }
 
 type fakeTx struct {
 	*fakeDB
@@ -398,6 +496,155 @@ func TestCreateBoardEndpoint(t *testing.T) {
 			t.Fatalf("board args = %#v, want normalized title and session owner", db.boardArgs)
 		}
 	})
+}
+
+func TestCreateTaskEndpoint(t *testing.T) {
+	t.Run("requires authentication", func(t *testing.T) {
+		response := send(newHandler(&fakeDB{}, nil, false), http.MethodPost, "/api/tasks", `{"title":"Task"}`, nil)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
+		}
+	})
+
+	for _, body := range []string{
+		`{`,
+		`{"title":" "}`,
+		`{"title":"Task","state":"Complete"}`,
+		`{"title":"Task","priority":"Urgent"}`,
+		`{"title":"Task","assigned_to_id":"not-a-uuid"}`,
+		`{"title":"Task","complete_by":"not-a-date"}`,
+	} {
+		t.Run("rejects invalid "+body, func(t *testing.T) {
+			db := &fakeDB{session: dbgen.Session{Token: "token", UserID: newUUID(1)}}
+			response := send(newHandler(db, nil, false), http.MethodPost, "/api/tasks", body,
+				&http.Cookie{Name: "snappy_session", Value: "token"})
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusBadRequest, response.Body.String())
+			}
+		})
+	}
+
+	t.Run("creates a task with defaults in the requested lane", func(t *testing.T) {
+		ownerID := newUUID(1)
+		now := time.Now()
+		db := &fakeDB{
+			session:  dbgen.Session{Token: "token", UserID: ownerID},
+			boardErr: pgx.ErrNoRows,
+			board: dbgen.Board{
+				ID: newUUID(2), Title: "Snappy Plan", OwnerID: ownerID,
+				CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
+				UpdatedAt: pgtype.Timestamptz{Time: now, Valid: true},
+			},
+			columnErr: pgx.ErrNoRows,
+			column: dbgen.Column{
+				ID: newUUID(3), BoardID: newUUID(2), Title: "To Do", Position: 1,
+				CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
+			},
+		}
+		tx := &fakeTx{fakeDB: db}
+		handler := newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false)
+
+		response := send(handler, http.MethodPost, "/api/tasks", `{"title":"  Call dentist  ","state":"ToDo"}`,
+			&http.Cookie{Name: "snappy_session", Value: "token"})
+		if response.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusCreated, response.Body.String())
+		}
+		if !tx.committed {
+			t.Fatal("task transaction was not committed")
+		}
+		if len(db.taskArgs) != 7 || db.taskArgs[0] != db.column.ID || db.taskArgs[1] != "ToDo" ||
+			db.taskArgs[2] != "Call dentist" || db.taskArgs[4] != "Medium" {
+			t.Fatalf("task args = %#v", db.taskArgs)
+		}
+		var task dbgen.Task
+		if err := json.Unmarshal(response.Body.Bytes(), &task); err != nil {
+			t.Fatalf("decode created task: %v", err)
+		}
+		if task.Title != "Call dentist" || task.State != "ToDo" || task.Priority != "Medium" {
+			t.Fatalf("created task = %#v", task)
+		}
+	})
+
+	t.Run("persists optional task details", func(t *testing.T) {
+		ownerID := newUUID(1)
+		due := time.Date(2026, time.October, 20, 9, 30, 0, 0, time.UTC)
+		db := &fakeDB{
+			session: dbgen.Session{Token: "token", UserID: ownerID},
+			user:    dbgen.User{ID: newUUID(4), FullName: "Assigned User"},
+			board:   dbgen.Board{ID: newUUID(2), Title: "Existing", OwnerID: ownerID},
+			column:  dbgen.Column{ID: newUUID(3), BoardID: newUUID(2), Title: "Backlog"},
+		}
+		tx := &fakeTx{fakeDB: db}
+		handler := newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false)
+		body := `{"title":"Plan trip","description":"Compare dates","assigned_to_id":"` + db.user.ID.String() +
+			`","state":"Backlog","priority":"High","complete_by":"` + due.Format(time.RFC3339) + `"}`
+
+		response := send(handler, http.MethodPost, "/api/tasks", body,
+			&http.Cookie{Name: "snappy_session", Value: "token"})
+		if response.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusCreated, response.Body.String())
+		}
+		if db.task.Description.String != "Compare dates" || db.task.AssignedToID != db.user.ID ||
+			db.task.Priority != "High" || !db.task.CompleteBy.Time.Equal(due) {
+			t.Fatalf("created task fields = %#v", db.task)
+		}
+	})
+}
+
+func TestTaskReadEndpointsRequireAuthentication(t *testing.T) {
+	for _, path := range []string{"/api/tasks", "/api/users"} {
+		response := send(newHandler(&fakeDB{}, nil, false), http.MethodGet, path, "", nil)
+		if response.Code != http.StatusUnauthorized {
+			t.Errorf("%s status = %d, want %d", path, response.Code, http.StatusUnauthorized)
+		}
+	}
+}
+
+func TestTaskReadEndpoints(t *testing.T) {
+	ownerID := newUUID(1)
+	task := dbgen.Task{
+		ID:       newUUID(2),
+		ColumnID: newUUID(3),
+		Title:    "Read saved task",
+		State:    "Backlog",
+		Priority: "Medium",
+	}
+	assignee := dbgen.GetUsersForAssignmentRow{ID: ownerID, FullName: "Board Owner"}
+	db := &fakeDB{
+		session:   dbgen.Session{Token: "token", UserID: ownerID},
+		tasks:     []dbgen.Task{task},
+		assignees: []dbgen.GetUsersForAssignmentRow{assignee},
+	}
+	handler := newHandler(db, nil, false)
+	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
+
+	tasksResponse := send(handler, http.MethodGet, "/api/tasks", "", cookie)
+	if tasksResponse.Code != http.StatusOK {
+		t.Fatalf("tasks status = %d, want %d: %s", tasksResponse.Code, http.StatusOK, tasksResponse.Body.String())
+	}
+	var tasks []dbgen.Task
+	if err := json.Unmarshal(tasksResponse.Body.Bytes(), &tasks); err != nil {
+		t.Fatalf("decode tasks: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].Title != task.Title || tasks[0].Priority != task.Priority {
+		t.Fatalf("tasks = %#v", tasks)
+	}
+
+	usersResponse := send(handler, http.MethodGet, "/api/users", "", cookie)
+	if usersResponse.Code != http.StatusOK {
+		t.Fatalf("users status = %d, want %d: %s", usersResponse.Code, http.StatusOK, usersResponse.Body.String())
+	}
+	var users []dbgen.GetUsersForAssignmentRow
+	if err := json.Unmarshal(usersResponse.Body.Bytes(), &users); err != nil {
+		t.Fatalf("decode assignable users: %v", err)
+	}
+	if len(users) != 1 || users[0] != assignee {
+		t.Fatalf("assignable users = %#v", users)
+	}
 }
 
 func TestHealthEndpoint(t *testing.T) {

@@ -39,6 +39,11 @@ func main() { // Read from Docker env, fallback to localhost for manual testing
 	defer pool.Close()
 
 	log.Println("Successfully connected to PostgreSQL!")
+	if err := backend.EnsureTaskSchema(context.Background(), func(ctx context.Context) (backend.SetupTransaction, error) {
+		return pool.Begin(ctx)
+	}); err != nil {
+		log.Fatalf("Unable to update task schema: %v\n", err)
+	}
 
 	frontendFiles, err := backend.FrontendFiles()
 	if err != nil {
