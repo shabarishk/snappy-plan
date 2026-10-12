@@ -10,7 +10,7 @@ import { sortTasksByPriority, type TaskPriority } from './taskPriority';
 // --- Types ---
 type TaskState = 'Backlog' | 'ToDo' | 'InProgress' | 'Complete';
 type ColumnId = 'backlog' | 'todo' | 'in-progress' | 'complete';
-type Task = {
+export type Task = {
   id: string;
   columnId: ColumnId;
   state: TaskState;
@@ -121,13 +121,15 @@ function Column({
   );
 }
 
-// --- Main App Component ---
-export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+export function AuthenticatedBoard({
+  tasks,
+  setTasks,
+}: {
+  tasks: Task[];
+  setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
+}) {
   const [currentPage, setCurrentPage] = useState<'board' | 'backlog'>('board');
-  const [tasks, setTasks] = useState<Task[]>([]);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
-  const handleAuthenticated = useCallback(() => setIsAuthenticated(true), []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -171,10 +173,6 @@ export default function App() {
       task.id === taskId ? moveTaskToColumn(task, 'todo') : task
     ));
   };
-
-  if (!isAuthenticated) {
-    return <AuthWrapper onAuthenticated={handleAuthenticated} />;
-  }
 
   return (
     <div className="h-screen bg-gray-200 font-sans flex flex-col">
@@ -242,4 +240,17 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+// --- Main App Component ---
+export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const handleAuthenticated = useCallback(() => setIsAuthenticated(true), []);
+
+  if (!isAuthenticated) {
+    return <AuthWrapper onAuthenticated={handleAuthenticated} />;
+  }
+
+  return <AuthenticatedBoard tasks={tasks} setTasks={setTasks} />;
 }

@@ -78,4 +78,57 @@ describe('AuthWrapper', () => {
       'Unable to connect to Snappy Plan. Please refresh the page and try again.',
     );
   });
+
+  it('shows a recoverable error when account setup is rejected', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ authenticated: false }))
+      .mockResolvedValueOnce(response({ setup_required: true }))
+      .mockResolvedValueOnce(response({}, false));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AuthWrapper onAuthenticated={vi.fn()} />);
+    await screen.findByRole('heading', { name: 'Initialize Snappy Plan' });
+    fireEvent.submit(screen.getByRole('button', { name: 'Create Admin Account' }).closest('form')!);
+
+    expect(await screen.findByText('Setup failed. Please try again.')).toBeTruthy();
+  });
+
+  it('shows a recoverable error when login is rejected', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ authenticated: false }))
+      .mockResolvedValueOnce(response({ setup_required: false }))
+      .mockResolvedValueOnce(response({}, false));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AuthWrapper onAuthenticated={vi.fn()} />);
+    await screen.findByRole('heading', { name: 'Welcome Back' });
+    fireEvent.submit(screen.getByRole('button', { name: 'Log In' }).closest('form')!);
+
+    expect(await screen.findByText('Invalid email or password')).toBeTruthy();
+  });
+
+  it('reports network failures during setup and login', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const setupFetch = vi.fn()
+      .mockResolvedValueOnce(response({ authenticated: false }))
+      .mockResolvedValueOnce(response({ setup_required: true }))
+      .mockRejectedValueOnce(new Error('network error'));
+    vi.stubGlobal('fetch', setupFetch);
+    const { unmount } = render(<AuthWrapper onAuthenticated={vi.fn()} />);
+    await screen.findByRole('heading', { name: 'Initialize Snappy Plan' });
+    fireEvent.submit(screen.getByRole('button', { name: 'Create Admin Account' }).closest('form')!);
+    expect(await screen.findByText('Setup failed. Please check backend logs.')).toBeTruthy();
+    unmount();
+
+    const loginFetch = vi.fn()
+      .mockResolvedValueOnce(response({ authenticated: false }))
+      .mockResolvedValueOnce(response({ setup_required: false }))
+      .mockRejectedValueOnce(new Error('network error'));
+    vi.stubGlobal('fetch', loginFetch);
+    render(<AuthWrapper onAuthenticated={vi.fn()} />);
+    await screen.findByRole('heading', { name: 'Welcome Back' });
+    fireEvent.submit(screen.getByRole('button', { name: 'Log In' }).closest('form')!);
+    expect(await screen.findByText('Invalid email or password')).toBeTruthy();
+    expect(consoleError).toHaveBeenCalled();
+  });
 });

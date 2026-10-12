@@ -1,13 +1,50 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import App from '../src/App';
+import App, { AuthenticatedBoard, type Task } from '../src/App';
 import { sortTasksByPriority } from '../src/taskPriority';
 
 vi.mock('@dnd-kit/core', async () => {
   const React = await import('react');
+  const task = {
+    id: 'task-1',
+    columnId: 'backlog',
+    state: 'Backlog',
+    priority: 'High',
+    title: 'Test task',
+  };
 
   return {
-    DndContext: ({ children }: { children: React.ReactNode }) => children,
+    DndContext: ({
+      children,
+      onDragStart,
+      onDragOver,
+      onDragEnd,
+    }: {
+      children: React.ReactNode;
+      onDragStart: (event: never) => void;
+      onDragOver: (event: never) => void;
+      onDragEnd: () => void;
+    }) => React.createElement(React.Fragment, null,
+      children,
+      React.createElement('button', {
+        onClick: () => onDragStart({
+          active: { id: task.id, data: { current: { type: 'Task', task } } },
+        } as never),
+      }, 'Mock drag start'),
+      React.createElement('button', {
+        onClick: () => onDragOver({
+          active: { id: task.id, data: { current: { type: 'Task', task } } },
+          over: { id: 'complete', data: { current: { type: 'Column' } } },
+        } as never),
+      }, 'Mock drag over Complete'),
+      React.createElement('button', {
+        onClick: () => onDragOver({
+          active: { id: task.id, data: { current: { type: 'Task', task } } },
+          over: null,
+        } as never),
+      }, 'Mock drag without target'),
+      React.createElement('button', { onClick: onDragEnd }, 'Mock drag end'),
+    ),
     DragOverlay: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
     closestCorners: vi.fn(),
     KeyboardSensor: vi.fn(),
@@ -85,5 +122,42 @@ describe('App board', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Kanban board' }));
     expect(screen.getByRole('heading', { name: 'To Do' })).toBeTruthy();
     expect(screen.getAllByText('0 tasks')).toHaveLength(3);
+  });
+
+  it('moves backlog tasks between lanes and displays their priority and completion time', () => {
+    const task: Task = {
+      id: 'task-1',
+      columnId: 'backlog',
+      state: 'Backlog',
+      priority: 'High',
+      title: 'Test task',
+      description: 'Task details',
+    };
+    const setTasks = vi.fn((update: React.SetStateAction<Task[]>) => {
+      tasks = typeof update === 'function' ? update(tasks) : update;
+    });
+    let tasks = [task];
+
+    const { rerender } = render(<AuthenticatedBoard tasks={tasks} setTasks={setTasks} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
+    expect(screen.getByText('Priority: High')).toBeTruthy();
+    expect(screen.getByText('Task details')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move to To Do' }));
+    expect(setTasks).toHaveBeenCalled();
+    rerender(<AuthenticatedBoard tasks={tasks} setTasks={setTasks} />);
+    expect(screen.getByRole('region', { name: 'Backlog tasks' }).textContent).toContain('0 tasks');
+    expect(screen.getByRole('button', { name: 'Kanban board' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Kanban board' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mock drag start' }));
+    expect(screen.getAllByText('Test task')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Mock drag without target' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mock drag over Complete' }));
+    rerender(<AuthenticatedBoard tasks={tasks} setTasks={setTasks} />);
+    expect(screen.getByText('Completed', { exact: false })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Mock drag end' }));
+    rerender(<AuthenticatedBoard tasks={tasks} setTasks={setTasks} />);
+    expect(screen.getAllByText('Test task')).toHaveLength(1);
   });
 });
