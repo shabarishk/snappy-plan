@@ -91,46 +91,38 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 }
 
 const createTask = `-- name: CreateTask :one
-INSERT INTO tasks (column_id, state, title, description, priority, assigned_to_id)
+INSERT INTO tasks (column_id, state, title, description, priority, assigned_to_id, complete_by)
 VALUES (
        $1,
-       CASE (
-           SELECT LOWER(TRIM(task_column.title))
-           FROM columns AS task_column
-           WHERE task_column.id = $1
-       )
-           WHEN 'todo' THEN 'ToDo'
-           WHEN 'to do' THEN 'ToDo'
-           WHEN 'to-do' THEN 'ToDo'
-           WHEN 'inprogress' THEN 'InProgress'
-           WHEN 'in progress' THEN 'InProgress'
-           WHEN 'in-progress' THEN 'InProgress'
-           WHEN 'complete' THEN 'Complete'
-           ELSE 'Backlog'
-       END,
        $2,
        $3,
        $4,
-       $5
+       $5,
+       $6,
+       $7
 )
 RETURNING id, column_id, title, description, assigned_to_id, created_at, updated_at, complete_by, completed_at, state, priority
 `
 
 type CreateTaskParams struct {
-	ColumnID     pgtype.UUID `json:"column_id"`
-	Title        string      `json:"title"`
-	Description  pgtype.Text `json:"description"`
-	Priority     string      `json:"priority"`
-	AssignedToID pgtype.UUID `json:"assigned_to_id"`
+	ColumnID     pgtype.UUID        `json:"column_id"`
+	State        string             `json:"state"`
+	Title        string             `json:"title"`
+	Description  pgtype.Text        `json:"description"`
+	Priority     string             `json:"priority"`
+	AssignedToID pgtype.UUID        `json:"assigned_to_id"`
+	CompleteBy   pgtype.Timestamptz `json:"complete_by"`
 }
 
 func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, error) {
 	row := q.db.QueryRow(ctx, createTask,
 		arg.ColumnID,
+		arg.State,
 		arg.Title,
 		arg.Description,
 		arg.Priority,
 		arg.AssignedToID,
+		arg.CompleteBy,
 	)
 	var i Task
 	err := row.Scan(
@@ -182,6 +174,26 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 	return i, err
 }
 
+const getBoardByOwner = `-- name: GetBoardByOwner :one
+SELECT id, title, owner_id, created_at, updated_at FROM boards
+WHERE owner_id = $1
+ORDER BY created_at ASC, id ASC
+LIMIT 1
+`
+
+func (q *Queries) GetBoardByOwner(ctx context.Context, ownerID pgtype.UUID) (Board, error) {
+	row := q.db.QueryRow(ctx, getBoardByOwner, ownerID)
+	var i Board
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getBoardWithColumns = `-- name: GetBoardWithColumns :many
 SELECT 
     b.id as board_id, b.title as board_title,
@@ -224,6 +236,30 @@ func (q *Queries) GetBoardWithColumns(ctx context.Context, id pgtype.UUID) ([]Ge
 		return nil, err
 	}
 	return items, nil
+}
+
+const getColumnByBoardAndTitle = `-- name: GetColumnByBoardAndTitle :one
+SELECT id, board_id, title, position, created_at FROM columns
+WHERE board_id = $1 AND LOWER(TRIM(title)) = LOWER(TRIM($2))
+LIMIT 1
+`
+
+type GetColumnByBoardAndTitleParams struct {
+	BoardID pgtype.UUID `json:"board_id"`
+	Title   string      `json:"title"`
+}
+
+func (q *Queries) GetColumnByBoardAndTitle(ctx context.Context, arg GetColumnByBoardAndTitleParams) (Column, error) {
+	row := q.db.QueryRow(ctx, getColumnByBoardAndTitle, arg.BoardID, arg.Title)
+	var i Column
+	err := row.Scan(
+		&i.ID,
+		&i.BoardID,
+		&i.Title,
+		&i.Position,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const getSession = `-- name: GetSession :one
@@ -280,6 +316,51 @@ func (q *Queries) GetTasksByColumn(ctx context.Context, columnID pgtype.UUID) ([
 	return items, nil
 }
 
+const getTasksByOwner = `-- name: GetTasksByOwner :many
+SELECT task.id, task.column_id, task.title, task.description, task.assigned_to_id, task.created_at, task.updated_at, task.complete_by, task.completed_at, task.state, task.priority
+FROM tasks AS task
+JOIN columns AS task_column ON task_column.id = task.column_id
+JOIN boards AS board ON board.id = task_column.board_id
+WHERE board.owner_id = $1
+ORDER BY CASE task.priority
+    WHEN 'High' THEN 0
+    WHEN 'Medium' THEN 1
+    ELSE 2
+END, task.created_at ASC
+`
+
+func (q *Queries) GetTasksByOwner(ctx context.Context, ownerID pgtype.UUID) ([]Task, error) {
+	rows, err := q.db.Query(ctx, getTasksByOwner, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Task
+	for rows.Next() {
+		var i Task
+		if err := rows.Scan(
+			&i.ID,
+			&i.ColumnID,
+			&i.Title,
+			&i.Description,
+			&i.AssignedToID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CompleteBy,
+			&i.CompletedAt,
+			&i.State,
+			&i.Priority,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
 SELECT id, email, password_hash, full_name, role, created_at, updated_at FROM users
 WHERE email = $1 LIMIT 1
@@ -298,6 +379,58 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getUserByID = `-- name: GetUserByID :one
+SELECT id, email, password_hash, full_name, role, created_at, updated_at FROM users
+WHERE id = $1
+LIMIT 1
+`
+
+func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByID, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.FullName,
+		&i.Role,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getUsersForAssignment = `-- name: GetUsersForAssignment :many
+SELECT id, full_name
+FROM users
+ORDER BY full_name ASC, id ASC
+`
+
+type GetUsersForAssignmentRow struct {
+	ID       pgtype.UUID `json:"id"`
+	FullName string      `json:"full_name"`
+}
+
+func (q *Queries) GetUsersForAssignment(ctx context.Context) ([]GetUsersForAssignmentRow, error) {
+	rows, err := q.db.Query(ctx, getUsersForAssignment)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetUsersForAssignmentRow
+	for rows.Next() {
+		var i GetUsersForAssignmentRow
+		if err := rows.Scan(&i.ID, &i.FullName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const moveTask = `-- name: MoveTask :one

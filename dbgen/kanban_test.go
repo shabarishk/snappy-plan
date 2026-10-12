@@ -173,10 +173,12 @@ func TestCreateTaskScansNullableTaskFields(t *testing.T) {
 
 	got, err := New(db).CreateTask(context.Background(), CreateTaskParams{
 		ColumnID:     columnID,
+		State:        "Backlog",
 		Title:        want.Title,
 		Description:  pgtype.Text{},
 		Priority:     want.Priority,
 		AssignedToID: assignedToID,
+		CompleteBy:   pgtype.Timestamptz{},
 	})
 	if err != nil {
 		t.Fatalf("CreateTask returned error: %v", err)
@@ -184,8 +186,9 @@ func TestCreateTaskScansNullableTaskFields(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("CreateTask task = %#v, want %#v", got, want)
 	}
-	if len(db.args) != 5 || db.args[0] != columnID || db.args[1] != want.Title ||
-		db.args[2] != (pgtype.Text{}) || db.args[3] != want.Priority || db.args[4] != assignedToID {
+	if len(db.args) != 7 || db.args[0] != columnID || db.args[1] != "Backlog" || db.args[2] != want.Title ||
+		db.args[3] != (pgtype.Text{}) || db.args[4] != want.Priority || db.args[5] != assignedToID ||
+		db.args[6] != (pgtype.Timestamptz{}) {
 		t.Fatalf("CreateTask args = %#v", db.args)
 	}
 }

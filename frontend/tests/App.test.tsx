@@ -3,6 +3,28 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import App, { AuthenticatedBoard, type Task } from '../src/App';
 import { sortTasksByPriority } from '../src/taskPriority';
 
+const taskResponse = (overrides: Record<string, unknown> = {}) => ({
+  id: 'saved-task',
+  title: 'Persisted task',
+  description: null,
+  column_id: 'column-1',
+  state: 'Backlog',
+  priority: 'Medium',
+  assigned_to_id: null,
+  complete_by: null,
+  completed_at: null,
+  ...overrides,
+});
+
+const mockBoardReads = () => vi.fn().mockImplementation(async (url: string) => {
+  if (url === '/api/tasks') return { ok: true, json: async () => [] };
+  if (url === '/api/users') return {
+    ok: true,
+    json: async () => [{ id: 'user-1', full_name: 'Board Owner' }],
+  };
+  return { ok: true, json: async () => ({ authenticated: true }) };
+});
+
 vi.mock('@dnd-kit/core', async () => {
   const React = await import('react');
   const task = {
@@ -95,10 +117,7 @@ describe('App board', () => {
   });
 
   it('renders an empty board after authentication', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ authenticated: true }),
-    }));
+    vi.stubGlobal('fetch', mockBoardReads());
     render(<App />);
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Snappy Plan' })).toBeTruthy());
@@ -125,6 +144,7 @@ describe('App board', () => {
   });
 
   it('moves backlog tasks between lanes and displays their priority and completion time', () => {
+    vi.stubGlobal('fetch', mockBoardReads());
     const task: Task = {
       id: 'task-1',
       columnId: 'backlog',
@@ -159,5 +179,96 @@ describe('App board', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Mock drag end' }));
     rerender(<AuthenticatedBoard tasks={tasks} setTasks={setTasks} />);
     expect(screen.getAllByText('Test task')).toHaveLength(1);
+  });
+
+  it('creates and displays a task from the overlay form', async () => {
+    const fetchMock = mockBoardReads();
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/tasks' && options?.method === 'POST') {
+        return { ok: true, json: async () => taskResponse({
+          title: 'Book a campsite',
+          description: 'Check the lake sites',
+          state: 'ToDo',
+          priority: 'High',
+          assigned_to_id: 'user-1',
+          complete_by: '2026-10-20T09:30:00.000Z',
+        }) };
+      }
+      if (url === '/api/tasks') return { ok: true, json: async () => [] };
+      if (url === '/api/users') return {
+        ok: true,
+        json: async () => [{ id: 'user-1', full_name: 'Board Owner' }],
+      };
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Snappy Plan' });
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Create task' }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
+    const dialog = screen.getByRole('dialog', { name: 'Create task' });
+    expect((screen.getByLabelText('Current state') as HTMLSelectElement).value).toBe('Backlog');
+    expect((screen.getByLabelText('Priority') as HTMLSelectElement).value).toBe('Medium');
+    expect((screen.getByLabelText('Title') as HTMLInputElement).required).toBe(true);
+
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Book a campsite' } });
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Check the lake sites' } });
+    fireEvent.change(screen.getByLabelText('Assigned to'), { target: { value: 'user-1' } });
+    fireEvent.change(screen.getByLabelText('Current state'), { target: { value: 'ToDo' } });
+    fireEvent.change(screen.getByLabelText('Priority'), { target: { value: 'High' } });
+    fireEvent.change(screen.getByLabelText('Complete by'), { target: { value: '2026-10-20T02:30' } });
+    fireEvent.submit(dialog.querySelector('form')!);
+
+    expect(await screen.findByText('Book a campsite')).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith('/api/tasks', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        title: 'Book a campsite',
+        description: 'Check the lake sites',
+        assigned_to_id: 'user-1',
+        state: 'ToDo',
+        priority: 'High',
+        complete_by: new Date('2026-10-20T02:30').toISOString(),
+      }),
+    }));
+    expect(screen.getByText('Priority: High')).toBeTruthy();
+  });
+
+  it('creates a default task in Backlog with Medium priority', async () => {
+    const fetchMock = mockBoardReads();
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/tasks' && options?.method === 'POST') {
+        const request = JSON.parse(options.body as string) as { title: string; state: string; priority: string };
+        return { ok: true, json: async () => taskResponse(request) };
+      }
+      if (url === '/api/tasks') return { ok: true, json: async () => [] };
+      if (url === '/api/users') return { ok: true, json: async () => [] };
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Snappy Plan' });
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Create task' }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Review the garden plan' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Task' }));
+
+    expect(await screen.findByText('Review the garden plan')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Backlog' })).toBeTruthy();
+    expect(screen.getByText('Priority: Medium')).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith('/api/tasks', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        title: 'Review the garden plan',
+        description: '',
+        assigned_to_id: '',
+        state: 'Backlog',
+        priority: 'Medium',
+        complete_by: null,
+      }),
+    }));
   });
 });

@@ -17,10 +17,15 @@ type Querier interface {
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateTask(ctx context.Context, arg CreateTaskParams) (Task, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	GetBoardByOwner(ctx context.Context, ownerID pgtype.UUID) (Board, error)
 	GetBoardWithColumns(ctx context.Context, id pgtype.UUID) ([]GetBoardWithColumnsRow, error)
+	GetColumnByBoardAndTitle(ctx context.Context, arg GetColumnByBoardAndTitleParams) (Column, error)
 	GetSession(ctx context.Context, token string) (Session, error)
 	GetTasksByColumn(ctx context.Context, columnID pgtype.UUID) ([]Task, error)
+	GetTasksByOwner(ctx context.Context, ownerID pgtype.UUID) ([]Task, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
+	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
+	GetUsersForAssignment(ctx context.Context) ([]GetUsersForAssignmentRow, error)
 	MoveTask(ctx context.Context, arg MoveTaskParams) (Task, error)
 }
 

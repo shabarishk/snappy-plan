@@ -18,6 +18,7 @@ docker compose -f docker-compose.local.yml up --build
 ```
 
 The application (frontend and API) is available at `http://localhost:3000`.
+After signing in, use **Create task** to add a task with a title, optional description, assignee, Backlog/ToDo state, priority, and optional completion date. Tasks are stored in PostgreSQL and loaded when the board opens.
 
 ## Run tests and coverage
 
@@ -42,4 +43,4 @@ npm run test:coverage
 
 Coverage reports are generated under `frontend/coverage/`; they are local test artifacts and should not be committed.
 
-The initial schema in `migrations/000001_init_schema.up.sql` defines the task description and completion timestamp. Compose initialization scripts run only when PostgreSQL creates a new data directory. For an existing database, apply the required schema changes manually before deploying: `ALTER TABLE tasks ALTER COLUMN description DROP NOT NULL; ALTER TABLE tasks ADD COLUMN completed_at TIMESTAMPTZ;`. Also apply `migrations/000004_add_task_state.up.sql` to add a `state` field constrained to `Backlog`, `ToDo`, `InProgress`, or `Complete`, then apply `migrations/000005_replace_task_position_with_priority.up.sql` to replace task ordering with a priority field constrained to `Low`, `Medium`, or `High`. Existing tasks default to `Medium`; the board orders them High to Low.
+The initial schema in `migrations/000001_init_schema.up.sql` defines the task description and completion timestamp. Compose initialization scripts run only when PostgreSQL creates a new data directory. On application startup, the backend idempotently ensures the task `state` and `priority` columns and constraints exist, and removes the obsolete task position column, including for existing database volumes. Existing tasks without a priority default to `Medium`; the board orders them High to Low.
