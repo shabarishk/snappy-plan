@@ -98,10 +98,6 @@ body {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .board-columns.backlog-page {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .board-column {
     min-width: 0;
     min-height: 0;

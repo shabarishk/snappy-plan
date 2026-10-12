@@ -227,7 +227,16 @@ export default function App() {
           onDragEnd={onDragEnd}
         >
           {/* Backlog is managed separately; the main board keeps its active workflow lanes. */}
-          <div className={`board-columns gap-4 pb-4 ${currentPage === 'backlog' ? 'backlog-page' : ''}`}>
+          <div
+            role="region"
+            aria-label={currentPage === 'backlog' ? 'Backlog tasks' : 'Kanban board columns'}
+            className="board-columns gap-4 pb-4"
+            style={{
+              gridTemplateColumns: currentPage === 'backlog'
+                ? 'minmax(0, 1fr)'
+                : 'repeat(3, minmax(0, 1fr))',
+            }}
+          >
             {(currentPage === 'backlog' ? COLUMNS.filter((column) => column.id === 'backlog') : BOARD_COLUMNS).map((col) => (
               <Column
                 key={col.id}

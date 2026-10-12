@@ -102,9 +102,13 @@ describe('App board', () => {
     expect(screen.getByRole('heading', { name: 'Complete' })).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'Backlog' })).toBeNull();
     expect(screen.getAllByText('1 tasks')).toHaveLength(2);
+    expect(screen.getByRole('region', { name: 'Kanban board columns' }).getAttribute('style'))
+      .toContain('repeat(3, minmax(0, 1fr))');
 
     fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
     expect(screen.getByRole('heading', { name: 'Backlog' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Backlog tasks' }).getAttribute('style'))
+      .toContain('minmax(0, 1fr)');
     expect(screen.getByText('Setup Unraid Docker')).toBeTruthy();
     expect(screen.getByText('Configure and verify the production container.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Move to To Do' }));
