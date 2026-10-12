@@ -16,11 +16,13 @@ services:
       - ./migrations/000002_add_user_roles.up.sql:/docker-entrypoint-initdb.d/002_add_user_roles.sql:ro
       - ./migrations/000003_create_sessions_table.up.sql:/docker-entrypoint-initdb.d/003_create_sessions_table.sql:ro
 
-  backend:
+  app:
     build: 
       context: .
       dockerfile: Dockerfile
     restart: always
+    ports:
+      - "3000:8080"
     environment:
       # Set COOKIE_SECURE=true when serving the app over HTTPS.
       - COOKIE_SECURE=${COOKIE_SECURE:-false}
@@ -28,13 +30,3 @@ services:
       - DATABASE_URL=postgres://postgres:your_secure_password@db:5432/snappyplan?sslmode=disable
     depends_on:
       - db
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile.frontend
-    restart: always
-    ports:
-      - "3000:80" # Maps Unraid port 3000 to Nginx port 80
-    depends_on:
-      - backend

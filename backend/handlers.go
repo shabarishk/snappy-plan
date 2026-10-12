@@ -6,11 +6,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"net/mail"
-	"snappy-plan/dbgen"
+	"path"
 	"strings"
 	"time"
+
+	"snappy-plan/dbgen"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -31,7 +34,7 @@ type ApiConfig struct {
 	SecureCookie bool
 }
 
-func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, error), secureCookie bool) http.Handler {
+func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, error), secureCookie bool, frontendFiles fs.FS) http.Handler {
 	api := &ApiConfig{DB: dbgen.New(db), BeginTx: beginTx, SecureCookie: secureCookie}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/setup/status", api.handleSetupStatus)
@@ -42,7 +45,42 @@ func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, 
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Snappy Plan Backend is running!"))
 	})
-	return mux
+	mux.Handle("/api/", http.NotFoundHandler())
+	mux.Handle("/", frontendHandler(frontendFiles))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
+func frontendHandler(files fs.FS) http.Handler {
+	fileServer := http.FileServer(http.FS(files))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		name := strings.TrimPrefix(r.URL.Path, "/")
+		if name == "" {
+			name = "index.html"
+		}
+		if _, err := fs.Stat(files, name); err != nil {
+			if path.Ext(name) != "" {
+				http.NotFound(w, r)
+				return
+			}
+			r = r.Clone(r.Context())
+			r.URL.Path = "/"
+		}
+		if r.URL.Path == "/" || r.URL.Path == "/index.html" ||
+			r.URL.Path == "/sw.js" || r.URL.Path == "/registerSW.js" {
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		}
+		fileServer.ServeHTTP(w, r)
+	})
 }
 
 // Check if the application requires first-time setup
