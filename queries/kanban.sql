@@ -1,11 +1,23 @@
+-- name: CountUsers :one
+SELECT COUNT(*) FROM users;
+
 -- name: CreateUser :one
-INSERT INTO users (email, password_hash, full_name)
-VALUES ($1, $2, $3)
+INSERT INTO users (email, password_hash, full_name, role)
+VALUES ($1, $2, $3, $4)
 RETURNING *;
 
 -- name: GetUserByEmail :one
 SELECT * FROM users
 WHERE email = $1 LIMIT 1;
+
+-- name: CreateSession :one
+INSERT INTO sessions (token, user_id, expires_at)
+VALUES ($1, $2, $3)
+RETURNING *;
+
+-- name: GetSession :one
+SELECT * FROM sessions
+WHERE token = $1 AND expires_at > NOW();
 
 -- name: CreateBoard :one
 INSERT INTO boards (title, owner_id)

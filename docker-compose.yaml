@@ -11,6 +11,10 @@ services:
     volumes:
       # Maps the database to Unraid's persistent appdata share
       - /mnt/user/appdata/snappyplan/db:/var/lib/postgresql/data
+      # PostgreSQL runs these scripts automatically when initializing an empty data directory.
+      - ./migrations/000001_init_schema.up.sql:/docker-entrypoint-initdb.d/001_init_schema.sql:ro
+      - ./migrations/000002_add_user_roles.up.sql:/docker-entrypoint-initdb.d/002_add_user_roles.sql:ro
+      - ./migrations/000003_create_sessions_table.up.sql:/docker-entrypoint-initdb.d/003_create_sessions_table.sql:ro
 
   backend:
     build: 
@@ -18,6 +22,8 @@ services:
       dockerfile: Dockerfile.backend
     restart: always
     environment:
+      # Set COOKIE_SECURE=true when serving the app over HTTPS.
+      - COOKIE_SECURE=${COOKIE_SECURE:-false}
       # The Go app connects using the Docker service name 'db' instead of 'localhost'
       - DATABASE_URL=postgres://postgres:your_secure_password@db:5432/snappyplan?sslmode=disable
     depends_on:

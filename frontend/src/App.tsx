@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   DndContext, DragOverlay, closestCorners, KeyboardSensor, PointerSensor,
   useSensor, useSensors, type DragStartEvent, type DragOverEvent, type DragEndEvent,
@@ -7,6 +7,7 @@ import {
   SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { AuthWrapper } from './Auth';
 
 // --- Types ---
 type Task = { id: string; columnId: string; title: string };
@@ -75,8 +76,10 @@ function Column({ column, tasks }: { column: ColumnType; tasks: Task[] }) {
 
 // --- Main App Component ---
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
+  const handleAuthenticated = useCallback(() => setIsAuthenticated(true), []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -135,6 +138,10 @@ export default function App() {
       });
     }
   };
+
+  if (!isAuthenticated) {
+    return <AuthWrapper onAuthenticated={handleAuthenticated} />;
+  }
 
   return (
     <div className="h-screen bg-gray-200 font-sans flex flex-col">
