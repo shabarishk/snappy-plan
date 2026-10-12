@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App from '../src/App';
+import { sortTasksByPriority } from '../src/taskPriority';
 
 vi.mock('@dnd-kit/core', async () => {
   const React = await import('react');
@@ -13,28 +14,16 @@ vi.mock('@dnd-kit/core', async () => {
     PointerSensor: vi.fn(),
     useSensor: () => ({}),
     useSensors: (...sensors: object[]) => sensors,
+    useDraggable: () => ({
+      attributes: {},
+      listeners: {},
+      setNodeRef: vi.fn(),
+      transform: null,
+      isDragging: false,
+    }),
+    useDroppable: () => ({ setNodeRef: vi.fn() }),
   };
 });
-
-vi.mock('@dnd-kit/sortable', () => ({
-  SortableContext: ({ children }: { children: React.ReactNode }) => children,
-  arrayMove: <T,>(items: T[], from: number, to: number) => {
-    const next = [...items];
-    const [item] = next.splice(from, 1);
-    if (item !== undefined) next.splice(to, 0, item);
-    return next;
-  },
-  sortableKeyboardCoordinates: vi.fn(),
-  verticalListSortingStrategy: vi.fn(),
-  useSortable: () => ({
-    attributes: {},
-    listeners: {},
-    setNodeRef: vi.fn(),
-    transform: null,
-    transition: undefined,
-    isDragging: false,
-  }),
-}));
 
 vi.mock('@dnd-kit/utilities', () => ({
   CSS: { Transform: { toString: () => undefined } },
@@ -46,6 +35,16 @@ afterEach(() => {
 });
 
 describe('App board', () => {
+  it('orders tasks from highest to lowest priority', () => {
+    const tasks = [
+      { id: 'low', columnId: 'todo' as const, state: 'ToDo' as const, priority: 'Low' as const, title: 'Low priority' },
+      { id: 'high', columnId: 'todo' as const, state: 'ToDo' as const, priority: 'High' as const, title: 'High priority' },
+      { id: 'medium', columnId: 'todo' as const, state: 'ToDo' as const, priority: 'Medium' as const, title: 'Medium priority' },
+    ];
+
+    expect(sortTasksByPriority(tasks).map((task) => task.id)).toEqual(['high', 'medium', 'low']);
+  });
+
   it('requires auth before rendering the board', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ authenticated: false }) })

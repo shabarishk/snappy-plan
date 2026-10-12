@@ -1,7 +1,10 @@
 version: "2"
 sql:
   - engine: "postgresql"
-    schema: "migrations/000001_init_schema.up.sql"
+    schema:
+      - "migrations/000001_init_schema.up.sql"
+      - "migrations/000004_add_task_state.up.sql"
+      - "migrations/000005_replace_task_position_with_priority.up.sql"
     queries: "queries/"
     gen:
       go:

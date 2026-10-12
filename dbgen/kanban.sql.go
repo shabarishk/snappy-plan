@@ -91,16 +91,36 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 }
 
 const createTask = `-- name: CreateTask :one
-INSERT INTO tasks (column_id, title, description, position, assigned_to_id)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, column_id, title, description, position, assigned_to_id, created_at, updated_at, completed_at
+INSERT INTO tasks (column_id, state, title, description, priority, assigned_to_id)
+VALUES (
+       $1,
+       CASE (
+           SELECT LOWER(TRIM(task_column.title))
+           FROM columns AS task_column
+           WHERE task_column.id = $1
+       )
+           WHEN 'todo' THEN 'ToDo'
+           WHEN 'to do' THEN 'ToDo'
+           WHEN 'to-do' THEN 'ToDo'
+           WHEN 'inprogress' THEN 'InProgress'
+           WHEN 'in progress' THEN 'InProgress'
+           WHEN 'in-progress' THEN 'InProgress'
+           WHEN 'complete' THEN 'Complete'
+           ELSE 'Backlog'
+       END,
+       $2,
+       $3,
+       $4,
+       $5
+)
+RETURNING id, column_id, title, description, assigned_to_id, created_at, updated_at, complete_by, completed_at, state, priority
 `
 
 type CreateTaskParams struct {
 	ColumnID     pgtype.UUID `json:"column_id"`
 	Title        string      `json:"title"`
 	Description  pgtype.Text `json:"description"`
-	Position     int32       `json:"position"`
+	Priority     string      `json:"priority"`
 	AssignedToID pgtype.UUID `json:"assigned_to_id"`
 }
 
@@ -109,7 +129,7 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 		arg.ColumnID,
 		arg.Title,
 		arg.Description,
-		arg.Position,
+		arg.Priority,
 		arg.AssignedToID,
 	)
 	var i Task
@@ -118,11 +138,13 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 		&i.ColumnID,
 		&i.Title,
 		&i.Description,
-		&i.Position,
 		&i.AssignedToID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CompleteBy,
 		&i.CompletedAt,
+		&i.State,
+		&i.Priority,
 	)
 	return i, err
 }
@@ -217,9 +239,13 @@ func (q *Queries) GetSession(ctx context.Context, token string) (Session, error)
 }
 
 const getTasksByColumn = `-- name: GetTasksByColumn :many
-SELECT id, column_id, title, description, position, assigned_to_id, created_at, updated_at, completed_at FROM tasks
+SELECT id, column_id, title, description, assigned_to_id, created_at, updated_at, complete_by, completed_at, state, priority FROM tasks
 WHERE column_id = $1
-ORDER BY position ASC
+ORDER BY CASE priority
+    WHEN 'High' THEN 0
+    WHEN 'Medium' THEN 1
+    ELSE 2
+END, created_at ASC
 `
 
 func (q *Queries) GetTasksByColumn(ctx context.Context, columnID pgtype.UUID) ([]Task, error) {
@@ -236,11 +262,13 @@ func (q *Queries) GetTasksByColumn(ctx context.Context, columnID pgtype.UUID) ([
 			&i.ColumnID,
 			&i.Title,
 			&i.Description,
-			&i.Position,
 			&i.AssignedToID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CompleteBy,
 			&i.CompletedAt,
+			&i.State,
+			&i.Priority,
 		); err != nil {
 			return nil, err
 		}
@@ -275,7 +303,20 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 const moveTask = `-- name: MoveTask :one
 UPDATE tasks AS task
 SET column_id = $1,
-    position = $2,
+    state = CASE (
+        SELECT LOWER(TRIM(destination.title))
+        FROM columns AS destination
+        WHERE destination.id = $1
+    )
+        WHEN 'todo' THEN 'ToDo'
+        WHEN 'to do' THEN 'ToDo'
+        WHEN 'to-do' THEN 'ToDo'
+        WHEN 'inprogress' THEN 'InProgress'
+        WHEN 'in progress' THEN 'InProgress'
+        WHEN 'in-progress' THEN 'InProgress'
+        WHEN 'complete' THEN 'Complete'
+        ELSE 'Backlog'
+    END,
     updated_at = NOW(),
     completed_at = CASE
         WHEN EXISTS (
@@ -285,29 +326,30 @@ SET column_id = $1,
         ) THEN COALESCE(task.completed_at, NOW())
         ELSE NULL
     END
-WHERE task.id = $3
-RETURNING task.id, task.column_id, task.title, task.description, task.position, task.assigned_to_id, task.created_at, task.updated_at, task.completed_at
+WHERE task.id = $2
+RETURNING task.id, task.column_id, task.title, task.description, task.assigned_to_id, task.created_at, task.updated_at, task.complete_by, task.completed_at, task.state, task.priority
 `
 
 type MoveTaskParams struct {
 	ColumnID pgtype.UUID `json:"column_id"`
-	Position int32       `json:"position"`
 	ID       pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) MoveTask(ctx context.Context, arg MoveTaskParams) (Task, error) {
-	row := q.db.QueryRow(ctx, moveTask, arg.ColumnID, arg.Position, arg.ID)
+	row := q.db.QueryRow(ctx, moveTask, arg.ColumnID, arg.ID)
 	var i Task
 	err := row.Scan(
 		&i.ID,
 		&i.ColumnID,
 		&i.Title,
 		&i.Description,
-		&i.Position,
 		&i.AssignedToID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CompleteBy,
 		&i.CompletedAt,
+		&i.State,
+		&i.Priority,
 	)
 	return i, err
 }

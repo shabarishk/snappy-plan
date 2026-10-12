@@ -137,11 +137,13 @@ func taskRow(task Task) []any {
 		task.ColumnID,
 		task.Title,
 		task.Description,
-		task.Position,
 		task.AssignedToID,
 		task.CreatedAt,
 		task.UpdatedAt,
+		task.CompleteBy,
 		task.CompletedAt,
+		task.State,
+		task.Priority,
 	}
 }
 
@@ -152,10 +154,11 @@ func testTask() Task {
 		ColumnID:     pgtype.UUID{Bytes: [16]byte{2}, Valid: true},
 		Title:        "Finish task",
 		Description:  pgtype.Text{String: "Optional details", Valid: true},
-		Position:     3,
 		AssignedToID: pgtype.UUID{Bytes: [16]byte{4}, Valid: true},
 		CreatedAt:    pgtype.Timestamptz{Time: now.Add(-time.Hour), Valid: true},
 		UpdatedAt:    pgtype.Timestamptz{Time: now, Valid: true},
+		State:        "InProgress",
+		Priority:     "High",
 		CompletedAt:  pgtype.Timestamptz{Time: now, Valid: true},
 	}
 }
@@ -172,7 +175,7 @@ func TestCreateTaskScansNullableTaskFields(t *testing.T) {
 		ColumnID:     columnID,
 		Title:        want.Title,
 		Description:  pgtype.Text{},
-		Position:     want.Position,
+		Priority:     want.Priority,
 		AssignedToID: assignedToID,
 	})
 	if err != nil {
@@ -182,7 +185,7 @@ func TestCreateTaskScansNullableTaskFields(t *testing.T) {
 		t.Fatalf("CreateTask task = %#v, want %#v", got, want)
 	}
 	if len(db.args) != 5 || db.args[0] != columnID || db.args[1] != want.Title ||
-		db.args[2] != (pgtype.Text{}) || db.args[3] != want.Position || db.args[4] != assignedToID {
+		db.args[2] != (pgtype.Text{}) || db.args[3] != want.Priority || db.args[4] != assignedToID {
 		t.Fatalf("CreateTask args = %#v", db.args)
 	}
 }
@@ -193,7 +196,6 @@ func TestMoveTaskReturnsCompletionTimestamp(t *testing.T) {
 
 	got, err := New(db).MoveTask(context.Background(), MoveTaskParams{
 		ColumnID: want.ColumnID,
-		Position: want.Position,
 		ID:       want.ID,
 	})
 	if err != nil {
@@ -202,10 +204,10 @@ func TestMoveTaskReturnsCompletionTimestamp(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("MoveTask task = %#v, want %#v", got, want)
 	}
-	if len(db.args) != 3 || db.args[0] != want.ColumnID || db.args[1] != want.Position || db.args[2] != want.ID {
+	if len(db.args) != 2 || db.args[0] != want.ColumnID || db.args[1] != want.ID {
 		t.Fatalf("MoveTask args = %#v", db.args)
 	}
-	for _, fragment := range []string{"completed_at = CASE", "COALESCE(task.completed_at, NOW())", "ELSE NULL"} {
+	for _, fragment := range []string{"state = CASE", "'in-progress' THEN 'InProgress'", "completed_at = CASE", "COALESCE(task.completed_at, NOW())", "ELSE NULL"} {
 		if !strings.Contains(db.query, fragment) {
 			t.Errorf("MoveTask query does not contain %q", fragment)
 		}
@@ -228,6 +230,11 @@ func TestGetTasksByColumnScansCompletionTimestamps(t *testing.T) {
 	}
 	if len(db.args) != 1 || db.args[0] != columnID {
 		t.Fatalf("GetTasksByColumn args = %#v", db.args)
+	}
+	if !strings.Contains(db.query, "ORDER BY CASE priority") ||
+		!strings.Contains(db.query, "WHEN 'High' THEN 0") ||
+		!strings.Contains(db.query, "WHEN 'Medium' THEN 1") {
+		t.Fatalf("GetTasksByColumn query does not order tasks by priority: %s", db.query)
 	}
 	if !rows.closed {
 		t.Fatal("GetTasksByColumn did not close rows")
