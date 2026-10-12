@@ -25,6 +25,7 @@ const COLUMNS: ColumnType[] = [
   { id: 'in-progress', title: 'In Progress' },
   { id: 'complete', title: 'Complete' },
 ];
+const BOARD_COLUMNS = COLUMNS.filter((column) => column.id !== 'backlog');
 
 const INITIAL_TASKS: Task[] = [
   { id: '1', columnId: 'backlog', title: 'Setup Unraid Docker', description: 'Configure and verify the production container.' },
@@ -33,7 +34,7 @@ const INITIAL_TASKS: Task[] = [
 ];
 
 // --- Sub-Components ---
-function SortableTask({ task }: { task: Task }) {
+function SortableTask({ task, onMoveToTodo }: { task: Task; onMoveToTodo?: (taskId: string) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
     data: { type: 'Task', task },
@@ -60,6 +61,18 @@ function SortableTask({ task }: { task: Task }) {
           Completed <time dateTime={task.completedAt}>{new Date(task.completedAt).toLocaleString()}</time>
         </p>
       )}
+      {onMoveToTodo && (
+        <button
+          type="button"
+          className="mt-3 rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
+          onClick={(event) => {
+            event.stopPropagation();
+            onMoveToTodo(task.id);
+          }}
+        >
+          Move to To Do
+        </button>
+      )}
     </div>
   );
 }
@@ -73,7 +86,15 @@ function moveTaskToColumn(task: Task, columnId: string): Task {
   };
 }
 
-function Column({ column, tasks }: { column: ColumnType; tasks: Task[] }) {
+function Column({
+  column,
+  tasks,
+  onMoveToTodo,
+}: {
+  column: ColumnType;
+  tasks: Task[];
+  onMoveToTodo?: (taskId: string) => void;
+}) {
   return (
     <>
     {/* Columns stack and scroll with the page on mobile, then fill desktop grid cells. */}
@@ -86,7 +107,7 @@ function Column({ column, tasks }: { column: ColumnType; tasks: Task[] }) {
       <div className="board-column-tasks flex-1 p-3 overflow-y-auto">
         <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
           {tasks.map((task) => (
-            <SortableTask key={task.id} task={task} />
+            <SortableTask key={task.id} task={task} onMoveToTodo={onMoveToTodo} />
           ))}
         </SortableContext>
       </div>
@@ -98,6 +119,7 @@ function Column({ column, tasks }: { column: ColumnType; tasks: Task[] }) {
 // --- Main App Component ---
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentPage, setCurrentPage] = useState<'board' | 'backlog'>('board');
   const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const handleAuthenticated = useCallback(() => setIsAuthenticated(true), []);
@@ -160,6 +182,12 @@ export default function App() {
     }
   };
 
+  const moveBacklogTaskToTodo = (taskId: string) => {
+    setTasks((previous) => previous.map((task) =>
+      task.id === taskId ? moveTaskToColumn(task, 'todo') : task
+    ));
+  };
+
   if (!isAuthenticated) {
     return <AuthWrapper onAuthenticated={handleAuthenticated} />;
   }
@@ -168,6 +196,24 @@ export default function App() {
     <div className="h-screen bg-gray-200 font-sans flex flex-col">
       <header className="bg-white p-4 shadow-sm z-10 flex justify-between items-center shrink-0">
         <h1 className="text-xl font-extrabold text-blue-600 tracking-tight">Snappy Plan</h1>
+        <nav aria-label="Main navigation" className="flex items-center gap-2">
+          <button
+            type="button"
+            aria-current={currentPage === 'board' ? 'page' : undefined}
+            onClick={() => setCurrentPage('board')}
+            className={`rounded-lg px-3 py-2 text-sm font-medium ${currentPage === 'board' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+          >
+            Kanban board
+          </button>
+          <button
+            type="button"
+            aria-current={currentPage === 'backlog' ? 'page' : undefined}
+            onClick={() => setCurrentPage('backlog')}
+            className={`rounded-lg px-3 py-2 text-sm font-medium ${currentPage === 'backlog' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+          >
+            Backlog
+          </button>
+        </nav>
         <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold">S</div>
       </header>
 
@@ -180,10 +226,15 @@ export default function App() {
           onDragOver={onDragOver}
           onDragEnd={onDragEnd}
         >
-          {/* Mobile lanes stack vertically; desktop uses four columns. */}
-          <div className="board-columns gap-4 pb-4">
-            {COLUMNS.map((col) => (
-              <Column key={col.id} column={col} tasks={tasks.filter((t) => t.columnId === col.id)} />
+          {/* Backlog is managed separately; the main board keeps its active workflow lanes. */}
+          <div className={`board-columns gap-4 pb-4 ${currentPage === 'backlog' ? 'backlog-page' : ''}`}>
+            {(currentPage === 'backlog' ? COLUMNS.filter((column) => column.id === 'backlog') : BOARD_COLUMNS).map((col) => (
+              <Column
+                key={col.id}
+                column={col}
+                tasks={tasks.filter((task) => task.columnId === col.id)}
+                onMoveToTodo={currentPage === 'backlog' ? moveBacklogTaskToTodo : undefined}
+              />
             ))}
           </div>
 
