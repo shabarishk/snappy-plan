@@ -8,11 +8,8 @@ export default defineConfig({
     environment: 'jsdom',
     include: ['tests/**/*.test.{ts,tsx}'],
     coverage: {
-      include: ['src/App.tsx', 'src/Auth.tsx'],
-      reporter: ['text', 'html'],
-      thresholds: {
-        statements: 76,
-      },
+      include: ['src/**/*.{ts,tsx}'],
+      reporter: ['text', 'html', 'lcov'],
     },
   },
   plugins: [

@@ -4,12 +4,65 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
-  build-and-test:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      app: ${{ steps.filter.outputs.app }}
+    steps:
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - '**/*.go'
+              - 'go.mod'
+              - 'go.sum'
+              - 'migrations/**'
+              - 'queries/**'
+              - 'sqlc.yaml'
+            frontend:
+              - 'frontend/src/**'
+              - 'frontend/tests/**'
+              - 'frontend/package.json'
+              - 'frontend/package-lock.json'
+              - 'frontend/vite.config.ts'
+              - 'frontend/tsconfig*.json'
+            app:
+              - '.dockerignore'
+              - 'Dockerfile'
+              - 'docker-compose.yaml'
+              - 'backend/**/*.go'
+              - 'cmd/**/*.go'
+              - 'dbgen/**/*.go'
+              - 'frontend/src/**'
+              - 'frontend/public/**'
+              - 'frontend/index.html'
+              - 'frontend/package.json'
+              - 'frontend/package-lock.json'
+              - 'frontend/vite.config.ts'
+              - 'frontend/tsconfig*.json'
+              - 'go.mod'
+              - 'go.sum'
+              - 'migrations/**'
+              - 'queries/**'
+              - 'sqlc.yaml'
+
+  frontend-test-coverage:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -26,27 +79,65 @@ jobs:
         run: npm run test:coverage
         working-directory: frontend
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install diff-cover
+        run: python -m pip install diff-cover
+
+      - name: Check changed-line coverage
+        run: |
+          sed -i 's#^SF:src/#SF:frontend/src/#' frontend/coverage/lcov.info
+          diff-cover frontend/coverage/lcov.info --compare-branch="origin/${BASE_REF}" --fail-under=75
+        env:
+          BASE_REF: ${{ github.base_ref }}
+
+  backend-test-coverage:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22' # Update to match your go.mod version
+          go-version-file: go.mod
+          cache: true
 
-      - name: Check Backend Test Coverage
+      - name: Run backend tests with coverage
+        run: go test -coverprofile=coverage.out -coverpkg=./backend/...,./cmd/...,./dbgen/... ./backend/... ./cmd/... ./dbgen/...
+
+      - name: Convert Go coverage to Cobertura
         run: |
-          # Run tests and output coverage profile
-          go test -coverprofile=coverage.out ./...
-          
-          # Extract the total coverage percentage
-          COVERAGE=$(go tool cover -func=coverage.out | grep total | grep -Eo '[0-9]+\.[0-9]+')
-          echo "Total Coverage: $COVERAGE%"
-          
-          # Evaluate if coverage is below 75%
-          awk -v cov="$COVERAGE" 'BEGIN { 
-            if (cov < 75.0) { 
-              print "Error: Coverage " cov "% is strictly below the 75% threshold."; 
-              exit 1; 
-            } 
-          }'
+          go install github.com/boumenot/gocover-cobertura@v1.5.0
+          gocover-cobertura -strict -ignore-non-code-lines < coverage.out > coverage.xml
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install diff-cover
+        run: python -m pip install diff-cover
+
+      - name: Check changed-line coverage
+        run: diff-cover coverage.xml --compare-branch="origin/${BASE_REF}" --fail-under=75
+        env:
+          BASE_REF: ${{ github.base_ref }}
+
+  build:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Build Docker Compose
         run: docker compose -f docker-compose.yaml build
