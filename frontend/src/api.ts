@@ -33,6 +33,14 @@ export interface CreateTaskRequest {
   complete_by: string | null;
 }
 
+export interface UpdateTaskRequest {
+  title: string;
+  description: string;
+  priority: ApiTask['priority'];
+  state: ApiTask['state'];
+  complete_by: string | null;
+}
+
 // 2. Wrap standard fetch calls
 export const checkHealth = async () => {
   const res = await fetch('/api/health');
@@ -81,6 +89,20 @@ export const moveTask = async (
     headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin',
     body: JSON.stringify({ state }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+};
+
+export const updateTask = async (
+  taskId: string,
+  task: UpdateTaskRequest,
+): Promise<ApiTask> => {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify(task),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();

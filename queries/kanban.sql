@@ -138,6 +138,36 @@ WHERE task.id = $2
   )
 RETURNING task.*;
 
+-- name: UpdateTask :one
+UPDATE tasks AS task
+SET column_id = sqlc.arg(column_id),
+    state = sqlc.arg(state),
+    title = sqlc.arg(title),
+    description = sqlc.narg(description),
+    priority = sqlc.arg(priority),
+    complete_by = sqlc.narg(complete_by),
+    updated_at = NOW(),
+    completed_at = CASE
+        WHEN sqlc.arg(state)::VARCHAR = 'Complete' THEN COALESCE(task.completed_at, NOW())
+        ELSE NULL
+    END
+WHERE task.id = sqlc.arg(task_id)
+  AND EXISTS (
+      SELECT 1
+      FROM columns AS task_column
+      JOIN boards AS task_board ON task_board.id = task_column.board_id
+      WHERE task_column.id = task.column_id
+        AND task_board.owner_id = sqlc.arg(owner_id)
+  )
+  AND EXISTS (
+      SELECT 1
+      FROM columns AS destination
+      JOIN boards AS destination_board ON destination_board.id = destination.board_id
+      WHERE destination.id = sqlc.arg(column_id)
+        AND destination_board.owner_id = sqlc.arg(owner_id)
+  )
+RETURNING task.*;
+
 -- name: GetUsersForAssignment :many
 SELECT id, full_name
 FROM users

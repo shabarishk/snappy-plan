@@ -45,6 +45,7 @@ func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, 
 	mux.HandleFunc("GET /api/tasks", api.handleGetTasks)
 	mux.HandleFunc("POST /api/tasks", api.handleCreateTask)
 	mux.HandleFunc("PATCH /api/tasks/{taskID}", api.handleMoveTask)
+	mux.HandleFunc("PUT /api/tasks/{taskID}", api.handleUpdateTask)
 	mux.HandleFunc("GET /api/users", api.handleGetUsersForAssignment)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Snappy Plan Backend is running!"))
@@ -530,6 +531,140 @@ func (api *ApiConfig) handleMoveTask(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(task); err != nil {
 		http.Error(w, "Failed to encode moved task", http.StatusInternalServerError)
+	}
+}
+
+func (api *ApiConfig) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
+	session, ok, err := api.authenticatedSession(r)
+	if err != nil {
+		http.Error(w, "Failed to validate session", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	taskID := pgtype.UUID{}
+	if err := taskID.Scan(r.PathValue("taskID")); err != nil {
+		http.Error(w, "Task ID is invalid", http.StatusBadRequest)
+		return
+	}
+	var params struct {
+		Title       string  `json:"title"`
+		Description string  `json:"description"`
+		Priority    string  `json:"priority"`
+		State       string  `json:"state"`
+		CompleteBy  *string `json:"complete_by"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&params); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	params.Title = strings.TrimSpace(params.Title)
+	if params.Title == "" || len(params.Title) > 255 {
+		http.Error(w, "Task title is required and must be at most 255 bytes", http.StatusBadRequest)
+		return
+	}
+	if params.Priority != "Low" && params.Priority != "Medium" && params.Priority != "High" {
+		http.Error(w, "Priority must be Low, Medium, or High", http.StatusBadRequest)
+		return
+	}
+
+	columnTitle := ""
+	columnPosition := int32(0)
+	switch params.State {
+	case "Backlog":
+		columnTitle = "Backlog"
+	case "ToDo":
+		columnTitle = "To Do"
+		columnPosition = 1
+	case "InProgress":
+		columnTitle = "In Progress"
+		columnPosition = 2
+	case "Complete":
+		columnTitle = "Complete"
+		columnPosition = 3
+	default:
+		http.Error(w, "State must be Backlog, ToDo, InProgress, or Complete", http.StatusBadRequest)
+		return
+	}
+
+	description := pgtype.Text{}
+	if params.Description != "" {
+		description = pgtype.Text{String: params.Description, Valid: true}
+	}
+	completeBy := pgtype.Timestamptz{}
+	if params.CompleteBy != nil && *params.CompleteBy != "" {
+		parsedTime, err := time.Parse(time.RFC3339, *params.CompleteBy)
+		if err != nil {
+			http.Error(w, "Complete-by date must be a valid timestamp", http.StatusBadRequest)
+			return
+		}
+		completeBy = pgtype.Timestamptz{Time: parsedTime, Valid: true}
+	}
+
+	if api.BeginTx == nil {
+		http.Error(w, "Task updates are unavailable", http.StatusInternalServerError)
+		return
+	}
+	tx, err := api.BeginTx(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to start task update", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback(context.Background())
+	if _, err := tx.Exec(r.Context(), "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", session.UserID.String()); err != nil {
+		http.Error(w, "Failed to prepare task update", http.StatusInternalServerError)
+		return
+	}
+
+	txQueries := dbgen.New(tx)
+	board, err := txQueries.GetBoardByTaskAndOwner(r.Context(), dbgen.GetBoardByTaskAndOwnerParams{
+		TaskID: taskID, OwnerID: session.UserID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.Error(w, "Task not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "Failed to load task", http.StatusInternalServerError)
+		return
+	}
+	column, err := txQueries.GetColumnByBoardAndTitle(r.Context(), dbgen.GetColumnByBoardAndTitleParams{
+		BoardID: board.ID, Title: columnTitle,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		column, err = txQueries.CreateColumn(r.Context(), dbgen.CreateColumnParams{
+			BoardID: board.ID, Title: columnTitle, Position: columnPosition,
+		})
+	}
+	if err != nil {
+		http.Error(w, "Failed to prepare task lane", http.StatusInternalServerError)
+		return
+	}
+
+	task, err := txQueries.UpdateTask(r.Context(), dbgen.UpdateTaskParams{
+		ColumnID: column.ID, State: params.State, Title: params.Title,
+		Description: description, Priority: params.Priority, CompleteBy: completeBy,
+		TaskID: taskID, OwnerID: session.UserID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.Error(w, "Task not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "Failed to update task", http.StatusInternalServerError)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		http.Error(w, "Failed to save task update", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(task); err != nil {
+		http.Error(w, "Failed to encode updated task", http.StatusInternalServerError)
 	}
 }
 
