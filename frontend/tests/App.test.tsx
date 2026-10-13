@@ -62,6 +62,12 @@ vi.mock('@dnd-kit/core', async () => {
       React.createElement('button', {
         onClick: () => onDragOver({
           active: { id: task.id, data: { current: { type: 'Task', task } } },
+          over: { id: 'in-progress', data: { current: { type: 'Column' } } },
+        } as never),
+      }, 'Mock drag over In Progress'),
+      React.createElement('button', {
+        onClick: () => onDragOver({
+          active: { id: task.id, data: { current: { type: 'Task', task } } },
           over: null,
         } as never),
       }, 'Mock drag without target'),
@@ -179,6 +185,42 @@ describe('App board', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Mock drag end' }));
     rerender(<AuthenticatedBoard tasks={tasks} setTasks={setTasks} />);
     expect(screen.getAllByText('Test task')).toHaveLength(1);
+  });
+
+  it('persists a drag-and-drop state change to the backend', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/tasks' && options?.method === 'PATCH') {
+        return { ok: true, json: async () => taskResponse({
+          id: 'task-1',
+          state: 'InProgress',
+        }) };
+      }
+      if (url === '/api/tasks') return {
+        ok: true,
+        json: async () => [taskResponse({
+          id: 'task-1',
+          state: 'ToDo',
+          title: 'Move into progress',
+        })],
+      };
+      if (url === '/api/users') return { ok: true, json: async () => [] };
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    await screen.findByText('Move into progress');
+    fireEvent.click(screen.getByRole('button', { name: 'Mock drag start' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mock drag over In Progress' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mock drag end' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tasks/task-1',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ state: 'InProgress' }),
+      }),
+    ));
   });
 
   it('creates and displays a task from the overlay form', async () => {

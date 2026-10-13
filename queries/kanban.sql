@@ -30,6 +30,15 @@ WHERE owner_id = $1
 ORDER BY created_at ASC, id ASC
 LIMIT 1;
 
+-- name: GetBoardByTaskAndOwner :one
+SELECT board.*
+FROM tasks AS task
+JOIN columns AS task_column ON task_column.id = task.column_id
+JOIN boards AS board ON board.id = task_column.board_id
+WHERE task.id = sqlc.arg(task_id)
+  AND board.owner_id = sqlc.arg(owner_id)
+LIMIT 1;
+
 -- name: GetBoardWithColumns :many
 SELECT 
     b.id as board_id, b.title as board_title,
@@ -110,6 +119,23 @@ SET column_id = $1,
         ELSE NULL
     END
 WHERE task.id = $2
+  AND EXISTS (
+      SELECT 1
+      FROM columns AS task_column
+      JOIN boards AS task_board ON task_board.id = task_column.board_id
+      WHERE task_column.id = task.column_id
+        AND task_board.owner_id = $3
+  )
+  AND EXISTS (
+      SELECT 1
+      FROM boards AS destination_board
+      WHERE destination_board.id = (
+          SELECT destination.board_id
+          FROM columns AS destination
+          WHERE destination.id = $1
+      )
+        AND destination_board.owner_id = $3
+  )
 RETURNING task.*;
 
 -- name: GetUsersForAssignment :many

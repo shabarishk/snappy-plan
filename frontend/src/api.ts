@@ -71,3 +71,17 @@ export const createTask = async (task: CreateTaskRequest): Promise<ApiTask> => {
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 };
+
+export const moveTask = async (
+  taskId: string,
+  state: ApiTask['state'],
+): Promise<ApiTask> => {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ state }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+};

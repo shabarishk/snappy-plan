@@ -34,11 +34,15 @@ type fakeDB struct {
 	task               dbgen.Task
 	createTaskErr      error
 	createColumnErr    error
+	moveTaskErr        error
+	tasksErr           error
+	assigneesErr       error
 	assignees          []dbgen.GetUsersForAssignmentRow
 	tasks              []dbgen.Task
 	boardArgs          []any
 	columnArgs         []any
 	taskArgs           []any
+	moveTaskArgs       []any
 	sessionArgs        []any
 	createUserArgs     []any
 	createBoardErr     error
@@ -53,12 +57,18 @@ func (db *fakeDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, erro
 func (db *fakeDB) Query(_ context.Context, query string, _ ...any) (pgx.Rows, error) {
 	switch {
 	case strings.Contains(query, "FROM tasks AS task"):
+		if db.tasksErr != nil {
+			return nil, db.tasksErr
+		}
 		rows := make([][]any, len(db.tasks))
 		for i, task := range db.tasks {
 			rows[i] = taskValues(task)
 		}
 		return &fakeRows{values: rows}, nil
 	case strings.Contains(query, "SELECT id, full_name"):
+		if db.assigneesErr != nil {
+			return nil, db.assigneesErr
+		}
 		rows := make([][]any, len(db.assignees))
 		for i, user := range db.assignees {
 			rows[i] = []any{user.ID, user.FullName}
@@ -83,6 +93,10 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 			db.user.ID, db.user.Email, db.user.PasswordHash, db.user.FullName,
 			db.user.Role, db.user.CreatedAt, db.user.UpdatedAt,
 		}, err: db.userErr}
+	case strings.Contains(query, "FROM tasks AS task") && strings.Contains(query, "WHERE task.id"):
+		return fakeRow{values: []any{
+			db.board.ID, db.board.Title, db.board.OwnerID, db.board.CreatedAt, db.board.UpdatedAt,
+		}, err: db.boardErr}
 	case strings.Contains(query, "FROM boards") && strings.Contains(query, "WHERE owner_id"):
 		return fakeRow{values: []any{
 			db.board.ID, db.board.Title, db.board.OwnerID, db.board.CreatedAt, db.board.UpdatedAt,
@@ -128,6 +142,24 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 		db.task.Priority = args[4].(string)
 		db.task.AssignedToID = args[5].(pgtype.UUID)
 		db.task.CompleteBy = args[6].(pgtype.Timestamptz)
+		return fakeRow{values: taskValues(db.task)}
+	case strings.Contains(query, "UPDATE tasks AS task"):
+		db.moveTaskArgs = args
+		if db.moveTaskErr != nil {
+			return fakeRow{err: db.moveTaskErr}
+		}
+		db.task.ColumnID = args[0].(pgtype.UUID)
+		db.task.State = map[string]string{
+			"Backlog":     "Backlog",
+			"To Do":       "ToDo",
+			"In Progress": "InProgress",
+			"Complete":    "Complete",
+		}[db.column.Title]
+		if db.task.State == "Complete" {
+			db.task.CompletedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
+		} else {
+			db.task.CompletedAt = pgtype.Timestamptz{}
+		}
 		return fakeRow{values: taskValues(db.task)}
 	case strings.Contains(query, "INSERT INTO users"):
 		db.createUserArgs = args
@@ -375,6 +407,14 @@ func TestSetupEndpoint(t *testing.T) {
 	})
 }
 
+func TestSetupEndpointWithoutTransaction(t *testing.T) {
+	body := `{"email":"admin@example.com","full_name":"Admin User","password":"password123"}`
+	response := send(newHandler(&fakeDB{}, nil, false), http.MethodPost, "/api/setup", body, nil)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusInternalServerError)
+	}
+}
+
 func TestLoginAndAuthStatusEndpoints(t *testing.T) {
 	t.Run("login sets secure session cookie", func(t *testing.T) {
 		db := &fakeDB{user: newUser("password123")}
@@ -524,6 +564,82 @@ func TestCreateTaskEndpoint(t *testing.T) {
 		})
 	}
 
+	t.Run("rejects unavailable task storage and transaction failures", func(t *testing.T) {
+		ownerID := newUUID(1)
+		body := `{"title":"Task"}`
+		testCases := []struct {
+			name            string
+			begin           func(context.Context) (backend.SetupTransaction, error)
+			wantStatus      int
+			createBoardErr  error
+			boardErr        error
+			columnErr       error
+			createColumnErr error
+			createTaskErr   error
+			commitErr       error
+		}{
+			{name: "missing transaction provider", wantStatus: http.StatusInternalServerError},
+			{
+				name: "begin error", wantStatus: http.StatusInternalServerError,
+				begin: func(context.Context) (backend.SetupTransaction, error) { return nil, errors.New("begin failed") },
+			},
+			{
+				name: "lock error", wantStatus: http.StatusInternalServerError,
+				begin: func(context.Context) (backend.SetupTransaction, error) {
+					return &fakeTx{fakeDB: &fakeDB{}, execErr: errors.New("lock failed")}, nil
+				},
+			},
+			{
+				name: "board query error", wantStatus: http.StatusInternalServerError,
+				boardErr: errors.New("board query failed"),
+			},
+			{
+				name: "board creation error", wantStatus: http.StatusInternalServerError,
+				boardErr: pgx.ErrNoRows, createBoardErr: errors.New("board insert failed"),
+			},
+			{
+				name: "lane query error", wantStatus: http.StatusInternalServerError,
+				columnErr: errors.New("lane query failed"),
+			},
+			{
+				name: "lane creation error", wantStatus: http.StatusInternalServerError,
+				columnErr: pgx.ErrNoRows, createColumnErr: errors.New("lane insert failed"),
+			},
+			{
+				name: "task creation error", wantStatus: http.StatusInternalServerError,
+				createTaskErr: errors.New("task insert failed"),
+			},
+			{
+				name: "commit error", wantStatus: http.StatusInternalServerError,
+				commitErr: errors.New("commit failed"),
+			},
+		}
+		for _, test := range testCases {
+			t.Run(test.name, func(t *testing.T) {
+				db := &fakeDB{
+					session:         dbgen.Session{Token: "token", UserID: ownerID},
+					board:           dbgen.Board{ID: newUUID(2), OwnerID: ownerID},
+					column:          dbgen.Column{ID: newUUID(3), BoardID: newUUID(2), Title: "Backlog"},
+					boardErr:        test.boardErr,
+					columnErr:       test.columnErr,
+					createBoardErr:  test.createBoardErr,
+					createColumnErr: test.createColumnErr,
+					createTaskErr:   test.createTaskErr,
+				}
+				begin := test.begin
+				if begin == nil && test.name != "missing transaction provider" {
+					tx := &fakeTx{fakeDB: db, commitErr: test.commitErr}
+					begin = func(context.Context) (backend.SetupTransaction, error) { return tx, nil }
+				}
+				response := send(newHandler(db, begin, false), http.MethodPost, "/api/tasks", body,
+					&http.Cookie{Name: "snappy_session", Value: "token"})
+				if response.Code != test.wantStatus {
+					t.Fatalf("status = %d, want %d: %s", response.Code, test.wantStatus, response.Body.String())
+				}
+			})
+		}
+	})
+
 	t.Run("creates a task with defaults in the requested lane", func(t *testing.T) {
 		ownerID := newUUID(1)
 		now := time.Now()
@@ -595,6 +711,142 @@ func TestCreateTaskEndpoint(t *testing.T) {
 	})
 }
 
+func TestMoveTaskEndpoint(t *testing.T) {
+	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
+	t.Run("requires authentication", func(t *testing.T) {
+		response := send(newHandler(&fakeDB{}, nil, false), http.MethodPatch,
+			"/api/tasks/"+newUUID(2).String(), `{"state":"InProgress"}`, nil)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("persists a move to the requested state", func(t *testing.T) {
+		ownerID := newUUID(1)
+		taskID := newUUID(2)
+		destinationColumnID := newUUID(3)
+		db := &fakeDB{
+			session: dbgen.Session{Token: "token", UserID: ownerID},
+			board:   dbgen.Board{ID: newUUID(4), OwnerID: ownerID},
+			column: dbgen.Column{
+				ID: destinationColumnID, BoardID: newUUID(4), Title: "In Progress", Position: 2,
+			},
+			task: dbgen.Task{ID: taskID, Title: "Persist this move", State: "ToDo", Priority: "Medium"},
+		}
+		tx := &fakeTx{fakeDB: db}
+		handler := newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false)
+
+		response := send(handler, http.MethodPatch, "/api/tasks/"+taskID.String(),
+			`{"state":"InProgress"}`, cookie)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+		}
+		if !tx.committed {
+			t.Fatal("task move transaction was not committed")
+		}
+		if len(db.moveTaskArgs) != 3 || db.moveTaskArgs[0] != destinationColumnID ||
+			db.moveTaskArgs[1] != taskID || db.moveTaskArgs[2] != ownerID {
+			t.Fatalf("move task args = %#v", db.moveTaskArgs)
+		}
+		var movedTask dbgen.Task
+		if err := json.Unmarshal(response.Body.Bytes(), &movedTask); err != nil {
+			t.Fatalf("decode moved task: %v", err)
+		}
+		if movedTask.State != "InProgress" || movedTask.ColumnID != destinationColumnID {
+			t.Fatalf("moved task = %#v", movedTask)
+		}
+	})
+
+	t.Run("rejects an unsupported state", func(t *testing.T) {
+		db := &fakeDB{session: dbgen.Session{Token: "token", UserID: newUUID(1)}}
+		response := send(newHandler(db, nil, false), http.MethodPatch,
+			"/api/tasks/"+newUUID(2).String(), `{"state":"Blocked"}`, cookie)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusBadRequest, response.Body.String())
+		}
+	})
+
+	for _, test := range []struct {
+		name            string
+		path            string
+		body            string
+		beginMissing    bool
+		beginErr        error
+		execErr         error
+		boardErr        error
+		columnErr       error
+		createColumnErr error
+		moveTaskErr     error
+		commitErr       error
+		wantStatus      int
+	}{
+		{name: "invalid task ID", path: "/api/tasks/not-a-uuid", body: `{"state":"ToDo"}`, wantStatus: http.StatusBadRequest},
+		{name: "invalid JSON", path: "/api/tasks/" + newUUID(2).String(), body: `{`, wantStatus: http.StatusBadRequest},
+		{name: "missing transaction provider", path: "/api/tasks/" + newUUID(2).String(), body: `{"state":"ToDo"}`, beginMissing: true, wantStatus: http.StatusInternalServerError},
+		{name: "begin error", path: "/api/tasks/" + newUUID(2).String(), body: `{"state":"ToDo"}`, beginErr: errors.New("begin failed"), wantStatus: http.StatusInternalServerError},
+		{name: "advisory lock error", path: "/api/tasks/" + newUUID(2).String(), body: `{"state":"ToDo"}`, execErr: errors.New("lock failed"), wantStatus: http.StatusInternalServerError},
+		{name: "task not found", path: "/api/tasks/" + newUUID(2).String(), body: `{"state":"ToDo"}`, boardErr: pgx.ErrNoRows, wantStatus: http.StatusNotFound},
+		{name: "task query error", path: "/api/tasks/" + newUUID(2).String(), body: `{"state":"ToDo"}`, boardErr: errors.New("query failed"), wantStatus: http.StatusInternalServerError},
+		{name: "lane query error", path: "/api/tasks/" + newUUID(2).String(), body: `{"state":"ToDo"}`, columnErr: errors.New("query failed"), wantStatus: http.StatusInternalServerError},
+		{name: "lane creation error", path: "/api/tasks/" + newUUID(2).String(), body: `{"state":"ToDo"}`, columnErr: pgx.ErrNoRows, createColumnErr: errors.New("insert failed"), wantStatus: http.StatusInternalServerError},
+		{name: "task not found on update", path: "/api/tasks/" + newUUID(2).String(), body: `{"state":"ToDo"}`, moveTaskErr: pgx.ErrNoRows, wantStatus: http.StatusNotFound},
+		{name: "update error", path: "/api/tasks/" + newUUID(2).String(), body: `{"state":"ToDo"}`, moveTaskErr: errors.New("update failed"), wantStatus: http.StatusInternalServerError},
+		{name: "commit error", path: "/api/tasks/" + newUUID(2).String(), body: `{"state":"ToDo"}`, commitErr: errors.New("commit failed"), wantStatus: http.StatusInternalServerError},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ownerID := newUUID(1)
+			db := &fakeDB{
+				session:         dbgen.Session{Token: "token", UserID: ownerID},
+				board:           dbgen.Board{ID: newUUID(4), OwnerID: ownerID},
+				column:          dbgen.Column{ID: newUUID(3), BoardID: newUUID(4), Title: "To Do"},
+				boardErr:        test.boardErr,
+				columnErr:       test.columnErr,
+				createColumnErr: test.createColumnErr,
+				moveTaskErr:     test.moveTaskErr,
+			}
+			var begin func(context.Context) (backend.SetupTransaction, error)
+			if !test.beginMissing {
+				begin = func(context.Context) (backend.SetupTransaction, error) {
+					if test.beginErr != nil {
+						return nil, test.beginErr
+					}
+					return &fakeTx{
+						fakeDB: db, execErr: test.execErr, commitErr: test.commitErr,
+					}, nil
+				}
+			}
+			response := send(newHandler(db, begin, false), http.MethodPatch, test.path, test.body, cookie)
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", response.Code, test.wantStatus, response.Body.String())
+			}
+		})
+	}
+
+	t.Run("creates a missing destination lane", func(t *testing.T) {
+		ownerID := newUUID(1)
+		db := &fakeDB{
+			session:   dbgen.Session{Token: "token", UserID: ownerID},
+			board:     dbgen.Board{ID: newUUID(4), OwnerID: ownerID},
+			column:    dbgen.Column{ID: newUUID(3), BoardID: newUUID(4), Title: "Complete"},
+			columnErr: pgx.ErrNoRows,
+		}
+		tx := &fakeTx{fakeDB: db}
+		handler := newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false)
+		response := send(handler, http.MethodPatch, "/api/tasks/"+newUUID(2).String(),
+			`{"state":"Complete"}`, cookie)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+		}
+		if !tx.committed || db.columnArgs[1] != "Complete" || db.columnArgs[2] != int32(3) {
+			t.Fatalf("lane creation args = %#v; committed = %t", db.columnArgs, tx.committed)
+		}
+	})
+}
+
 func TestTaskReadEndpointsRequireAuthentication(t *testing.T) {
 	for _, path := range []string{"/api/tasks", "/api/users"} {
 		response := send(newHandler(&fakeDB{}, nil, false), http.MethodGet, path, "", nil)
@@ -645,6 +897,33 @@ func TestTaskReadEndpoints(t *testing.T) {
 	if len(users) != 1 || users[0] != assignee {
 		t.Fatalf("assignable users = %#v", users)
 	}
+
+	for _, test := range []struct {
+		name string
+		db   *fakeDB
+		path string
+	}{
+		{name: "task query error", db: &fakeDB{session: dbgen.Session{Token: "token", UserID: ownerID}, tasksErr: errors.New("query failed")}, path: "/api/tasks"},
+		{name: "assignee query error", db: &fakeDB{session: dbgen.Session{Token: "token", UserID: ownerID}, assigneesErr: errors.New("query failed")}, path: "/api/users"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := send(newHandler(test.db, nil, false), http.MethodGet, test.path, "", cookie)
+			if response.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want %d", response.Code, http.StatusInternalServerError)
+			}
+		})
+	}
+
+	t.Run("empty task and assignee lists are encoded as arrays", func(t *testing.T) {
+		emptyDB := &fakeDB{session: dbgen.Session{Token: "token", UserID: ownerID}}
+		handler := newHandler(emptyDB, nil, false)
+		for _, path := range []string{"/api/tasks", "/api/users"} {
+			response := send(handler, http.MethodGet, path, "", cookie)
+			if response.Code != http.StatusOK || response.Body.String() != "[]\n" {
+				t.Errorf("%s response = %d %q", path, response.Code, response.Body.String())
+			}
+		}
+	})
 }
 
 func TestHealthEndpoint(t *testing.T) {
