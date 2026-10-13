@@ -61,6 +61,50 @@ BEGIN
 END $$;
 `
 
+const ensureUserIDSchema = `
+DO $$
+DECLARE
+    user_id_data_type TEXT;
+BEGIN
+    SELECT data_type INTO user_id_data_type
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'users'
+      AND column_name = 'id';
+
+    IF user_id_data_type = 'uuid' THEN
+        ALTER TABLE boards DROP CONSTRAINT IF EXISTS boards_owner_id_fkey;
+        ALTER TABLE tasks DROP CONSTRAINT IF EXISTS tasks_assigned_to_id_fkey;
+        ALTER TABLE sessions DROP CONSTRAINT IF EXISTS sessions_user_id_fkey;
+        ALTER TABLE users DROP CONSTRAINT IF EXISTS users_pkey;
+
+        ALTER TABLE users ALTER COLUMN id DROP DEFAULT;
+        ALTER TABLE users ALTER COLUMN id TYPE VARCHAR(32) USING REPLACE(id::text, '-', '');
+        ALTER TABLE boards ALTER COLUMN owner_id TYPE VARCHAR(32) USING REPLACE(owner_id::text, '-', '');
+        ALTER TABLE tasks ALTER COLUMN assigned_to_id TYPE VARCHAR(32) USING REPLACE(assigned_to_id::text, '-', '');
+        ALTER TABLE sessions ALTER COLUMN user_id TYPE VARCHAR(32) USING REPLACE(user_id::text, '-', '');
+
+        ALTER TABLE users ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+        ALTER TABLE boards ADD CONSTRAINT boards_owner_id_fkey
+            FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE;
+        ALTER TABLE tasks ADD CONSTRAINT tasks_assigned_to_id_fkey
+            FOREIGN KEY (assigned_to_id) REFERENCES users(id) ON DELETE SET NULL;
+        ALTER TABLE sessions ADD CONSTRAINT sessions_user_id_fkey
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+    ELSIF user_id_data_type IS NULL THEN
+        RAISE EXCEPTION 'users.id column does not exist';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'users'::regclass AND conname = 'users_id_alphanumeric'
+    ) THEN
+        ALTER TABLE users
+        ADD CONSTRAINT users_id_alphanumeric CHECK (id ~ '^[A-Za-z0-9]{1,32}$');
+    END IF;
+END $$;
+`
+
 var taskSchemaCleanup = []string{
 	"DROP INDEX IF EXISTS idx_tasks_column_position",
 	"ALTER TABLE tasks DROP COLUMN IF EXISTS position",
@@ -68,6 +112,25 @@ var taskSchemaCleanup = []string{
 	"ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ",
 	"ALTER TABLE tasks ALTER COLUMN description DROP NOT NULL",
 	"CREATE INDEX IF NOT EXISTS idx_tasks_column_priority ON tasks(column_id, priority)",
+}
+
+func EnsureUserIDSchema(ctx context.Context, beginTx func(context.Context) (SetupTransaction, error)) error {
+	tx, err := beginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin user ID schema upgrade: %w", err)
+	}
+	defer tx.Rollback(context.Background())
+
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(731942612)); err != nil {
+		return fmt.Errorf("lock user ID schema upgrade: %w", err)
+	}
+	if _, err := tx.Exec(ctx, ensureUserIDSchema); err != nil {
+		return fmt.Errorf("apply user ID schema upgrade: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit user ID schema upgrade: %w", err)
+	}
+	return nil
 }
 
 func EnsureTaskSchema(ctx context.Context, beginTx func(context.Context) (SetupTransaction, error)) error {

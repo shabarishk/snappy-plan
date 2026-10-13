@@ -18,6 +18,7 @@ docker compose -f docker-compose.local.yml up --build
 ```
 
 The application (frontend and API) is available at `http://localhost:3000`.
+On first use, choose a 1-32 character alphanumeric username; it is lowercased and stored as the account's unique user ID.
 After signing in, use **Create task** to add a task with a title, optional description, assignee, Backlog/ToDo state, priority, and optional completion date. Tasks are stored in PostgreSQL and loaded when the board opens.
 
 ## Run tests and coverage

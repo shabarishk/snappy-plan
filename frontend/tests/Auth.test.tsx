@@ -21,6 +21,7 @@ describe('AuthWrapper', () => {
     render(<AuthWrapper onAuthenticated={vi.fn()} />);
     await screen.findByRole('heading', { name: 'Initialize Snappy Plan' });
 
+    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'AdminUser1' } });
     fireEvent.change(screen.getByLabelText('Full Name'), { target: { value: 'Admin User' } });
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'admin@example.com' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });
@@ -30,6 +31,7 @@ describe('AuthWrapper', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/setup', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({
+        username: 'AdminUser1',
         email: 'admin@example.com',
         full_name: 'Admin User',
         password: 'password123',
