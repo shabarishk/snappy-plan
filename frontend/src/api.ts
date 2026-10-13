@@ -24,6 +24,12 @@ export interface TaskAssignee {
   full_name: string;
 }
 
+export interface UserProfile {
+  username: string;
+  full_name: string;
+  email: string;
+}
+
 export interface CreateTaskRequest {
   title: string;
   description: string;
@@ -66,6 +72,23 @@ export const getTasks = async (): Promise<ApiTask[]> => {
 export const getTaskAssignees = async (): Promise<TaskAssignee[]> => {
   const res = await fetch('/api/users', { credentials: 'same-origin' });
   if (!res.ok) throw new Error('Failed to load users');
+  return res.json();
+};
+
+export const getProfile = async (): Promise<UserProfile> => {
+  const res = await fetch('/api/profile', { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+};
+
+export const updateProfile = async (profile: Pick<UserProfile, 'full_name' | 'email'>): Promise<UserProfile> => {
+  const res = await fetch('/api/profile', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify(profile),
+  });
+  if (!res.ok) throw new Error(await res.text());
   return res.json();
 };
 

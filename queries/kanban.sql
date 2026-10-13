@@ -177,3 +177,11 @@ ORDER BY full_name ASC, id ASC;
 SELECT * FROM users
 WHERE id = $1
 LIMIT 1;
+
+-- name: UpdateUserProfile :one
+UPDATE users
+SET email = $2,
+    full_name = $3,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;

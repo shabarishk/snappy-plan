@@ -12,10 +12,12 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"snappy-plan/dbgen"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -47,6 +49,8 @@ func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, 
 	mux.HandleFunc("PATCH /api/tasks/{taskID}", api.handleMoveTask)
 	mux.HandleFunc("PUT /api/tasks/{taskID}", api.handleUpdateTask)
 	mux.HandleFunc("GET /api/users", api.handleGetUsersForAssignment)
+	mux.HandleFunc("GET /api/profile", api.handleGetProfile)
+	mux.HandleFunc("PUT /api/profile", api.handleUpdateProfile)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Snappy Plan Backend is running!"))
 	})
@@ -285,6 +289,100 @@ func (api *ApiConfig) handleGetUsersForAssignment(w http.ResponseWriter, r *http
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(users); err != nil {
 		http.Error(w, "Failed to encode users", http.StatusInternalServerError)
+	}
+}
+
+type profileResponse struct {
+	Username string `json:"username"`
+	FullName string `json:"full_name"`
+	Email    string `json:"email"`
+}
+
+func (api *ApiConfig) handleGetProfile(w http.ResponseWriter, r *http.Request) {
+	session, ok, err := api.authenticatedSession(r)
+	if err != nil {
+		http.Error(w, "Failed to validate session", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	user, err := api.DB.GetUserByID(r.Context(), session.UserID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "Failed to load profile", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(profileResponse{
+		Username: user.ID,
+		FullName: user.FullName,
+		Email:    user.Email,
+	}); err != nil {
+		http.Error(w, "Failed to encode profile", http.StatusInternalServerError)
+	}
+}
+
+func (api *ApiConfig) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
+	session, ok, err := api.authenticatedSession(r)
+	if err != nil {
+		http.Error(w, "Failed to validate session", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	var params struct {
+		FullName string `json:"full_name"`
+		Email    string `json:"email"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&params); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+	params.FullName = strings.TrimSpace(params.FullName)
+	params.Email = strings.TrimSpace(params.Email)
+	address, err := mail.ParseAddress(params.Email)
+	if params.FullName == "" || utf8.RuneCountInString(params.FullName) > 100 ||
+		utf8.RuneCountInString(params.Email) > 255 || err != nil || address.Address != params.Email {
+		http.Error(w, "Provide a full name of at most 100 characters and a valid email", http.StatusBadRequest)
+		return
+	}
+
+	user, err := api.DB.UpdateUserProfile(r.Context(), dbgen.UpdateUserProfileParams{
+		ID:       session.UserID,
+		Email:    params.Email,
+		FullName: params.FullName,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+	var databaseError *pgconn.PgError
+	if errors.As(err, &databaseError) && databaseError.Code == "23505" {
+		http.Error(w, "Email address is already in use", http.StatusConflict)
+		return
+	}
+	if err != nil {
+		http.Error(w, "Failed to update profile", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(profileResponse{
+		Username: user.ID,
+		FullName: user.FullName,
+		Email:    user.Email,
+	}); err != nil {
+		http.Error(w, "Failed to encode profile", http.StatusInternalServerError)
 	}
 }
 
