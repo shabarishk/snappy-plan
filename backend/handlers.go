@@ -129,6 +129,10 @@ func (api *ApiConfig) handleInitialSetup(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	if api.BeginTx == nil {
+		http.Error(w, "Setup is unavailable", http.StatusInternalServerError)
+		return
+	}
 	// Serialize first-run requests so only one can observe an empty users table.
 	tx, err := api.BeginTx(r.Context())
 	if err != nil {
