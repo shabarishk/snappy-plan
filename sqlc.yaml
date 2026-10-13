@@ -3,8 +3,11 @@ sql:
   - engine: "postgresql"
     schema:
       - "migrations/000001_init_schema.up.sql"
+      - "migrations/000002_add_user_roles.up.sql"
+      - "migrations/000003_create_sessions_table.up.sql"
       - "migrations/000004_add_task_state.up.sql"
       - "migrations/000005_replace_task_position_with_priority.up.sql"
+      - "migrations/000006_use_username_as_user_id.up.sql"
     queries: "queries/"
     gen:
       go:

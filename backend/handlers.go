@@ -105,6 +105,7 @@ func (api *ApiConfig) handleSetupStatus(w http.ResponseWriter, r *http.Request) 
 // Handle the one-time creation of the Admin account
 func (api *ApiConfig) handleInitialSetup(w http.ResponseWriter, r *http.Request) {
 	type setupParams struct {
+		Username string `json:"username"`
 		Email    string `json:"email"`
 		Password string `json:"password"`
 		FullName string `json:"full_name"`
@@ -115,12 +116,14 @@ func (api *ApiConfig) handleInitialSetup(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
+	params.Username = strings.ToLower(strings.TrimSpace(params.Username))
 	params.Email = strings.TrimSpace(params.Email)
 	params.FullName = strings.TrimSpace(params.FullName)
 	address, err := mail.ParseAddress(params.Email)
-	if err != nil || address.Address != params.Email || params.FullName == "" ||
+	if !isAlphanumeric(params.Username) || len(params.Username) > 32 ||
+		err != nil || address.Address != params.Email || params.FullName == "" ||
 		len(params.Password) < 8 || len(params.Password) > 72 {
-		http.Error(w, "Provide a valid email, full name, and password of 8 to 72 bytes", http.StatusBadRequest)
+		http.Error(w, "Provide an alphanumeric username of at most 32 characters, a valid email, full name, and password of 8 to 72 bytes", http.StatusBadRequest)
 		return
 	}
 
@@ -158,6 +161,7 @@ func (api *ApiConfig) handleInitialSetup(w http.ResponseWriter, r *http.Request)
 	}
 
 	user, err := txQueries.CreateUser(r.Context(), dbgen.CreateUserParams{
+		ID:           params.Username,
 		Email:        params.Email,
 		PasswordHash: string(hashedPassword),
 		FullName:     params.FullName,
@@ -176,8 +180,20 @@ func (api *ApiConfig) handleInitialSetup(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{
 		"message": "Admin account created successfully",
-		"user_id": user.ID.String(),
+		"user_id": user.ID,
 	})
+}
+
+func isAlphanumeric(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, char := range value {
+		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') {
+			return false
+		}
+	}
+	return true
 }
 
 // handleCreateBoard is a method attached to ApiConfig
@@ -320,13 +336,13 @@ func (api *ApiConfig) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	if params.Description != "" {
 		description = pgtype.Text{String: params.Description, Valid: true}
 	}
-	assignedToID := pgtype.UUID{}
+	assignedToID := pgtype.Text{}
 	if params.AssignedToID != "" {
-		if err := assignedToID.Scan(params.AssignedToID); err != nil {
+		if !isAlphanumeric(params.AssignedToID) || len(params.AssignedToID) > 32 {
 			http.Error(w, "Assigned user ID is invalid", http.StatusBadRequest)
 			return
 		}
-		user, err := api.DB.GetUserByID(r.Context(), assignedToID)
+		user, err := api.DB.GetUserByID(r.Context(), params.AssignedToID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				http.Error(w, "Assigned user does not exist", http.StatusBadRequest)
@@ -335,7 +351,7 @@ func (api *ApiConfig) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Failed to validate assigned user", http.StatusInternalServerError)
 			return
 		}
-		assignedToID = user.ID
+		assignedToID = pgtype.Text{String: user.ID, Valid: true}
 	}
 
 	completeBy := pgtype.Timestamptz{}
@@ -358,7 +374,7 @@ func (api *ApiConfig) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(context.Background())
-	if _, err := tx.Exec(r.Context(), "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", session.UserID.String()); err != nil {
+	if _, err := tx.Exec(r.Context(), "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", session.UserID); err != nil {
 		http.Error(w, "Failed to prepare task creation", http.StatusInternalServerError)
 		return
 	}
@@ -476,7 +492,7 @@ func (api *ApiConfig) handleMoveTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(context.Background())
-	if _, err := tx.Exec(r.Context(), "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", session.UserID.String()); err != nil {
+	if _, err := tx.Exec(r.Context(), "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", session.UserID); err != nil {
 		http.Error(w, "Failed to prepare task move", http.StatusInternalServerError)
 		return
 	}
@@ -614,7 +630,7 @@ func (api *ApiConfig) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(context.Background())
-	if _, err := tx.Exec(r.Context(), "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", session.UserID.String()); err != nil {
+	if _, err := tx.Exec(r.Context(), "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", session.UserID); err != nil {
 		http.Error(w, "Failed to prepare task update", http.StatusInternalServerError)
 		return
 	}

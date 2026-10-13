@@ -142,7 +142,7 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 		db.task.Title = args[2].(string)
 		db.task.Description = args[3].(pgtype.Text)
 		db.task.Priority = args[4].(string)
-		db.task.AssignedToID = args[5].(pgtype.UUID)
+		db.task.AssignedToID = args[5].(pgtype.Text)
 		db.task.CompleteBy = args[6].(pgtype.Timestamptz)
 		return fakeRow{values: taskValues(db.task)}
 	case strings.Contains(query, "UPDATE tasks AS task"):
@@ -182,7 +182,7 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 			return fakeRow{err: db.createUserError}
 		}
 		return fakeRow{values: []any{
-			db.user.ID, args[0], args[1], args[2], args[3],
+			args[0], args[1], args[2], args[3], args[4],
 			db.user.CreatedAt, db.user.UpdatedAt,
 		}}
 	default:
@@ -290,7 +290,7 @@ func newUser(password string) dbgen.User {
 	}
 	now := time.Now()
 	return dbgen.User{
-		ID:           newUUID(1),
+		ID:           "admin1",
 		Email:        "admin@example.com",
 		PasswordHash: string(hash),
 		FullName:     "Admin User",
@@ -349,14 +349,16 @@ func TestSetupStatusEndpoint(t *testing.T) {
 }
 
 func TestSetupEndpoint(t *testing.T) {
-	validBody := `{"email":"admin@example.com","full_name":"Admin User","password":"password123"}`
+	validBody := `{"username":"AdminUser","email":"admin@example.com","full_name":"Admin User","password":"password123"}`
 
 	t.Run("validates request", func(t *testing.T) {
 		for _, body := range []string{
 			`{`,
-			`{"email":"not-an-email","full_name":"Admin","password":"password123"}`,
-			`{"email":"admin@example.com","full_name":" ","password":"password123"}`,
-			`{"email":"admin@example.com","full_name":"Admin","password":"short"}`,
+			`{"username":"bad-name","email":"admin@example.com","full_name":"Admin","password":"password123"}`,
+			`{"username":"","email":"admin@example.com","full_name":"Admin","password":"password123"}`,
+			`{"username":"admin1","email":"not-an-email","full_name":"Admin","password":"password123"}`,
+			`{"username":"admin1","email":"admin@example.com","full_name":" ","password":"password123"}`,
+			`{"username":"admin1","email":"admin@example.com","full_name":"Admin","password":"short"}`,
 			strings.Repeat("x", (1<<20)+1),
 		} {
 			response := send(newHandler(&fakeDB{}, nil, false), http.MethodPost, "/api/setup", body, nil)
@@ -373,11 +375,16 @@ func TestSetupEndpoint(t *testing.T) {
 			return tx, nil
 		}, false)
 		response := send(handler, http.MethodPost, "/api/setup", validBody, nil)
-		if response.Code != http.StatusCreated || !tx.committed || txDB.createUserArgs[3] != "admin" {
+		if response.Code != http.StatusCreated || !tx.committed ||
+			txDB.createUserArgs[0] != "adminuser" || txDB.createUserArgs[4] != "admin" {
 			t.Fatalf("status = %d; committed = %t; args = %#v", response.Code, tx.committed, txDB.createUserArgs)
 		}
-		if err := bcrypt.CompareHashAndPassword([]byte(txDB.createUserArgs[1].(string)), []byte("password123")); err != nil {
+		if err := bcrypt.CompareHashAndPassword([]byte(txDB.createUserArgs[2].(string)), []byte("password123")); err != nil {
 			t.Fatalf("password was not securely hashed: %v", err)
+		}
+		var result map[string]string
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil || result["user_id"] != "adminuser" {
+			t.Fatalf("setup response = %#v, error = %v", result, err)
 		}
 	})
 
@@ -423,7 +430,7 @@ func TestSetupEndpoint(t *testing.T) {
 }
 
 func TestSetupEndpointWithoutTransaction(t *testing.T) {
-	body := `{"email":"admin@example.com","full_name":"Admin User","password":"password123"}`
+	body := `{"username":"admin1","email":"admin@example.com","full_name":"Admin User","password":"password123"}`
 	response := send(newHandler(&fakeDB{}, nil, false), http.MethodPost, "/api/setup", body, nil)
 	if response.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusInternalServerError)
@@ -521,7 +528,7 @@ func TestCreateBoardEndpoint(t *testing.T) {
 		{name: "board insert failure", body: `{"title":"Board"}`, boardErr: errors.New("insert failed"), wantStatus: http.StatusInternalServerError},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			db := &fakeDB{session: dbgen.Session{Token: "token", UserID: newUUID(7)}, sessionErr: test.sessionErr, createBoardErr: test.boardErr}
+			db := &fakeDB{session: dbgen.Session{Token: "token", UserID: "owner7"}, sessionErr: test.sessionErr, createBoardErr: test.boardErr}
 			response := send(newHandler(db, nil, false), http.MethodPost, "/api/boards", test.body,
 				&http.Cookie{Name: "snappy_session", Value: "token"})
 			if response.Code != test.wantStatus {
@@ -531,7 +538,7 @@ func TestCreateBoardEndpoint(t *testing.T) {
 	}
 
 	t.Run("uses session owner instead of request owner", func(t *testing.T) {
-		ownerID := newUUID(7)
+		ownerID := "owner7"
 		now := time.Now()
 		db := &fakeDB{
 			session: dbgen.Session{Token: "token", UserID: ownerID},
@@ -570,7 +577,7 @@ func TestCreateTaskEndpoint(t *testing.T) {
 		`{"title":"Task","complete_by":"not-a-date"}`,
 	} {
 		t.Run("rejects invalid "+body, func(t *testing.T) {
-			db := &fakeDB{session: dbgen.Session{Token: "token", UserID: newUUID(1)}}
+			db := &fakeDB{session: dbgen.Session{Token: "token", UserID: "owner1"}}
 			response := send(newHandler(db, nil, false), http.MethodPost, "/api/tasks", body,
 				&http.Cookie{Name: "snappy_session", Value: "token"})
 			if response.Code != http.StatusBadRequest {
@@ -580,7 +587,7 @@ func TestCreateTaskEndpoint(t *testing.T) {
 	}
 
 	t.Run("rejects unavailable task storage and transaction failures", func(t *testing.T) {
-		ownerID := newUUID(1)
+		ownerID := "owner1"
 		body := `{"title":"Task"}`
 		testCases := []struct {
 			name            string
@@ -656,7 +663,7 @@ func TestCreateTaskEndpoint(t *testing.T) {
 	})
 
 	t.Run("creates a task with defaults in the requested lane", func(t *testing.T) {
-		ownerID := newUUID(1)
+		ownerID := "owner1"
 		now := time.Now()
 		db := &fakeDB{
 			session:  dbgen.Session{Token: "token", UserID: ownerID},
@@ -699,11 +706,11 @@ func TestCreateTaskEndpoint(t *testing.T) {
 	})
 
 	t.Run("persists optional task details", func(t *testing.T) {
-		ownerID := newUUID(1)
+		ownerID := "owner1"
 		due := time.Date(2026, time.October, 20, 9, 30, 0, 0, time.UTC)
 		db := &fakeDB{
 			session: dbgen.Session{Token: "token", UserID: ownerID},
-			user:    dbgen.User{ID: newUUID(4), FullName: "Assigned User"},
+			user:    dbgen.User{ID: "assigned1", FullName: "Assigned User"},
 			board:   dbgen.Board{ID: newUUID(2), Title: "Existing", OwnerID: ownerID},
 			column:  dbgen.Column{ID: newUUID(3), BoardID: newUUID(2), Title: "Backlog"},
 		}
@@ -711,7 +718,7 @@ func TestCreateTaskEndpoint(t *testing.T) {
 		handler := newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
 			return tx, nil
 		}, false)
-		body := `{"title":"Plan trip","description":"Compare dates","assigned_to_id":"` + db.user.ID.String() +
+		body := `{"title":"Plan trip","description":"Compare dates","assigned_to_id":"` + db.user.ID +
 			`","state":"Backlog","priority":"High","complete_by":"` + due.Format(time.RFC3339) + `"}`
 
 		response := send(handler, http.MethodPost, "/api/tasks", body,
@@ -719,7 +726,8 @@ func TestCreateTaskEndpoint(t *testing.T) {
 		if response.Code != http.StatusCreated {
 			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusCreated, response.Body.String())
 		}
-		if db.task.Description.String != "Compare dates" || db.task.AssignedToID != db.user.ID ||
+		if db.task.Description.String != "Compare dates" ||
+			db.task.AssignedToID != (pgtype.Text{String: db.user.ID, Valid: true}) ||
 			db.task.Priority != "High" || !db.task.CompleteBy.Time.Equal(due) {
 			t.Fatalf("created task fields = %#v", db.task)
 		}
@@ -737,7 +745,7 @@ func TestMoveTaskEndpoint(t *testing.T) {
 	})
 
 	t.Run("persists a move to the requested state", func(t *testing.T) {
-		ownerID := newUUID(1)
+		ownerID := "owner1"
 		taskID := newUUID(2)
 		destinationColumnID := newUUID(3)
 		db := &fakeDB{
@@ -775,7 +783,7 @@ func TestMoveTaskEndpoint(t *testing.T) {
 	})
 
 	t.Run("rejects an unsupported state", func(t *testing.T) {
-		db := &fakeDB{session: dbgen.Session{Token: "token", UserID: newUUID(1)}}
+		db := &fakeDB{session: dbgen.Session{Token: "token", UserID: "owner1"}}
 		response := send(newHandler(db, nil, false), http.MethodPatch,
 			"/api/tasks/"+newUUID(2).String(), `{"state":"Blocked"}`, cookie)
 		if response.Code != http.StatusBadRequest {
@@ -811,7 +819,7 @@ func TestMoveTaskEndpoint(t *testing.T) {
 		{name: "commit error", path: "/api/tasks/" + newUUID(2).String(), body: `{"state":"ToDo"}`, commitErr: errors.New("commit failed"), wantStatus: http.StatusInternalServerError},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			ownerID := newUUID(1)
+			ownerID := "owner1"
 			db := &fakeDB{
 				session:         dbgen.Session{Token: "token", UserID: ownerID},
 				board:           dbgen.Board{ID: newUUID(4), OwnerID: ownerID},
@@ -840,7 +848,7 @@ func TestMoveTaskEndpoint(t *testing.T) {
 	}
 
 	t.Run("creates a missing destination lane", func(t *testing.T) {
-		ownerID := newUUID(1)
+		ownerID := "owner1"
 		db := &fakeDB{
 			session:   dbgen.Session{Token: "token", UserID: ownerID},
 			board:     dbgen.Board{ID: newUUID(4), OwnerID: ownerID},
@@ -865,7 +873,7 @@ func TestMoveTaskEndpoint(t *testing.T) {
 func TestUpdateTaskEndpoint(t *testing.T) {
 	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
 	taskID := newUUID(2)
-	ownerID := newUUID(1)
+	ownerID := "owner1"
 	due := time.Date(2026, time.October, 20, 9, 30, 0, 0, time.UTC)
 	body := `{"title":"  Updated task  ","description":"Revised details","priority":"High",` +
 		`"state":"InProgress","complete_by":"` + due.Format(time.RFC3339) + `"}`
@@ -1065,7 +1073,7 @@ func TestTaskReadEndpointsRequireAuthentication(t *testing.T) {
 }
 
 func TestTaskReadEndpoints(t *testing.T) {
-	ownerID := newUUID(1)
+	ownerID := "owner1"
 	task := dbgen.Task{
 		ID:       newUUID(2),
 		ColumnID: newUUID(3),

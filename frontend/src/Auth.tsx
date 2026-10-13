@@ -50,6 +50,7 @@ export function AuthWrapper({ onAuthenticated }: { onAuthenticated: () => void }
 }
 
 function SetupScreen({ onComplete }: { onComplete: () => void }) {
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
@@ -61,7 +62,7 @@ function SetupScreen({ onComplete }: { onComplete: () => void }) {
       const res = await fetch('/api/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, full_name: fullName, password }),
+        body: JSON.stringify({ username, email, full_name: fullName, password }),
       });
 
       if (!res.ok) {
@@ -87,6 +88,10 @@ function SetupScreen({ onComplete }: { onComplete: () => void }) {
         {error && <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg text-sm">{error}</div>}
 
         <form onSubmit={handleSetup} className="space-y-4">
+          <div>
+            <label htmlFor="setup-username" className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+            <input id="setup-username" type="text" required minLength={1} maxLength={32} pattern="[A-Za-z0-9]+" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Choose a username" />
+          </div>
           <div>
             <label htmlFor="setup-full-name" className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
             <input id="setup-full-name" type="text" required value={fullName} onChange={(e) => setFullName(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="John Doe" />

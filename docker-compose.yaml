@@ -17,6 +17,7 @@ services:
       - ./migrations/000003_create_sessions_table.up.sql:/docker-entrypoint-initdb.d/003_create_sessions_table.sql:ro
       - ./migrations/000004_add_task_state.up.sql:/docker-entrypoint-initdb.d/004_add_task_state.sql:ro
       - ./migrations/000005_replace_task_position_with_priority.up.sql:/docker-entrypoint-initdb.d/005_replace_task_position_with_priority.sql:ro
+      - ./migrations/000006_use_username_as_user_id.up.sql:/docker-entrypoint-initdb.d/006_use_username_as_user_id.sql:ro
 
   app:
     build: 

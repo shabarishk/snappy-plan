@@ -55,6 +55,7 @@ func TestEnsureTaskSchema(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EnsureTaskSchema returned error: %v", err)
 		}
+
 		if len(tx.execCalls) != 8 || !strings.Contains(tx.execCalls[0], "pg_advisory_xact_lock") ||
 			!strings.Contains(tx.execCalls[1], "ADD COLUMN priority") ||
 			!strings.Contains(tx.execCalls[3], "DROP COLUMN IF EXISTS position") ||
@@ -86,6 +87,51 @@ func TestEnsureTaskSchema(t *testing.T) {
 		})
 		if !errors.Is(err, schemaErr) {
 			t.Fatalf("EnsureTaskSchema error = %v, want %v", err, schemaErr)
+		}
+		if tx.committed || !tx.rolledBack {
+			t.Fatalf("transaction committed=%t rolledBack=%t", tx.committed, tx.rolledBack)
+		}
+	})
+}
+
+func TestEnsureUserIDSchema(t *testing.T) {
+	t.Run("applies upgrade in a transaction", func(t *testing.T) {
+		tx := &schemaTestTx{}
+		err := EnsureUserIDSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if err != nil {
+			t.Fatalf("EnsureUserIDSchema returned error: %v", err)
+		}
+		if len(tx.execCalls) != 2 || !strings.Contains(tx.execCalls[0], "pg_advisory_xact_lock") ||
+			!strings.Contains(tx.execCalls[1], "ALTER TABLE users ALTER COLUMN id TYPE VARCHAR(32)") ||
+			!strings.Contains(tx.execCalls[1], "REPLACE(owner_id::text, '-', '')") ||
+			!strings.Contains(tx.execCalls[1], "users_id_alphanumeric") {
+			t.Fatalf("schema upgrade statements = %#v", tx.execCalls)
+		}
+		if !tx.committed || tx.rolledBack {
+			t.Fatalf("transaction committed=%t rolledBack=%t", tx.committed, tx.rolledBack)
+		}
+	})
+
+	t.Run("returns begin errors", func(t *testing.T) {
+		beginErr := errors.New("begin failed")
+		err := EnsureUserIDSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return nil, beginErr
+		})
+		if !errors.Is(err, beginErr) {
+			t.Fatalf("EnsureUserIDSchema error = %v, want %v", err, beginErr)
+		}
+	})
+
+	t.Run("returns schema errors without committing", func(t *testing.T) {
+		schemaErr := errors.New("schema failed")
+		tx := &schemaTestTx{execErr: schemaErr}
+		err := EnsureUserIDSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if !errors.Is(err, schemaErr) {
+			t.Fatalf("EnsureUserIDSchema error = %v, want %v", err, schemaErr)
 		}
 		if tx.committed || !tx.rolledBack {
 			t.Fatalf("transaction committed=%t rolledBack=%t", tx.committed, tx.rolledBack)
