@@ -223,6 +223,84 @@ describe('App board', () => {
     ));
   });
 
+  it('opens task details and persists edited fields to the backend', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/tasks/task-1' && options?.method === 'PUT') {
+        return {
+          ok: true,
+          json: async () => taskResponse({
+            id: 'task-1',
+            title: 'Updated task title',
+            description: 'Updated details',
+            state: 'InProgress',
+            priority: 'High',
+            complete_by: '2026-10-20T16:30:00.000Z',
+          }),
+        };
+      }
+      if (url === '/api/tasks') {
+        return {
+          ok: true,
+          json: async () => [taskResponse({
+            id: 'task-1',
+            title: 'Editable task',
+            description: 'Original details',
+            state: 'ToDo',
+            priority: 'Low',
+            complete_by: null,
+          })],
+        };
+      }
+      if (url === '/api/users') return { ok: true, json: async () => [] };
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByText('Editable task'));
+    expect(screen.getByRole('dialog', { name: 'Task details' })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Updated task title' } });
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Updated details' } });
+    fireEvent.change(screen.getByLabelText('Priority'), { target: { value: 'High' } });
+    fireEvent.change(screen.getByLabelText('State'), { target: { value: 'InProgress' } });
+    fireEvent.change(screen.getByLabelText('Complete by'), { target: { value: '2026-10-20T09:30' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(await screen.findByText('Updated task title')).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Task details' })).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-1', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({
+        title: 'Updated task title',
+        description: 'Updated details',
+        priority: 'High',
+        state: 'InProgress',
+        complete_by: new Date('2026-10-20T09:30').toISOString(),
+      }),
+    }));
+  });
+
+  it('closes task details using the close button or by clicking outside', () => {
+    vi.stubGlobal('fetch', mockBoardReads());
+    const task: Task = {
+      id: 'task-1',
+      columnId: 'todo',
+      state: 'ToDo',
+      priority: 'Medium',
+      title: 'Closeable task',
+    };
+    render(<AuthenticatedBoard tasks={[task]} setTasks={vi.fn()} />);
+
+    fireEvent.click(screen.getByText('Closeable task'));
+    fireEvent.click(screen.getByRole('button', { name: 'Close task details' }));
+    expect(screen.queryByRole('dialog', { name: 'Task details' })).toBeNull();
+
+    fireEvent.click(screen.getByText('Closeable task'));
+    const reopenedDialog = screen.getByRole('dialog', { name: 'Task details' });
+    fireEvent.click(reopenedDialog.parentElement!);
+    expect(screen.queryByRole('dialog', { name: 'Task details' })).toBeNull();
+  });
+
   it('creates and displays a task from the overlay form', async () => {
     const fetchMock = mockBoardReads();
     fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
