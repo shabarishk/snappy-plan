@@ -22,6 +22,10 @@ const mockBoardReads = () => vi.fn().mockImplementation(async (url: string) => {
     ok: true,
     json: async () => [{ id: 'user-1', full_name: 'Board Owner' }],
   };
+  if (url === '/api/profile') return {
+    ok: true,
+    json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+  };
   return { ok: true, json: async () => ({ authenticated: true }) };
 });
 
@@ -149,6 +153,56 @@ describe('App board', () => {
     expect(screen.getAllByText('0 tasks')).toHaveLength(3);
   });
 
+  it('provides Home and a user menu with an editable profile', async () => {
+    const fetchMock = mockBoardReads();
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/profile' && options?.method === 'PUT') {
+        const body = JSON.parse(options.body as string) as { full_name: string; email: string };
+        return { ok: true, json: async () => ({ username: 'boardowner', ...body }) };
+      }
+      if (url === '/api/tasks') return { ok: true, json: async () => [] };
+      if (url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Snappy Plan' });
+    const userMenuButton = await screen.findByRole('button', { name: 'User menu for boardowner' });
+    expect(userMenuButton.textContent).toBe('B');
+    fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
+    expect(screen.getByRole('heading', { name: 'Backlog' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Home' }));
+    expect(screen.getByRole('heading', { name: 'To Do' })).toBeTruthy();
+
+    fireEvent.click(userMenuButton);
+    expect(screen.getByRole('menuitem', { name: 'Settings' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));
+    expect(screen.getByRole('menu')).toBeTruthy();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Profile' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Profile' });
+    expect(dialog.textContent).toContain('boardowner');
+    expect((screen.getByLabelText('Full name') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText('Email address') as HTMLInputElement).value).toBe('owner@example.com');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit profile' }));
+    fireEvent.change(screen.getByLabelText('Full name'), { target: { value: 'Updated Owner' } });
+    fireEvent.change(screen.getByLabelText('Email address'), { target: { value: 'updated@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Profile' })).toBeNull());
+    expect(fetchMock).toHaveBeenCalledWith('/api/profile', expect.objectContaining({
+      method: 'PUT',
+      credentials: 'same-origin',
+      body: JSON.stringify({ full_name: 'Updated Owner', email: 'updated@example.com' }),
+    }));
+    expect(screen.getByRole('button', { name: 'User menu for boardowner' }).textContent).toBe('U');
+  });
+
   it('moves backlog tasks between lanes and displays their priority and completion time', () => {
     vi.stubGlobal('fetch', mockBoardReads());
     const task: Task = {
@@ -204,6 +258,10 @@ describe('App board', () => {
         })],
       };
       if (url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
       return { ok: true, json: async () => ({ authenticated: true }) };
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -252,6 +310,10 @@ describe('App board', () => {
         };
       }
       if (url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
       return { ok: true, json: async () => ({ authenticated: true }) };
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -319,6 +381,10 @@ describe('App board', () => {
         ok: true,
         json: async () => [{ id: 'user-1', full_name: 'Board Owner' }],
       };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
       return { ok: true, json: async () => ({ authenticated: true }) };
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -365,6 +431,10 @@ describe('App board', () => {
       }
       if (url === '/api/tasks') return { ok: true, json: async () => [] };
       if (url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
       return { ok: true, json: async () => ({ authenticated: true }) };
     });
     vi.stubGlobal('fetch', fetchMock);

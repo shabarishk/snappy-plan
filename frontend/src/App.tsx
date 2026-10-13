@@ -6,7 +6,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { AuthWrapper } from './Auth';
 import { sortTasksByPriority, type TaskPriority } from './taskPriority';
-import { createTask as persistTask, getTaskAssignees, getTasks, moveTask as persistMoveTask, updateTask as persistUpdateTask, type ApiTask, type TaskAssignee } from './api';
+import { createTask as persistTask, getProfile, getTaskAssignees, getTasks, moveTask as persistMoveTask, updateProfile, updateTask as persistUpdateTask, type ApiTask, type TaskAssignee, type UserProfile } from './api';
 
 // --- Types ---
 type TaskState = 'Backlog' | 'ToDo' | 'InProgress' | 'Complete';
@@ -358,6 +358,101 @@ function Column({
   );
 }
 
+function ProfileDialog({
+  profile,
+  onClose,
+  onSaved,
+}: {
+  profile: UserProfile;
+  onClose: () => void;
+  onSaved: (profile: UserProfile) => void;
+}) {
+  const [fullName, setFullName] = useState(profile.full_name);
+  const [email, setEmail] = useState(profile.email);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError('');
+    setIsSaving(true);
+    try {
+      onSaved(await updateProfile({ full_name: fullName, email }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update profile');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4">
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="profile-title"
+        className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
+      >
+        <div className="mb-5 flex items-center justify-between">
+          <h2 id="profile-title" className="text-xl font-bold text-gray-800">Profile</h2>
+          <button type="button" aria-label="Close profile" onClick={onClose} className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100">×</button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <span className="mb-1 block text-sm font-medium text-gray-700">Username</span>
+            <p className="rounded-lg bg-gray-50 p-2 text-gray-700">{profile.username}</p>
+          </div>
+          <div>
+            <label htmlFor="profile-full-name" className="mb-1 block text-sm font-medium text-gray-700">Full name</label>
+            <input
+              id="profile-full-name"
+              type="text"
+              required
+              maxLength={100}
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+              disabled={!isEditing || isSaving}
+              className="w-full rounded-lg border border-gray-300 p-2 disabled:border-transparent disabled:bg-gray-50 disabled:text-gray-700"
+            />
+          </div>
+          <div>
+            <label htmlFor="profile-email" className="mb-1 block text-sm font-medium text-gray-700">Email address</label>
+            <input
+              id="profile-email"
+              type="email"
+              required
+              maxLength={255}
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              disabled={!isEditing || isSaving}
+              className="w-full rounded-lg border border-gray-300 p-2 disabled:border-transparent disabled:bg-gray-50 disabled:text-gray-700"
+            />
+          </div>
+          {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+          <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
+            {isEditing ? (
+              <>
+                <button type="button" disabled={isSaving} onClick={() => {
+                  setFullName(profile.full_name);
+                  setEmail(profile.email);
+                  setError('');
+                  setIsEditing(false);
+                }} className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100">Cancel</button>
+                <button type="submit" disabled={isSaving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+                  {isSaving ? 'Saving…' : 'Save changes'}
+                </button>
+              </>
+            ) : (
+              <button type="button" onClick={() => setIsEditing(true)} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Edit profile</button>
+            )}
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 export function AuthenticatedBoard({
   tasks,
   setTasks,
@@ -369,6 +464,9 @@ export function AuthenticatedBoard({
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false);
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [moveError, setMoveError] = useState('');
@@ -376,11 +474,12 @@ export function AuthenticatedBoard({
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([getTasks(), getTaskAssignees()])
-      .then(([savedTasks, availableAssignees]) => {
+    Promise.all([getTasks(), getTaskAssignees(), getProfile()])
+      .then(([savedTasks, availableAssignees, currentProfile]) => {
         if (cancelled) return;
         setTasks(savedTasks.map(toBoardTask));
         setAssignees(availableAssignees);
+        setProfile(currentProfile);
       })
       .catch((err: unknown) => {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : 'Failed to load board data');
@@ -457,9 +556,49 @@ export function AuthenticatedBoard({
   };
 
   const selectedTask = tasks.find((task) => task.id === selectedTaskId);
+  const profileInitial = profile?.full_name.trim().charAt(0).toUpperCase()
+    || profile?.username.charAt(0).toUpperCase()
+    || '?';
 
   return (
-    <div className="h-screen bg-gray-200 font-sans flex flex-col">
+    <div className="flex h-screen min-h-0 bg-gray-200 font-sans">
+      <aside aria-label="Sidebar" className="relative z-20 flex w-16 shrink-0 flex-col items-center border-r border-gray-200 bg-white py-4">
+        <button
+          type="button"
+          aria-label="Home"
+          title="Home"
+          aria-current={currentPage === 'board' ? 'page' : undefined}
+          onClick={() => setCurrentPage('board')}
+          className={`flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'board' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V10Z" />
+          </svg>
+        </button>
+        <div className="mt-auto">
+          <button
+            type="button"
+            aria-label={`User menu for ${profile?.username ?? 'user'}`}
+            aria-haspopup="menu"
+            aria-expanded={isProfileMenuOpen}
+            title={profile?.full_name ?? 'User profile'}
+            onClick={() => setIsProfileMenuOpen((isOpen) => !isOpen)}
+            className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-700 hover:bg-blue-200"
+          >
+            {profileInitial}
+          </button>
+          {isProfileMenuOpen && (
+            <div role="menu" aria-label="User menu" className="absolute bottom-4 left-full ml-2 w-40 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
+              <button type="button" role="menuitem" onClick={() => {
+                setIsProfileMenuOpen(false);
+                setIsProfileDialogOpen(true);
+              }} className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">Profile</button>
+              <button type="button" role="menuitem" className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">Settings</button>
+            </div>
+          )}
+        </div>
+      </aside>
+      <div className="flex min-w-0 flex-1 flex-col">
       <header className="bg-white p-4 shadow-sm z-10 flex justify-between items-center shrink-0">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-extrabold text-blue-600 tracking-tight">Snappy Plan</h1>
@@ -485,8 +624,17 @@ export function AuthenticatedBoard({
             Backlog
           </button>
         </nav>
-        <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold">S</div>
       </header>
+      {isProfileDialogOpen && profile && (
+        <ProfileDialog
+          profile={profile}
+          onClose={() => setIsProfileDialogOpen(false)}
+          onSaved={(updatedProfile) => {
+            setProfile(updatedProfile);
+            setIsProfileDialogOpen(false);
+          }}
+        />
+      )}
       {isCreateTaskOpen && (
         <CreateTaskOverlay
           assignees={assignees}
@@ -553,6 +701,7 @@ export function AuthenticatedBoard({
           </DragOverlay>
         </DndContext>
       </main>
+      </div>
     </div>
   );
 }

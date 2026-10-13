@@ -36,6 +36,7 @@ type fakeDB struct {
 	createColumnErr    error
 	moveTaskErr        error
 	updateTaskErr      error
+	updateProfileErr   error
 	tasksErr           error
 	assigneesErr       error
 	assignees          []dbgen.GetUsersForAssignmentRow
@@ -45,6 +46,7 @@ type fakeDB struct {
 	taskArgs           []any
 	moveTaskArgs       []any
 	updateTaskArgs     []any
+	updateProfileArgs  []any
 	sessionArgs        []any
 	createUserArgs     []any
 	createBoardErr     error
@@ -83,18 +85,21 @@ func (db *fakeDB) Query(_ context.Context, query string, _ ...any) (pgx.Rows, er
 
 func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row {
 	switch {
+	case strings.Contains(query, "UPDATE users"):
+		db.updateProfileArgs = args
+		if db.updateProfileErr != nil {
+			return fakeRow{err: db.updateProfileErr}
+		}
+		db.user.ID = args[0].(string)
+		db.user.Email = args[1].(string)
+		db.user.FullName = args[2].(string)
+		return fakeRow{values: userValues(db.user)}
 	case strings.Contains(query, "SELECT COUNT(*) FROM users"):
 		return fakeRow{values: []any{db.count}, err: db.countErr}
 	case strings.Contains(query, "FROM users") && strings.Contains(query, "WHERE email"):
-		return fakeRow{values: []any{
-			db.user.ID, db.user.Email, db.user.PasswordHash, db.user.FullName,
-			db.user.Role, db.user.CreatedAt, db.user.UpdatedAt,
-		}, err: db.userErr}
+		return fakeRow{values: userValues(db.user), err: db.userErr}
 	case strings.Contains(query, "FROM users") && strings.Contains(query, "WHERE id"):
-		return fakeRow{values: []any{
-			db.user.ID, db.user.Email, db.user.PasswordHash, db.user.FullName,
-			db.user.Role, db.user.CreatedAt, db.user.UpdatedAt,
-		}, err: db.userErr}
+		return fakeRow{values: userValues(db.user), err: db.userErr}
 	case strings.Contains(query, "FROM tasks AS task") && strings.Contains(query, "WHERE task.id"):
 		return fakeRow{values: []any{
 			db.board.ID, db.board.Title, db.board.OwnerID, db.board.CreatedAt, db.board.UpdatedAt,
@@ -187,6 +192,13 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 		}}
 	default:
 		return fakeRow{err: errors.New("unexpected query: " + query)}
+	}
+}
+
+func userValues(user dbgen.User) []any {
+	return []any{
+		user.ID, user.Email, user.PasswordHash, user.FullName,
+		user.Role, user.CreatedAt, user.UpdatedAt,
 	}
 }
 
@@ -1137,6 +1149,142 @@ func TestTaskReadEndpoints(t *testing.T) {
 			response := send(handler, http.MethodGet, path, "", cookie)
 			if response.Code != http.StatusOK || response.Body.String() != "[]\n" {
 				t.Errorf("%s response = %d %q", path, response.Code, response.Body.String())
+			}
+		}
+	})
+}
+
+func TestProfileEndpoints(t *testing.T) {
+	const ownerID = "owner1"
+	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
+
+	t.Run("requires authentication", func(t *testing.T) {
+		handler := newHandler(&fakeDB{}, nil, false)
+		for _, method := range []string{http.MethodGet, http.MethodPut} {
+			response := send(handler, method, "/api/profile",
+				`{"full_name":"Updated User","email":"updated@example.com"}`, nil)
+			if response.Code != http.StatusUnauthorized {
+				t.Errorf("%s status = %d, want %d", method, response.Code, http.StatusUnauthorized)
+			}
+		}
+	})
+
+	t.Run("returns only profile fields", func(t *testing.T) {
+		user := newUser("password123")
+		user.ID = ownerID
+		db := &fakeDB{session: dbgen.Session{Token: "token", UserID: ownerID}, user: user}
+		response := send(newHandler(db, nil, false), http.MethodGet, "/api/profile", "", cookie)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+		}
+		var body map[string]string
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode profile: %v", err)
+		}
+		if body["username"] != ownerID || body["full_name"] != user.FullName || body["email"] != user.Email {
+			t.Fatalf("profile = %#v", body)
+		}
+		if strings.Contains(response.Body.String(), user.PasswordHash) {
+			t.Fatal("profile response included the password hash")
+		}
+	})
+
+	t.Run("reports profile lookup failures", func(t *testing.T) {
+		for _, test := range []struct {
+			name       string
+			sessionErr error
+			userErr    error
+			wantStatus int
+		}{
+			{name: "session validation error", sessionErr: errors.New("session query failed"), wantStatus: http.StatusInternalServerError},
+			{name: "missing user", userErr: pgx.ErrNoRows, wantStatus: http.StatusNotFound},
+			{name: "database failure", userErr: errors.New("user query failed"), wantStatus: http.StatusInternalServerError},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				db := &fakeDB{
+					session:    dbgen.Session{Token: "token", UserID: ownerID},
+					sessionErr: test.sessionErr,
+					userErr:    test.userErr,
+				}
+				response := send(newHandler(db, nil, false), http.MethodGet, "/api/profile", "", cookie)
+				if response.Code != test.wantStatus {
+					t.Fatalf("status = %d, want %d", response.Code, test.wantStatus)
+				}
+			})
+		}
+	})
+
+	t.Run("updates full name and email", func(t *testing.T) {
+		db := &fakeDB{session: dbgen.Session{Token: "token", UserID: ownerID}}
+		response := send(newHandler(db, nil, false), http.MethodPut, "/api/profile",
+			`{"full_name":"Updated User","email":"updated@example.com"}`, cookie)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+		}
+		if len(db.updateProfileArgs) != 3 || db.updateProfileArgs[0] != ownerID ||
+			db.updateProfileArgs[1] != "updated@example.com" || db.updateProfileArgs[2] != "Updated User" {
+			t.Fatalf("update args = %#v", db.updateProfileArgs)
+		}
+		var body map[string]string
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode profile: %v", err)
+		}
+		if body["username"] != ownerID || body["full_name"] != "Updated User" ||
+			body["email"] != "updated@example.com" || len(body) != 3 {
+			t.Fatalf("updated profile = %#v", body)
+		}
+	})
+
+	t.Run("validates profile fields", func(t *testing.T) {
+		for _, body := range []string{
+			`{`,
+			`{"full_name":" ","email":"valid@example.com"}`,
+			`{"full_name":"User","email":"not-an-email"}`,
+			`{"full_name":"User","email":"User <user@example.com>"}`,
+			`{"full_name":"` + strings.Repeat("a", 101) + `","email":"valid@example.com"}`,
+		} {
+			response := send(newHandler(&fakeDB{session: dbgen.Session{Token: "token", UserID: ownerID}}, nil, false),
+				http.MethodPut, "/api/profile", body, cookie)
+			if response.Code != http.StatusBadRequest {
+				t.Errorf("body %q status = %d, want %d", body, response.Code, http.StatusBadRequest)
+			}
+		}
+	})
+
+	t.Run("reports duplicate email and database failures", func(t *testing.T) {
+		for _, test := range []struct {
+			name       string
+			err        error
+			wantStatus int
+		}{
+			{name: "duplicate email", err: &pgconn.PgError{Code: "23505"}, wantStatus: http.StatusConflict},
+			{name: "missing user", err: pgx.ErrNoRows, wantStatus: http.StatusNotFound},
+			{name: "database failure", err: errors.New("database unavailable"), wantStatus: http.StatusInternalServerError},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				db := &fakeDB{
+					session:          dbgen.Session{Token: "token", UserID: ownerID},
+					updateProfileErr: test.err,
+				}
+				response := send(newHandler(db, nil, false), http.MethodPut, "/api/profile",
+					`{"full_name":"Updated User","email":"updated@example.com"}`, cookie)
+				if response.Code != test.wantStatus {
+					t.Fatalf("status = %d, want %d: %s", response.Code, test.wantStatus, response.Body.String())
+				}
+			})
+		}
+	})
+
+	t.Run("reports session validation errors", func(t *testing.T) {
+		db := &fakeDB{
+			session:    dbgen.Session{Token: "token", UserID: ownerID},
+			sessionErr: errors.New("session query failed"),
+		}
+		for _, method := range []string{http.MethodGet, http.MethodPut} {
+			response := send(newHandler(db, nil, false), method, "/api/profile",
+				`{"full_name":"Updated User","email":"updated@example.com"}`, cookie)
+			if response.Code != http.StatusInternalServerError {
+				t.Errorf("%s status = %d, want %d", method, response.Code, http.StatusInternalServerError)
 			}
 		}
 	})
