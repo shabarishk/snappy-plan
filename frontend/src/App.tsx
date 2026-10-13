@@ -358,13 +358,11 @@ function Column({
   );
 }
 
-function ProfileDialog({
+function ProfilePage({
   profile,
-  onClose,
   onSaved,
 }: {
   profile: UserProfile;
-  onClose: () => void;
   onSaved: (profile: UserProfile) => void;
 }) {
   const [fullName, setFullName] = useState(profile.full_name);
@@ -378,7 +376,11 @@ function ProfileDialog({
     setError('');
     setIsSaving(true);
     try {
-      onSaved(await updateProfile({ full_name: fullName, email }));
+      const savedProfile = await updateProfile({ full_name: fullName, email });
+      setFullName(savedProfile.full_name);
+      setEmail(savedProfile.email);
+      setIsEditing(false);
+      onSaved(savedProfile);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update profile');
     } finally {
@@ -387,18 +389,12 @@ function ProfileDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4">
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="profile-title"
-        className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
-      >
-        <div className="mb-5 flex items-center justify-between">
-          <h2 id="profile-title" className="text-xl font-bold text-gray-800">Profile</h2>
-          <button type="button" aria-label="Close profile" onClick={onClose} className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100">×</button>
-        </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
+    <section aria-labelledby="profile-title" className="mx-auto w-full max-w-2xl rounded-xl bg-white p-6 shadow-sm">
+      <div className="mb-6 border-b border-gray-100 pb-4">
+        <h2 id="profile-title" className="text-2xl font-bold text-gray-800">Profile</h2>
+        <p className="mt-1 text-sm text-gray-500">View and update your account information.</p>
+      </div>
+      <form onSubmit={handleSubmit} className="max-w-lg space-y-4">
           <div>
             <span className="mb-1 block text-sm font-medium text-gray-700">Username</span>
             <p className="rounded-lg bg-gray-50 p-2 text-gray-700">{profile.username}</p>
@@ -447,9 +443,8 @@ function ProfileDialog({
               <button type="button" onClick={() => setIsEditing(true)} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Edit profile</button>
             )}
           </div>
-        </form>
-      </section>
-    </div>
+      </form>
+    </section>
   );
 }
 
@@ -460,13 +455,12 @@ export function AuthenticatedBoard({
   tasks: Task[];
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
 }) {
-  const [currentPage, setCurrentPage] = useState<'board' | 'backlog'>('board');
+  const [currentPage, setCurrentPage] = useState<'board' | 'backlog' | 'profile'>('board');
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
-  const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false);
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [moveError, setMoveError] = useState('');
@@ -591,7 +585,9 @@ export function AuthenticatedBoard({
             <div role="menu" aria-label="User menu" className="absolute bottom-4 left-full ml-2 w-40 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
               <button type="button" role="menuitem" onClick={() => {
                 setIsProfileMenuOpen(false);
-                setIsProfileDialogOpen(true);
+                setIsCreateTaskOpen(false);
+                setSelectedTaskId(null);
+                setCurrentPage('profile');
               }} className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">Profile</button>
               <button type="button" role="menuitem" className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">Settings</button>
             </div>
@@ -602,11 +598,13 @@ export function AuthenticatedBoard({
       <header className="bg-white p-4 shadow-sm z-10 flex justify-between items-center shrink-0">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-extrabold text-blue-600 tracking-tight">Snappy Plan</h1>
-          <button type="button" disabled={isLoading || Boolean(loadError)} onClick={() => setIsCreateTaskOpen(true)} className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
-            Create task
-          </button>
+          {currentPage !== 'profile' && (
+            <button type="button" disabled={isLoading || Boolean(loadError)} onClick={() => setIsCreateTaskOpen(true)} className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+              Create task
+            </button>
+          )}
         </div>
-        <nav aria-label="Main navigation" className="flex items-center gap-2">
+        {currentPage !== 'profile' && <nav aria-label="Main navigation" className="flex items-center gap-2">
           <button
             type="button"
             aria-current={currentPage === 'board' ? 'page' : undefined}
@@ -623,19 +621,9 @@ export function AuthenticatedBoard({
           >
             Backlog
           </button>
-        </nav>
+        </nav>}
       </header>
-      {isProfileDialogOpen && profile && (
-        <ProfileDialog
-          profile={profile}
-          onClose={() => setIsProfileDialogOpen(false)}
-          onSaved={(updatedProfile) => {
-            setProfile(updatedProfile);
-            setIsProfileDialogOpen(false);
-          }}
-        />
-      )}
-      {isCreateTaskOpen && (
+      {currentPage !== 'profile' && isCreateTaskOpen && (
         <CreateTaskOverlay
           assignees={assignees}
           onClose={() => setIsCreateTaskOpen(false)}
@@ -646,7 +634,7 @@ export function AuthenticatedBoard({
           }}
         />
       )}
-      {selectedTask && (
+      {currentPage !== 'profile' && selectedTask && (
         <TaskDetailsOverlay
           key={selectedTask.id}
           task={selectedTask}
@@ -662,6 +650,12 @@ export function AuthenticatedBoard({
 
       {/* Main content area takes up remaining height */}
       <main className="board-main flex-1 p-4">
+        {currentPage === 'profile' ? (
+          profile
+            ? <ProfilePage profile={profile} onSaved={setProfile} />
+            : <p role={loadError ? 'alert' : undefined} className="p-4 text-sm text-gray-600">{loadError || 'Loading profile…'}</p>
+        ) : (
+          <>
         {(loadError || moveError) && <p role="alert" className="mb-3 rounded bg-red-100 p-3 text-sm text-red-700">{loadError || moveError}</p>}
         <DndContext
           sensors={sensors}
@@ -700,6 +694,8 @@ export function AuthenticatedBoard({
             ) : null}
           </DragOverlay>
         </DndContext>
+          </>
+        )}
       </main>
       </div>
     </div>

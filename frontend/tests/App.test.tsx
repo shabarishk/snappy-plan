@@ -185,8 +185,9 @@ describe('App board', () => {
     expect(screen.getByRole('menu')).toBeTruthy();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Profile' }));
 
-    const dialog = screen.getByRole('dialog', { name: 'Profile' });
-    expect(dialog.textContent).toContain('boardowner');
+    const profileHeading = await screen.findByRole('heading', { name: 'Profile' });
+    expect(profileHeading.closest('section')?.textContent).toContain('boardowner');
+    expect(screen.queryByRole('dialog')).toBeNull();
     expect((screen.getByLabelText('Full name') as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByLabelText('Email address') as HTMLInputElement).value).toBe('owner@example.com');
     fireEvent.click(screen.getByRole('button', { name: 'Edit profile' }));
@@ -194,13 +195,17 @@ describe('App board', () => {
     fireEvent.change(screen.getByLabelText('Email address'), { target: { value: 'updated@example.com' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Profile' })).toBeNull());
+    await waitFor(() => expect((screen.getByLabelText('Full name') as HTMLInputElement).disabled).toBe(true));
+    expect(screen.getByRole('heading', { name: 'Profile' })).toBeTruthy();
+    expect((screen.getByLabelText('Full name') as HTMLInputElement).value).toBe('Updated Owner');
     expect(fetchMock).toHaveBeenCalledWith('/api/profile', expect.objectContaining({
       method: 'PUT',
       credentials: 'same-origin',
       body: JSON.stringify({ full_name: 'Updated Owner', email: 'updated@example.com' }),
     }));
     expect(screen.getByRole('button', { name: 'User menu for boardowner' }).textContent).toBe('U');
+    fireEvent.click(screen.getByRole('button', { name: 'Home' }));
+    expect(screen.getByRole('heading', { name: 'To Do' })).toBeTruthy();
   });
 
   it('moves backlog tasks between lanes and displays their priority and completion time', () => {
