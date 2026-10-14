@@ -133,6 +133,32 @@ func EnsureUserIDSchema(ctx context.Context, beginTx func(context.Context) (Setu
 	return nil
 }
 
+func EnsurePersonalBoards(ctx context.Context, beginTx func(context.Context) (SetupTransaction, error)) error {
+	tx, err := beginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin personal board upgrade: %w", err)
+	}
+	defer tx.Rollback(context.Background())
+
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(731942613)); err != nil {
+		return fmt.Errorf("lock personal board upgrade: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO boards (title, owner_id)
+		SELECT full_name, id
+		FROM users AS user_account
+		WHERE NOT EXISTS (
+			SELECT 1 FROM boards WHERE owner_id = user_account.id
+		)
+	`); err != nil {
+		return fmt.Errorf("create missing personal boards: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit personal board upgrade: %w", err)
+	}
+	return nil
+}
+
 func EnsureTaskSchema(ctx context.Context, beginTx func(context.Context) (SetupTransaction, error)) error {
 	tx, err := beginTx(ctx)
 	if err != nil {

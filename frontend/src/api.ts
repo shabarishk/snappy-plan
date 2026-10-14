@@ -2,7 +2,7 @@
 
 // 1. Define types matching your Go structs
 export interface Board {
-  board_id: string;
+  id: string;
   title: string;
   owner_id: string;
 }
@@ -36,6 +36,7 @@ export interface AdminUser extends UserProfile {
 }
 
 export interface CreateTaskRequest {
+  board_id: string;
   title: string;
   description: string;
   assigned_to_id: string;
@@ -71,6 +72,12 @@ export const createBoard = async (title: string, ownerId: string): Promise<Board
 export const getTasks = async (): Promise<ApiTask[]> => {
   const res = await fetch('/api/tasks', { credentials: 'same-origin' });
   if (!res.ok) throw new Error('Failed to load tasks');
+  return res.json();
+};
+
+export const getBoards = async (): Promise<Board[]> => {
+  const res = await fetch('/api/boards', { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(await res.text());
   return res.json();
 };
 

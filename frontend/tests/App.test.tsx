@@ -16,8 +16,14 @@ const taskResponse = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+const boardList = [
+  { id: 'board-1', title: 'Board Owner', owner_id: 'boardowner' },
+  { id: 'board-2', title: 'Project Board', owner_id: 'boardowner' },
+];
+
 const mockBoardReads = () => vi.fn().mockImplementation(async (url: string) => {
   if (url === '/api/tasks') return { ok: true, json: async () => [] };
+  if (url === '/api/boards') return { ok: true, json: async () => boardList };
   if (url === '/api/users') return {
     ok: true,
     json: async () => [{ id: 'user-1', full_name: 'Board Owner' }],
@@ -157,6 +163,7 @@ describe('App board', () => {
   it('provides Home and a user menu with an editable profile', async () => {
     const fetchMock = mockBoardReads();
     fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
       if (url === '/api/profile/password' && options?.method === 'PUT') {
         return { ok: true, json: async () => ({ message: 'Password updated successfully' }) };
       }
@@ -251,6 +258,7 @@ describe('App board', () => {
       }
       if (url === '/api/setup/status') return { ok: true, json: async () => ({ setup_required: false }) };
       if (url === '/api/tasks' || url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
       if (url === '/api/profile') return {
         ok: true,
         json: async () => ({
@@ -281,6 +289,7 @@ describe('App board', () => {
   it('shows the admin tile to admins and supports creating and promoting users', async () => {
     const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
       if (url === '/api/tasks') return { ok: true, json: async () => [] };
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
       if (url === '/api/users') return { ok: true, json: async () => [] };
       if (url === '/api/profile') return {
         ok: true,
@@ -413,6 +422,7 @@ describe('App board', () => {
 
   it('persists a drag-and-drop state change to the backend', async () => {
     const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
       if (url === '/api/tasks' && options?.method === 'PATCH') {
         return { ok: true, json: async () => taskResponse({
           id: 'task-1',
@@ -453,6 +463,7 @@ describe('App board', () => {
 
   it('opens task details and persists edited fields to the backend', async () => {
     const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
       if (url === '/api/tasks/task-1' && options?.method === 'PUT') {
         return {
           ok: true,
@@ -536,6 +547,7 @@ describe('App board', () => {
   it('creates and displays a task from the overlay form', async () => {
     const fetchMock = mockBoardReads();
     fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
       if (url === '/api/tasks' && options?.method === 'POST') {
         return { ok: true, json: async () => taskResponse({
           title: 'Book a campsite',
@@ -570,6 +582,7 @@ describe('App board', () => {
 
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Book a campsite' } });
     fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Check the lake sites' } });
+    fireEvent.change(screen.getByLabelText('Board'), { target: { value: 'board-2' } });
     fireEvent.change(screen.getByLabelText('Assigned to'), { target: { value: 'user-1' } });
     fireEvent.change(screen.getByLabelText('Current state'), { target: { value: 'ToDo' } });
     fireEvent.change(screen.getByLabelText('Priority'), { target: { value: 'High' } });
@@ -581,6 +594,7 @@ describe('App board', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/tasks', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({
+        board_id: 'board-2',
         title: 'Book a campsite',
         description: 'Check the lake sites',
         assigned_to_id: 'user-1',
@@ -595,8 +609,9 @@ describe('App board', () => {
   it('creates a default task in Backlog with Medium priority', async () => {
     const fetchMock = mockBoardReads();
     fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
       if (url === '/api/tasks' && options?.method === 'POST') {
-        const request = JSON.parse(options.body as string) as { title: string; state: string; priority: string };
+        const request = JSON.parse(options.body as string) as { board_id: string; title: string; state: string; priority: string };
         return { ok: true, json: async () => taskResponse(request) };
       }
       if (url === '/api/tasks') return { ok: true, json: async () => [] };
@@ -622,6 +637,7 @@ describe('App board', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/tasks', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({
+        board_id: 'board-1',
         title: 'Review the garden plan',
         description: '',
         assigned_to_id: '',

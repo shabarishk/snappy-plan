@@ -6,7 +6,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { AuthWrapper } from './Auth';
 import { sortTasksByPriority, type TaskPriority } from './taskPriority';
-import { createTask as persistTask, createUser, getAdminUsers, getProfile, getTaskAssignees, getTasks, logout, moveTask as persistMoveTask, promoteUserToAdmin, updatePassword, updateProfile, updateTask as persistUpdateTask, type AdminUser, type ApiTask, type TaskAssignee, type UserProfile } from './api';
+import { createTask as persistTask, createUser, getAdminUsers, getBoards, getProfile, getTaskAssignees, getTasks, logout, moveTask as persistMoveTask, promoteUserToAdmin, updatePassword, updateProfile, updateTask as persistUpdateTask, type AdminUser, type ApiTask, type Board, type TaskAssignee, type UserProfile } from './api';
 
 // --- Types ---
 type TaskState = 'Backlog' | 'ToDo' | 'InProgress' | 'Complete';
@@ -75,16 +75,19 @@ function toBoardTask(task: ApiTask): Task {
 }
 
 function CreateTaskOverlay({
+  boards,
   assignees,
   onClose,
   onCreated,
 }: {
+  boards: Board[];
   assignees: TaskAssignee[];
   onClose: () => void;
   onCreated: (task: Task) => void;
 }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [boardId, setBoardId] = useState(boards[0]?.id ?? '');
   const [assignedToId, setAssignedToId] = useState('');
   const [state, setState] = useState<'Backlog' | 'ToDo'>('Backlog');
   const [priority, setPriority] = useState<TaskPriority>('Medium');
@@ -98,6 +101,7 @@ function CreateTaskOverlay({
     setError('');
     try {
       const task = await persistTask({
+        board_id: boardId,
         title,
         description,
         assigned_to_id: assignedToId,
@@ -135,6 +139,13 @@ function CreateTaskOverlay({
             <textarea id="task-description" name="description" value={description} onChange={(event) => setDescription(event.target.value)} rows={3} className="w-full rounded-lg border border-gray-300 p-2" />
           </div>
           <div>
+            <label htmlFor="task-board" className="mb-1 block text-sm font-medium text-gray-700">Board</label>
+            <select id="task-board" name="board_id" required value={boardId} onChange={(event) => setBoardId(event.target.value)} className="w-full rounded-lg border border-gray-300 p-2">
+              <option value="" disabled>Select a board</option>
+              {boards.map((board) => <option key={board.id} value={board.id}>{board.title}</option>)}
+            </select>
+          </div>
+          <div>
             <label htmlFor="task-assignee" className="mb-1 block text-sm font-medium text-gray-700">Assigned to</label>
             <select id="task-assignee" name="assigned_to_id" value={assignedToId} onChange={(event) => setAssignedToId(event.target.value)} className="w-full rounded-lg border border-gray-300 p-2">
               <option value="">Unassigned</option>
@@ -165,7 +176,7 @@ function CreateTaskOverlay({
           {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
           <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
             <button type="button" onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100">Cancel</button>
-            <button type="submit" disabled={saving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+            <button type="submit" disabled={saving || boards.length === 0} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
               {saving ? 'Creating…' : 'Confirm Task'}
             </button>
           </div>
@@ -722,6 +733,7 @@ export function AuthenticatedBoard({
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
+  const [boards, setBoards] = useState<Board[]>([]);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [logoutError, setLogoutError] = useState('');
@@ -752,12 +764,13 @@ export function AuthenticatedBoard({
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([getTasks(), getTaskAssignees(), getProfile()])
-      .then(([savedTasks, availableAssignees, currentProfile]) => {
+    Promise.all([getTasks(), getTaskAssignees(), getProfile(), getBoards()])
+      .then(([savedTasks, availableAssignees, currentProfile, availableBoards]) => {
         if (cancelled) return;
         setTasks(savedTasks.map(toBoardTask));
         setAssignees(availableAssignees);
         setProfile(currentProfile);
+        setBoards(availableBoards);
       })
       .catch((err: unknown) => {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : 'Failed to load board data');
@@ -953,6 +966,7 @@ export function AuthenticatedBoard({
       </header>
       {(currentPage === 'board' || currentPage === 'backlog') && isCreateTaskOpen && (
         <CreateTaskOverlay
+          boards={boards}
           assignees={assignees}
           onClose={() => setIsCreateTaskOpen(false)}
           onCreated={(task) => {
