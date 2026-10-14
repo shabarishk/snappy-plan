@@ -64,6 +64,27 @@ type fakeDB struct {
 	deleteSessionErr   error
 }
 
+type failingResponseWriter struct {
+	header http.Header
+	status int
+	err    error
+}
+
+func (writer *failingResponseWriter) Header() http.Header {
+	if writer.header == nil {
+		writer.header = make(http.Header)
+	}
+	return writer.header
+}
+
+func (writer *failingResponseWriter) WriteHeader(status int) {
+	writer.status = status
+}
+
+func (writer *failingResponseWriter) Write([]byte) (int, error) {
+	return 0, writer.err
+}
+
 func (db *fakeDB) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
 	if strings.Contains(query, "DELETE FROM sessions") {
 		db.deleteSessionArgs = args
@@ -1564,6 +1585,47 @@ func TestAdminUserEndpoints(t *testing.T) {
 		if len(boards) != 1 || boards[0].ID != boardID || boards[0].Title != "Personal board" ||
 			boards[0].OwnerID != "member" || boards[0].OwnerName != "Member User" {
 			t.Fatalf("admin boards = %#v", boards)
+		}
+	})
+
+	t.Run("returns an empty list when there are no boards", func(t *testing.T) {
+		db := &fakeDB{
+			session: dbgen.Session{Token: "token", UserID: adminID},
+			user:    admin,
+		}
+		response := send(newHandler(db, nil, false), http.MethodGet, "/api/admin/boards", "", cookie)
+		if response.Code != http.StatusOK || response.Body.String() != "[]\n" {
+			t.Fatalf("status=%d body=%q, want empty board list", response.Code, response.Body.String())
+		}
+	})
+
+	t.Run("reports board query failures", func(t *testing.T) {
+		db := &fakeDB{
+			session:        dbgen.Session{Token: "token", UserID: adminID},
+			user:           admin,
+			adminBoardsErr: errors.New("query failed"),
+		}
+		response := send(newHandler(db, nil, false), http.MethodGet, "/api/admin/boards", "", cookie)
+		if response.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want %d", response.Code, http.StatusInternalServerError)
+		}
+	})
+
+	t.Run("reports response encoding failures", func(t *testing.T) {
+		handler := newHandler(&fakeDB{
+			session: dbgen.Session{Token: "token", UserID: adminID},
+			user:    admin,
+			adminBoards: []dbgen.GetAllBoardsForAdminRow{{
+				ID: newUUID(8), Title: "Board", OwnerID: "member", FullName: "Member",
+			}},
+		}, nil, false)
+		request := httptest.NewRequest(http.MethodGet, "/api/admin/boards", nil)
+		request.AddCookie(cookie)
+		writer := &failingResponseWriter{err: errors.New("write failed")}
+
+		handler.ServeHTTP(writer, request)
+		if writer.status != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want %d", writer.status, http.StatusInternalServerError)
 		}
 	})
 
