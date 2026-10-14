@@ -21,52 +21,57 @@ import (
 )
 
 type fakeDB struct {
-	count              int64
-	countErr           error
-	user               dbgen.User
-	userErr            error
-	session            dbgen.Session
-	sessionErr         error
-	board              dbgen.Board
-	boards             []dbgen.Board
-	boardErr           error
-	column             dbgen.Column
-	columnErr          error
-	task               dbgen.Task
-	createTaskErr      error
-	createColumnErr    error
-	moveTaskErr        error
-	updateTaskErr      error
-	updateProfileErr   error
-	updatePasswordErr  error
-	tasksErr           error
-	assigneesErr       error
-	assignees          []dbgen.GetUsersForAssignmentRow
-	adminUsers         []dbgen.GetUsersForAdminRow
-	adminBoards        []dbgen.GetAllBoardsForAdminRow
-	adminBoardsErr     error
-	tasks              []dbgen.Task
-	boardArgs          []any
-	columnArgs         []any
-	taskArgs           []any
-	moveTaskArgs       []any
-	updateTaskArgs     []any
-	updateProfileArgs  []any
-	updateUserRoleErr  error
-	updateUserRoleArgs []any
-	updatePasswordArgs []any
-	deleteSessionArgs  []any
-	sessionArgs        []any
-	createUserArgs     []any
-	createBoardErr     error
-	boardMemberArgs    [][]any
-	boardMemberErr     error
-	deleteBoardArgs    []any
-	deleteBoardRows    int64
-	deleteBoardErr     error
-	createSessionError error
-	createUserError    error
-	deleteSessionErr   error
+	count                  int64
+	countErr               error
+	user                   dbgen.User
+	userErr                error
+	session                dbgen.Session
+	sessionErr             error
+	board                  dbgen.Board
+	boards                 []dbgen.Board
+	boardErr               error
+	column                 dbgen.Column
+	columnErr              error
+	task                   dbgen.Task
+	createTaskErr          error
+	createColumnErr        error
+	moveTaskErr            error
+	updateTaskErr          error
+	updateProfileErr       error
+	updatePasswordErr      error
+	tasksErr               error
+	assigneesErr           error
+	assignees              []dbgen.GetUsersForAssignmentRow
+	adminUsers             []dbgen.GetUsersForAdminRow
+	adminBoards            []dbgen.GetAllBoardsForAdminRow
+	adminBoardsErr         error
+	tasks                  []dbgen.Task
+	boardArgs              []any
+	columnArgs             []any
+	taskArgs               []any
+	moveTaskArgs           []any
+	updateTaskArgs         []any
+	updateProfileArgs      []any
+	updateUserRoleErr      error
+	updateUserRoleArgs     []any
+	updatePasswordArgs     []any
+	deleteSessionArgs      []any
+	sessionArgs            []any
+	createUserArgs         []any
+	createBoardErr         error
+	boardMemberArgs        [][]any
+	boardMemberErr         error
+	boardMembers           []string
+	boardMembersErr        error
+	boardMembersDeleteArgs []any
+	boardMembersDeleteErr  error
+	deleteBoardArgs        []any
+	deleteBoardQuery       string
+	deleteBoardRows        int64
+	deleteBoardErr         error
+	createSessionError     error
+	createUserError        error
+	deleteSessionErr       error
 }
 
 type failingResponseWriter struct {
@@ -93,10 +98,13 @@ func (writer *failingResponseWriter) Write([]byte) (int, error) {
 func (db *fakeDB) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
 	if strings.Contains(query, "DELETE FROM boards") {
 		db.deleteBoardArgs = args
+		db.deleteBoardQuery = query
 		if db.deleteBoardErr != nil {
 			return pgconn.CommandTag{}, db.deleteBoardErr
 		}
-		if db.deleteBoardRows > 0 {
+		canDelete := db.board.OwnerID == args[1].(string) ||
+			(strings.Contains(query, "role = 'admin'") && db.user.Role == "admin")
+		if canDelete && db.deleteBoardRows > 0 {
 			return pgconn.NewCommandTag("DELETE 1"), nil
 		}
 		return pgconn.NewCommandTag("DELETE 0"), nil
@@ -104,6 +112,10 @@ func (db *fakeDB) Exec(_ context.Context, query string, args ...any) (pgconn.Com
 	if strings.Contains(query, "INSERT INTO board_members") {
 		db.boardMemberArgs = append(db.boardMemberArgs, args)
 		return pgconn.CommandTag{}, db.boardMemberErr
+	}
+	if strings.Contains(query, "DELETE FROM board_members AS member") {
+		db.boardMembersDeleteArgs = args
+		return pgconn.CommandTag{}, db.boardMembersDeleteErr
 	}
 	if strings.Contains(query, "DELETE FROM sessions") {
 		db.deleteSessionArgs = args
@@ -144,6 +156,15 @@ func (db *fakeDB) Query(_ context.Context, query string, _ ...any) (pgx.Rows, er
 		rows := make([][]any, len(db.adminBoards))
 		for i, board := range db.adminBoards {
 			rows[i] = []any{board.ID, board.Title, board.OwnerID, board.FullName}
+		}
+		return &fakeRows{values: rows}, nil
+	case strings.Contains(query, "FROM board_members"):
+		if db.boardMembersErr != nil {
+			return nil, db.boardMembersErr
+		}
+		rows := make([][]any, len(db.boardMembers))
+		for i, userID := range db.boardMembers {
+			rows[i] = []any{userID}
 		}
 		return &fakeRows{values: rows}, nil
 	case strings.Contains(query, "SELECT id, full_name, email, role"):
@@ -377,6 +398,9 @@ func (tx *fakeTx) Exec(ctx context.Context, query string, args ...any) (pgconn.C
 		return pgconn.CommandTag{}, tx.execErr
 	}
 	if strings.Contains(query, "INSERT INTO board_members") {
+		return tx.fakeDB.Exec(ctx, query, args...)
+	}
+	if strings.Contains(query, "DELETE FROM board_members AS member") {
 		return tx.fakeDB.Exec(ctx, query, args...)
 	}
 	return pgconn.CommandTag{}, tx.execErr
@@ -818,18 +842,23 @@ func TestDeleteBoardEndpoint(t *testing.T) {
 		rows       int64
 		deleteErr  error
 		sessionErr error
+		role       string
+		boardOwner string
 		wantStatus int
 	}{
 		{name: "invalid board ID", boardID: "invalid", wantStatus: http.StatusBadRequest},
-		{name: "board does not belong to user", boardID: newUUID(8).String(), wantStatus: http.StatusNotFound},
+		{name: "board does not belong to user", boardID: newUUID(8).String(), rows: 1, role: "user", boardOwner: "other", wantStatus: http.StatusNotFound},
 		{name: "session lookup error", boardID: newUUID(8).String(), sessionErr: errors.New("session lookup failed"), wantStatus: http.StatusInternalServerError},
 		{name: "database error", boardID: newUUID(8).String(), deleteErr: errors.New("delete failed"), wantStatus: http.StatusInternalServerError},
-		{name: "deletes owned board", boardID: newUUID(8).String(), rows: 1, wantStatus: http.StatusNoContent},
+		{name: "deletes owned board", boardID: newUUID(8).String(), rows: 1, role: "user", boardOwner: "owner7", wantStatus: http.StatusNoContent},
+		{name: "admin deletes any board", boardID: newUUID(8).String(), rows: 1, role: "admin", boardOwner: "other", wantStatus: http.StatusNoContent},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			db := &fakeDB{
 				session:         dbgen.Session{Token: "token", UserID: "owner7"},
 				sessionErr:      test.sessionErr,
+				user:            dbgen.User{ID: "owner7", Role: test.role},
+				board:           dbgen.Board{OwnerID: test.boardOwner},
 				deleteBoardRows: test.rows,
 				deleteBoardErr:  test.deleteErr,
 			}
@@ -846,9 +875,188 @@ func TestDeleteBoardEndpoint(t *testing.T) {
 				if len(db.deleteBoardArgs) != 2 || db.deleteBoardArgs[0] != boardID || db.deleteBoardArgs[1] != "owner7" {
 					t.Fatalf("delete args = %#v, want requested board and authenticated owner", db.deleteBoardArgs)
 				}
+				if !strings.Contains(db.deleteBoardQuery, "role = 'admin'") {
+					t.Fatalf("delete query = %q, want admin role check", db.deleteBoardQuery)
+				}
 			}
 		})
 	}
+}
+
+func TestBoardMemberEndpoints(t *testing.T) {
+	const ownerID = "owner7"
+	boardID := newUUID(8).String()
+	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
+	board := dbgen.Board{ID: newUUID(8), Title: "Shared Board", OwnerID: ownerID}
+
+	t.Run("gets board members with owner and admin access", func(t *testing.T) {
+		for _, test := range []struct {
+			name          string
+			sessionUserID string
+			role          string
+			wantStatus    int
+			wantMembers   []string
+		}{
+			{name: "owner", sessionUserID: ownerID, role: "user", wantStatus: http.StatusOK, wantMembers: []string{"member7"}},
+			{name: "admin", sessionUserID: "admin1", role: "admin", wantStatus: http.StatusOK, wantMembers: []string{"member7"}},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				db := &fakeDB{
+					session:      dbgen.Session{Token: "token", UserID: test.sessionUserID},
+					user:         dbgen.User{ID: test.sessionUserID, Role: test.role},
+					board:        board,
+					boardMembers: []string{ownerID, "member7"},
+				}
+				response := send(newHandler(db, nil, false), http.MethodGet,
+					"/api/boards/"+boardID+"/members", "", cookie)
+				if response.Code != test.wantStatus {
+					t.Fatalf("status = %d, want %d: %s", response.Code, test.wantStatus, response.Body.String())
+				}
+				var result struct {
+					UserIDs []string `json:"user_ids"`
+				}
+				if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+					t.Fatalf("decode board members: %v", err)
+				}
+				if strings.Join(result.UserIDs, ",") != strings.Join(test.wantMembers, ",") {
+					t.Fatalf("user_ids = %#v, want %#v", result.UserIDs, test.wantMembers)
+				}
+			})
+		}
+	})
+
+	t.Run("rejects unauthorized or unavailable board member reads", func(t *testing.T) {
+		for _, test := range []struct {
+			name          string
+			boardID       string
+			sessionUserID string
+			role          string
+			sessionErr    error
+			boardErr      error
+			userErr       error
+			membersErr    error
+			withCookie    bool
+			wantStatus    int
+		}{
+			{name: "authentication required", boardID: boardID, wantStatus: http.StatusUnauthorized},
+			{name: "invalid board ID", boardID: "invalid", sessionUserID: ownerID, withCookie: true, wantStatus: http.StatusBadRequest},
+			{name: "session lookup failure", boardID: boardID, sessionUserID: ownerID, sessionErr: errors.New("session failed"), withCookie: true, wantStatus: http.StatusInternalServerError},
+			{name: "board missing", boardID: boardID, sessionUserID: ownerID, boardErr: pgx.ErrNoRows, withCookie: true, wantStatus: http.StatusNotFound},
+			{name: "board lookup failure", boardID: boardID, sessionUserID: ownerID, boardErr: errors.New("board query failed"), withCookie: true, wantStatus: http.StatusInternalServerError},
+			{name: "non-owner is hidden", boardID: boardID, sessionUserID: "member7", role: "user", withCookie: true, wantStatus: http.StatusNotFound},
+			{name: "admin validation failure", boardID: boardID, sessionUserID: "admin1", userErr: errors.New("user query failed"), withCookie: true, wantStatus: http.StatusInternalServerError},
+			{name: "member lookup failure", boardID: boardID, sessionUserID: ownerID, membersErr: errors.New("members query failed"), withCookie: true, wantStatus: http.StatusInternalServerError},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				db := &fakeDB{
+					session:         dbgen.Session{Token: "token", UserID: test.sessionUserID},
+					sessionErr:      test.sessionErr,
+					user:            dbgen.User{ID: test.sessionUserID, Role: test.role},
+					userErr:         test.userErr,
+					board:           board,
+					boardErr:        test.boardErr,
+					boardMembersErr: test.membersErr,
+				}
+				var requestCookie *http.Cookie
+				if test.withCookie {
+					requestCookie = cookie
+				}
+				response := send(newHandler(db, nil, false), http.MethodGet,
+					"/api/boards/"+test.boardID+"/members", "", requestCookie)
+				if response.Code != test.wantStatus {
+					t.Fatalf("status = %d, want %d: %s", response.Code, test.wantStatus, response.Body.String())
+				}
+			})
+		}
+	})
+
+	t.Run("updates and deduplicates board members", func(t *testing.T) {
+		db := &fakeDB{
+			session: dbgen.Session{Token: "token", UserID: ownerID},
+			user:    dbgen.User{ID: "member7", Role: "user"},
+			board:   board,
+		}
+		tx := &fakeTx{fakeDB: db}
+		response := send(newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false), http.MethodPut, "/api/boards/"+boardID+"/members",
+			`{"user_ids":["owner7","member7"," member8 ","member7"]}`, cookie)
+		if response.Code != http.StatusOK || !tx.committed {
+			t.Fatalf("status = %d, committed = %t: %s", response.Code, tx.committed, response.Body.String())
+		}
+		if len(db.boardMembersDeleteArgs) != 1 || db.boardMembersDeleteArgs[0] != board.ID {
+			t.Fatalf("deleted board members args = %#v", db.boardMembersDeleteArgs)
+		}
+		if len(db.boardMemberArgs) != 2 || db.boardMemberArgs[0][1] != "member7" ||
+			db.boardMemberArgs[1][1] != "member8" {
+			t.Fatalf("board member inserts = %#v", db.boardMemberArgs)
+		}
+		var result struct {
+			UserIDs []string `json:"user_ids"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+			t.Fatalf("decode updated board members: %v", err)
+		}
+		if strings.Join(result.UserIDs, ",") != "member7,member8" {
+			t.Fatalf("user_ids = %#v, want [member7 member8]", result.UserIDs)
+		}
+	})
+
+	t.Run("rejects invalid board member updates", func(t *testing.T) {
+		for _, test := range []struct {
+			name          string
+			body          string
+			sessionUserID string
+			role          string
+			userErr       error
+			deleteErr     error
+			insertErr     error
+			beginErr      error
+			commitErr     error
+			transaction   bool
+			wantStatus    int
+		}{
+			{name: "invalid JSON", body: `{`, wantStatus: http.StatusBadRequest},
+			{name: "transaction unavailable", body: `{"user_ids":[]}`, wantStatus: http.StatusInternalServerError},
+			{name: "transaction start failure", body: `{"user_ids":[]}`, transaction: true, beginErr: errors.New("begin failed"), wantStatus: http.StatusInternalServerError},
+			{name: "delete failure", body: `{"user_ids":[]}`, transaction: true, deleteErr: errors.New("delete failed"), wantStatus: http.StatusInternalServerError},
+			{name: "invalid member ID", body: `{"user_ids":["bad id"]}`, transaction: true, wantStatus: http.StatusBadRequest},
+			{name: "member does not exist", body: `{"user_ids":["missing"]}`, transaction: true, userErr: pgx.ErrNoRows, wantStatus: http.StatusBadRequest},
+			{name: "member lookup failure", body: `{"user_ids":["member7"]}`, transaction: true, userErr: errors.New("lookup failed"), wantStatus: http.StatusInternalServerError},
+			{name: "member insert failure", body: `{"user_ids":["member7"]}`, transaction: true, insertErr: errors.New("insert failed"), wantStatus: http.StatusInternalServerError},
+			{name: "commit failure", body: `{"user_ids":[]}`, transaction: true, commitErr: errors.New("commit failed"), wantStatus: http.StatusInternalServerError},
+			{name: "non-owner cannot update", body: `{"user_ids":[]}`, sessionUserID: "member7", role: "user", transaction: true, wantStatus: http.StatusNotFound},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				sessionUserID := test.sessionUserID
+				if sessionUserID == "" {
+					sessionUserID = ownerID
+				}
+				db := &fakeDB{
+					session:               dbgen.Session{Token: "token", UserID: sessionUserID},
+					user:                  dbgen.User{ID: sessionUserID, Role: test.role},
+					userErr:               test.userErr,
+					board:                 board,
+					boardMembersDeleteErr: test.deleteErr,
+					boardMemberErr:        test.insertErr,
+				}
+				var beginTx func(context.Context) (backend.SetupTransaction, error)
+				if test.transaction {
+					beginTx = func(context.Context) (backend.SetupTransaction, error) {
+						if test.beginErr != nil {
+							return nil, test.beginErr
+						}
+						return &fakeTx{fakeDB: db, commitErr: test.commitErr}, nil
+					}
+				}
+				response := send(newHandler(db, beginTx, false), http.MethodPut,
+					"/api/boards/"+boardID+"/members", test.body, cookie)
+				if response.Code != test.wantStatus {
+					t.Fatalf("status = %d, want %d: %s", response.Code, test.wantStatus, response.Body.String())
+				}
+			})
+		}
+	})
 }
 
 func TestGetTasksEndpoint(t *testing.T) {
@@ -1812,16 +2020,16 @@ func TestAdminUserEndpoints(t *testing.T) {
 		response := send(newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
 			return tx, nil
 		}, false), http.MethodPost, "/api/admin/users",
-			`{"username":" NewUser ","email":"new@example.com","password":"password123"}`, cookie)
+			`{"username":" NewUser ","full_name":" New User ","email":"new@example.com","password":"password123"}`, cookie)
 		if response.Code != http.StatusCreated || !tx.committed {
 			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusCreated, response.Body.String())
 		}
 		if len(db.createUserArgs) != 5 || db.createUserArgs[0] != "newuser" ||
-			db.createUserArgs[1] != "new@example.com" || db.createUserArgs[3] != "newuser" ||
+			db.createUserArgs[1] != "new@example.com" || db.createUserArgs[3] != "New User" ||
 			db.createUserArgs[4] != "user" {
 			t.Fatalf("create user args = %#v", db.createUserArgs)
 		}
-		if len(db.boardArgs) != 2 || db.boardArgs[0] != "newuser" || db.boardArgs[1] != "newuser" {
+		if len(db.boardArgs) != 2 || db.boardArgs[0] != "New User" || db.boardArgs[1] != "newuser" {
 			t.Fatalf("personal board args = %#v", db.boardArgs)
 		}
 		if err := bcrypt.CompareHashAndPassword([]byte(db.createUserArgs[2].(string)), []byte("password123")); err != nil {
@@ -1842,7 +2050,7 @@ func TestAdminUserEndpoints(t *testing.T) {
 		response := send(newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
 			return tx, nil
 		}, false), http.MethodPost, "/api/admin/users",
-			`{"username":"newuser","email":"new@example.com","password":"password123"}`, cookie)
+			`{"username":"newuser","full_name":"New User","email":"new@example.com","password":"password123"}`, cookie)
 		if response.Code != http.StatusInternalServerError || tx.committed || !tx.rolledBack {
 			t.Fatalf("status=%d committed=%t rolledBack=%t",
 				response.Code, tx.committed, tx.rolledBack)
@@ -1857,9 +2065,12 @@ func TestAdminUserEndpoints(t *testing.T) {
 			wantStatus int
 		}{
 			{name: "invalid username", body: `{"username":"bad name","email":"new@example.com","password":"password123"}`, wantStatus: http.StatusBadRequest},
+			{name: "missing full name", body: `{"username":"newuser","email":"new@example.com","password":"password123"}`, wantStatus: http.StatusBadRequest},
+			{name: "blank full name", body: `{"username":"newuser","full_name":"  ","email":"new@example.com","password":"password123"}`, wantStatus: http.StatusBadRequest},
+			{name: "full name too long", body: `{"username":"newuser","full_name":"` + strings.Repeat("a", 101) + `","email":"new@example.com","password":"password123"}`, wantStatus: http.StatusBadRequest},
 			{name: "invalid email", body: `{"username":"newuser","email":"not-email","password":"password123"}`, wantStatus: http.StatusBadRequest},
 			{name: "short password", body: `{"username":"newuser","email":"new@example.com","password":"short"}`, wantStatus: http.StatusBadRequest},
-			{name: "duplicate", body: `{"username":"newuser","email":"new@example.com","password":"password123"}`, createErr: &pgconn.PgError{Code: "23505"}, wantStatus: http.StatusConflict},
+			{name: "duplicate", body: `{"username":"newuser","full_name":"New User","email":"new@example.com","password":"password123"}`, createErr: &pgconn.PgError{Code: "23505"}, wantStatus: http.StatusConflict},
 		} {
 			t.Run(test.name, func(t *testing.T) {
 				db := &fakeDB{

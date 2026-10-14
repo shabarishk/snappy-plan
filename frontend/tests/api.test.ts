@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { checkHealth, createBoard } from '../src/api';
+import { checkHealth, createBoard, updateBoardMembers } from '../src/api';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -32,5 +32,21 @@ describe('API helpers', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }));
 
     await expect(createBoard('Home', ['user-1'])).rejects.toThrow();
+  });
+
+  it('updates board members and returns the saved user ids', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ user_ids: ['user-1'] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(updateBoardMembers('board/1', ['user-1'])).resolves.toEqual(['user-1']);
+    expect(fetchMock).toHaveBeenCalledWith('/api/boards/board%2F1/members', {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_ids: ['user-1'] }),
+    });
   });
 });

@@ -47,6 +47,8 @@ func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, 
 	mux.HandleFunc("POST /api/boards", api.handleCreateBoard)
 	mux.HandleFunc("GET /api/boards", api.handleGetBoards)
 	mux.HandleFunc("DELETE /api/boards/{boardID}", api.handleDeleteBoard)
+	mux.HandleFunc("GET /api/boards/{boardID}/members", api.handleGetBoardMembers)
+	mux.HandleFunc("PUT /api/boards/{boardID}/members", api.handleUpdateBoardMembers)
 	mux.HandleFunc("GET /api/tasks", api.handleGetTasks)
 	mux.HandleFunc("POST /api/tasks", api.handleCreateTask)
 	mux.HandleFunc("PATCH /api/tasks/{taskID}", api.handleMoveTask)
@@ -357,6 +359,124 @@ func (api *ApiConfig) handleDeleteBoard(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (api *ApiConfig) authorizeBoardManager(w http.ResponseWriter, r *http.Request) (dbgen.Board, bool) {
+	session, ok, err := api.authenticatedSession(r)
+	if err != nil {
+		http.Error(w, "Failed to validate session", http.StatusInternalServerError)
+		return dbgen.Board{}, false
+	}
+	if !ok {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return dbgen.Board{}, false
+	}
+	boardID := pgtype.UUID{}
+	if err := boardID.Scan(r.PathValue("boardID")); err != nil {
+		http.Error(w, "Board ID is invalid", http.StatusBadRequest)
+		return dbgen.Board{}, false
+	}
+	board, err := api.DB.GetBoardByID(r.Context(), boardID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.Error(w, "Board does not exist", http.StatusNotFound)
+		return dbgen.Board{}, false
+	}
+	if err != nil {
+		http.Error(w, "Failed to load board", http.StatusInternalServerError)
+		return dbgen.Board{}, false
+	}
+	if board.OwnerID != session.UserID {
+		user, err := api.DB.GetUserByID(r.Context(), session.UserID)
+		if err != nil {
+			http.Error(w, "Failed to validate administrator", http.StatusInternalServerError)
+			return dbgen.Board{}, false
+		}
+		if user.Role != "admin" {
+			http.Error(w, "Board does not exist", http.StatusNotFound)
+			return dbgen.Board{}, false
+		}
+	}
+	return board, true
+}
+
+func (api *ApiConfig) handleGetBoardMembers(w http.ResponseWriter, r *http.Request) {
+	board, ok := api.authorizeBoardManager(w, r)
+	if !ok {
+		return
+	}
+	ids, err := api.DB.GetBoardMemberIDs(r.Context(), board.ID)
+	if err != nil {
+		http.Error(w, "Failed to load board members", http.StatusInternalServerError)
+		return
+	}
+	userIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id != board.OwnerID {
+			userIDs = append(userIDs, id)
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string][]string{"user_ids": userIDs})
+}
+
+func (api *ApiConfig) handleUpdateBoardMembers(w http.ResponseWriter, r *http.Request) {
+	board, ok := api.authorizeBoardManager(w, r)
+	if !ok {
+		return
+	}
+	var params struct {
+		UserIDs []string `json:"user_ids"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&params); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if api.BeginTx == nil {
+		http.Error(w, "Board update is unavailable", http.StatusInternalServerError)
+		return
+	}
+	tx, err := api.BeginTx(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to start board update", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback(context.Background())
+	txQueries := dbgen.New(tx)
+	if err := txQueries.DeleteBoardMembersExceptOwner(r.Context(), board.ID); err != nil {
+		http.Error(w, "Failed to update board access", http.StatusInternalServerError)
+		return
+	}
+	seen := map[string]struct{}{board.OwnerID: {}}
+	userIDs := []string{}
+	for _, userID := range params.UserIDs {
+		userID = strings.TrimSpace(userID)
+		if !isAlphanumeric(userID) || len(userID) > 32 {
+			http.Error(w, "Board member ID is invalid", http.StatusBadRequest)
+			return
+		}
+		if _, exists := seen[userID]; exists {
+			continue
+		}
+		if _, err := txQueries.GetUserByID(r.Context(), userID); errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "Board member does not exist", http.StatusBadRequest)
+			return
+		} else if err != nil {
+			http.Error(w, "Failed to validate board member", http.StatusInternalServerError)
+			return
+		}
+		seen[userID] = struct{}{}
+		userIDs = append(userIDs, userID)
+		if err := txQueries.CreateBoardMember(r.Context(), dbgen.CreateBoardMemberParams{BoardID: board.ID, UserID: userID}); err != nil {
+			http.Error(w, "Failed to grant board access", http.StatusInternalServerError)
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		http.Error(w, "Failed to save board access", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string][]string{"user_ids": userIDs})
+}
+
 func (api *ApiConfig) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	session, ok, err := api.authenticatedSession(r)
 	if err != nil {
@@ -523,6 +643,7 @@ func (api *ApiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	var params struct {
 		Username string `json:"username"`
+		FullName string `json:"full_name"`
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
@@ -531,12 +652,14 @@ func (api *ApiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	params.Username = strings.ToLower(strings.TrimSpace(params.Username))
+	params.FullName = strings.TrimSpace(params.FullName)
 	params.Email = strings.TrimSpace(params.Email)
 	address, err := mail.ParseAddress(params.Email)
 	if !isAlphanumeric(params.Username) || len(params.Username) > 32 ||
+		params.FullName == "" || utf8.RuneCountInString(params.FullName) > 100 ||
 		utf8.RuneCountInString(params.Email) > 255 || err != nil || address.Address != params.Email ||
 		len(params.Password) < 8 || len(params.Password) > 72 {
-		http.Error(w, "Provide an alphanumeric username of at most 32 characters, a valid email, and a password of 8 to 72 bytes", http.StatusBadRequest)
+		http.Error(w, "Provide an alphanumeric username of at most 32 characters, a full name of at most 100 characters, a valid email, and a password of 8 to 72 bytes", http.StatusBadRequest)
 		return
 	}
 
@@ -560,7 +683,7 @@ func (api *ApiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		ID:           params.Username,
 		Email:        params.Email,
 		PasswordHash: string(passwordHash),
-		FullName:     params.Username,
+		FullName:     params.FullName,
 		Role:         "user",
 	})
 	var databaseError *pgconn.PgError

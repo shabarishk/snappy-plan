@@ -95,6 +95,23 @@ export const deleteBoard = async (boardId: string): Promise<void> => {
   if (!res.ok) throw new Error(await res.text());
 };
 
+export const getBoardMembers = async (boardId: string): Promise<string[]> => {
+  const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}/members`, { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()).user_ids;
+};
+
+export const updateBoardMembers = async (boardId: string, userIds: string[]): Promise<string[]> => {
+  const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}/members`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_ids: userIds }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()).user_ids;
+};
+
 export const getTaskAssignees = async (): Promise<TaskAssignee[]> => {
   const res = await fetch('/api/users', { credentials: 'same-origin' });
   if (!res.ok) throw new Error('Failed to load users');
@@ -129,6 +146,7 @@ export const getAdminBoards = async (): Promise<AdminBoard[]> => {
 
 export const createUser = async (user: {
   username: string;
+  full_name: string;
   email: string;
   password: string;
 }): Promise<AdminUser> => {
