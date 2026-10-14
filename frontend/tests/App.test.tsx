@@ -22,7 +22,7 @@ const boardList = [
 ];
 
 const mockBoardReads = () => vi.fn().mockImplementation(async (url: string) => {
-  if (url === '/api/tasks') return { ok: true, json: async () => [] };
+  if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
   if (url === '/api/boards') return { ok: true, json: async () => boardList };
   if (url === '/api/users') return {
     ok: true,
@@ -107,6 +107,7 @@ vi.mock('@dnd-kit/utilities', () => ({
 afterEach(() => {
   cleanup();
   window.history.replaceState({}, '', '/');
+  window.localStorage.removeItem('snappy-plan-selected-board');
   vi.unstubAllGlobals();
 });
 
@@ -137,7 +138,7 @@ describe('App board', () => {
     vi.stubGlobal('fetch', mockBoardReads());
     render(<App />);
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Snappy Plan' })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Current board: Board Owner' })).toBeTruthy());
     expect(screen.getByRole('heading', { name: 'To Do' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'In Progress' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Complete' })).toBeTruthy();
@@ -160,6 +161,45 @@ describe('App board', () => {
     expect(screen.getAllByText('0 tasks')).toHaveLength(3);
   });
 
+  it('switches boards and creates a shared board', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/boards' && options?.method === 'POST') {
+        return { ok: true, json: async () => ({ id: 'board-3', title: 'New Shared Board', owner_id: 'boardowner' }) };
+      }
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
+      if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
+      if (url === '/api/users') return {
+        ok: true,
+        json: async () => [{ id: 'user-2', full_name: 'Teammate' }],
+      };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Current board: Board Owner' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Project Board' }));
+    expect(await screen.findByRole('button', { name: 'Current board: Project Board' })).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith('/api/tasks?board_id=board-2', { credentials: 'same-origin' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Current board: Project Board' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: '+ Create new board' }));
+    const dialog = screen.getByRole('dialog', { name: 'Create a new board' });
+    fireEvent.change(screen.getByLabelText('Board name'), { target: { value: 'New Shared Board' } });
+    fireEvent.click(screen.getByLabelText('Teammate (user-2)'));
+    fireEvent.submit(dialog.querySelector('form')!);
+
+    expect(await screen.findByRole('button', { name: 'Current board: New Shared Board' })).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith('/api/boards', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ title: 'New Shared Board', user_ids: ['user-2'] }),
+    }));
+  });
+
   it('provides Home and a user menu with an editable profile', async () => {
     const fetchMock = mockBoardReads();
     fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
@@ -171,7 +211,7 @@ describe('App board', () => {
         const body = JSON.parse(options.body as string) as { full_name: string; email: string };
         return { ok: true, json: async () => ({ username: 'boardowner', ...body }) };
       }
-      if (url === '/api/tasks') return { ok: true, json: async () => [] };
+      if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
       if (url === '/api/users') return { ok: true, json: async () => [] };
       if (url === '/api/profile') return {
         ok: true,
@@ -182,7 +222,7 @@ describe('App board', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<App />);
 
-    await screen.findByRole('heading', { name: 'Snappy Plan' });
+    await screen.findByRole('button', { name: 'Current board: Board Owner' });
     const userMenuButton = await screen.findByRole('button', { name: 'User menu for boardowner' });
     expect(userMenuButton.textContent).toBe('B');
     fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
@@ -257,7 +297,7 @@ describe('App board', () => {
         return { ok: true, json: async () => ({ authenticated: authChecks === 1 }) };
       }
       if (url === '/api/setup/status') return { ok: true, json: async () => ({ setup_required: false }) };
-      if (url === '/api/tasks' || url === '/api/users') return { ok: true, json: async () => [] };
+      if (url.startsWith('/api/tasks?board_id=') || url === '/api/users') return { ok: true, json: async () => [] };
       if (url === '/api/boards') return { ok: true, json: async () => boardList };
       if (url === '/api/profile') return {
         ok: true,
@@ -288,7 +328,7 @@ describe('App board', () => {
 
   it('shows the admin tile to admins and supports creating and promoting users', async () => {
     const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
-      if (url === '/api/tasks') return { ok: true, json: async () => [] };
+      if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
       if (url === '/api/boards') return { ok: true, json: async () => boardList };
       if (url === '/api/admin/boards') return {
         ok: true,
@@ -447,7 +487,7 @@ describe('App board', () => {
           state: 'InProgress',
         }) };
       }
-      if (url === '/api/tasks') return {
+      if (url.startsWith('/api/tasks?board_id=')) return {
         ok: true,
         json: async () => [taskResponse({
           id: 'task-1',
@@ -495,7 +535,7 @@ describe('App board', () => {
           }),
         };
       }
-      if (url === '/api/tasks') {
+      if (url.startsWith('/api/tasks?board_id=')) {
         return {
           ok: true,
           json: async () => [taskResponse({
@@ -576,7 +616,17 @@ describe('App board', () => {
           complete_by: '2026-10-20T09:30:00.000Z',
         }) };
       }
-      if (url === '/api/tasks') return { ok: true, json: async () => [] };
+      if (url.startsWith('/api/tasks?board_id=')) return {
+        ok: true,
+        json: async () => url.endsWith('board-2') ? [taskResponse({
+          title: 'Book a campsite',
+          description: 'Check the lake sites',
+          state: 'ToDo',
+          priority: 'High',
+          assigned_to_id: 'user-1',
+          complete_by: '2026-10-20T09:30:00.000Z',
+        })] : [],
+      };
       if (url === '/api/users') return {
         ok: true,
         json: async () => [{ id: 'user-1', full_name: 'Board Owner' }],
@@ -590,7 +640,7 @@ describe('App board', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<App />);
 
-    await screen.findByRole('heading', { name: 'Snappy Plan' });
+    await screen.findByRole('button', { name: 'Current board: Board Owner' });
     await waitFor(() => expect((screen.getByRole('button', { name: 'Create task' }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
     const dialog = screen.getByRole('dialog', { name: 'Create task' });
@@ -632,7 +682,7 @@ describe('App board', () => {
         const request = JSON.parse(options.body as string) as { board_id: string; title: string; state: string; priority: string };
         return { ok: true, json: async () => taskResponse(request) };
       }
-      if (url === '/api/tasks') return { ok: true, json: async () => [] };
+      if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
       if (url === '/api/users') return { ok: true, json: async () => [] };
       if (url === '/api/profile') return {
         ok: true,
@@ -643,7 +693,7 @@ describe('App board', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<App />);
 
-    await screen.findByRole('heading', { name: 'Snappy Plan' });
+    await screen.findByRole('button', { name: 'Current board: Board Owner' });
     await waitFor(() => expect((screen.getByRole('button', { name: 'Create task' }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Review the garden plan' } });

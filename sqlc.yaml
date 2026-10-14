@@ -8,6 +8,7 @@ sql:
       - "migrations/000004_add_task_state.up.sql"
       - "migrations/000005_replace_task_position_with_priority.up.sql"
       - "migrations/000006_use_username_as_user_id.up.sql"
+      - "migrations/000007_create_board_members.up.sql"
     queries: "queries/"
     gen:
       go:

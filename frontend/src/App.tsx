@@ -6,7 +6,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { AuthWrapper } from './Auth';
 import { sortTasksByPriority, type TaskPriority } from './taskPriority';
-import { createTask as persistTask, createUser, getAdminBoards, getAdminUsers, getBoards, getProfile, getTaskAssignees, getTasks, logout, moveTask as persistMoveTask, promoteUserToAdmin, updatePassword, updateProfile, updateTask as persistUpdateTask, type AdminBoard, type AdminUser, type ApiTask, type Board, type TaskAssignee, type UserProfile } from './api';
+import { createBoard as persistCreateBoard, createTask as persistTask, createUser, getAdminBoards, getAdminUsers, getBoards, getProfile, getTaskAssignees, getTasks, logout, moveTask as persistMoveTask, promoteUserToAdmin, updatePassword, updateProfile, updateTask as persistUpdateTask, type AdminBoard, type AdminUser, type ApiTask, type Board, type TaskAssignee, type UserProfile } from './api';
 
 // --- Types ---
 type TaskState = 'Backlog' | 'ToDo' | 'InProgress' | 'Complete';
@@ -76,18 +76,20 @@ function toBoardTask(task: ApiTask): Task {
 
 function CreateTaskOverlay({
   boards,
+  selectedBoardId,
   assignees,
   onClose,
   onCreated,
 }: {
   boards: Board[];
+  selectedBoardId: string;
   assignees: TaskAssignee[];
   onClose: () => void;
-  onCreated: (task: Task) => void;
+  onCreated: (task: Task, boardId: string) => void;
 }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [boardId, setBoardId] = useState(boards[0]?.id ?? '');
+  const [boardId, setBoardId] = useState(selectedBoardId);
   const [assignedToId, setAssignedToId] = useState('');
   const [state, setState] = useState<'Backlog' | 'ToDo'>('Backlog');
   const [priority, setPriority] = useState<TaskPriority>('Medium');
@@ -109,7 +111,7 @@ function CreateTaskOverlay({
         priority,
         complete_by: completeBy ? new Date(completeBy).toISOString() : null,
       });
-      onCreated(toBoardTask(task));
+      onCreated(toBoardTask(task), boardId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create task');
     } finally {
@@ -178,6 +180,73 @@ function CreateTaskOverlay({
             <button type="button" onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100">Cancel</button>
             <button type="submit" disabled={saving || boards.length === 0} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
               {saving ? 'Creating…' : 'Confirm Task'}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function CreateBoardOverlay({
+  users,
+  onClose,
+  onCreated,
+}: {
+  users: TaskAssignee[];
+  onClose: () => void;
+  onCreated: (board: Board) => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [userIds, setUserIds] = useState<string[]>([]);
+  const [error, setError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError('');
+    setIsSaving(true);
+    try {
+      onCreated(await persistCreateBoard(title, userIds));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create board');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4">
+      <section role="dialog" aria-modal="true" aria-labelledby="create-board-title" className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+        <div className="mb-5 flex items-center justify-between">
+          <h2 id="create-board-title" className="text-xl font-bold text-gray-800">Create a new board</h2>
+          <button type="button" aria-label="Close create board form" onClick={onClose} className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100">×</button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label htmlFor="new-board-title" className="mb-1 block text-sm font-medium text-gray-700">Board name</label>
+            <input id="new-board-title" required maxLength={100} value={title} onChange={(event) => setTitle(event.target.value)} className="w-full rounded-lg border border-gray-300 p-2" />
+          </div>
+          <fieldset className="space-y-2">
+            <legend className="mb-1 text-sm font-medium text-gray-700">Users who can access this board</legend>
+            {users.length === 0 ? <p className="text-sm text-gray-500">No other users are available.</p> : users.map((user) => (
+              <label key={user.id} className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={userIds.includes(user.id)}
+                  onChange={(event) => setUserIds((current) => event.target.checked
+                    ? [...current, user.id]
+                    : current.filter((id) => id !== user.id))}
+                />
+                {user.full_name} ({user.id})
+              </label>
+            ))}
+          </fieldset>
+          {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+          <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
+            <button type="button" onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100">Cancel</button>
+            <button type="submit" disabled={isSaving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+              {isSaving ? 'Creating…' : 'Create board'}
             </button>
           </div>
         </form>
@@ -805,11 +874,14 @@ export function AuthenticatedBoard({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
   const [boards, setBoards] = useState<Board[]>([]);
+  const [selectedBoardId, setSelectedBoardId] = useState('');
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [logoutError, setLogoutError] = useState('');
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
+  const [isCreateBoardOpen, setIsCreateBoardOpen] = useState(false);
+  const [isBoardMenuOpen, setIsBoardMenuOpen] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [moveError, setMoveError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -835,13 +907,19 @@ export function AuthenticatedBoard({
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([getTasks(), getTaskAssignees(), getProfile(), getBoards()])
-      .then(([savedTasks, availableAssignees, currentProfile, availableBoards]) => {
+    Promise.all([getTaskAssignees(), getProfile(), getBoards()])
+      .then(([availableAssignees, currentProfile, availableBoards]) => {
         if (cancelled) return;
-        setTasks(savedTasks.map(toBoardTask));
         setAssignees(availableAssignees);
         setProfile(currentProfile);
         setBoards(availableBoards);
+        const savedBoardId = window.localStorage.getItem('snappy-plan-selected-board');
+        const nextBoard = availableBoards.find((board) => board.id === savedBoardId) ?? availableBoards[0];
+        if (nextBoard) setSelectedBoardId(nextBoard.id);
+        else {
+          setTasks([]);
+          setIsLoading(false);
+        }
       })
       .catch((err: unknown) => {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : 'Failed to load board data');
@@ -851,6 +929,22 @@ export function AuthenticatedBoard({
       });
     return () => { cancelled = true; };
   }, [setTasks]);
+
+  useEffect(() => {
+    if (!selectedBoardId) return;
+    let cancelled = false;
+    getTasks(selectedBoardId)
+      .then((savedTasks) => {
+        if (!cancelled) setTasks(savedTasks.map(toBoardTask));
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : 'Failed to load board tasks');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [selectedBoardId, setTasks]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -918,6 +1012,7 @@ export function AuthenticatedBoard({
   };
 
   const selectedTask = tasks.find((task) => task.id === selectedTaskId);
+  const selectedBoard = boards.find((board) => board.id === selectedBoardId);
   const profileInitial = profile?.full_name.trim().charAt(0).toUpperCase()
     || profile?.username.charAt(0).toUpperCase()
     || '?';
@@ -1007,9 +1102,48 @@ export function AuthenticatedBoard({
       <div className="flex min-w-0 flex-1 flex-col">
       <header className="bg-white p-4 shadow-sm z-10 flex justify-between items-center shrink-0">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-extrabold text-blue-600 tracking-tight">
-            {currentPage === 'admin' ? 'Admin' : currentPage === 'settings' ? 'Settings' : currentPage === 'profile' ? 'Profile' : 'Snappy Plan'}
-          </h1>
+          {(currentPage === 'board' || currentPage === 'backlog') ? (
+            <div className="relative">
+              <button
+                type="button"
+                aria-label={`Current board: ${selectedBoard?.title ?? 'No boards'}`}
+                aria-haspopup="menu"
+                aria-expanded={isBoardMenuOpen}
+                disabled={isLoading && !selectedBoard}
+                onClick={() => setIsBoardMenuOpen((open) => !open)}
+                className="flex items-center gap-2 rounded-lg px-2 py-1 text-xl font-extrabold tracking-tight text-blue-600 hover:bg-blue-50 disabled:opacity-50"
+              >
+                {selectedBoard?.title ?? (isLoading ? 'Loading boards…' : 'No boards')}
+                <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4"><path fillRule="evenodd" d="M5.22 7.22a.75.75 0 0 1 1.06 0L10 10.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 8.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" /></svg>
+              </button>
+              {isBoardMenuOpen && (
+                <div role="menu" aria-label="Switch board" className="absolute left-0 top-full z-30 mt-2 min-w-56 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
+                  {boards.map((board) => (
+                    <button key={board.id} type="button" role="menuitem" onClick={() => {
+                      setSelectedBoardId(board.id);
+                      window.localStorage.setItem('snappy-plan-selected-board', board.id);
+                      setTasks([]);
+                      setIsLoading(true);
+                      setIsBoardMenuOpen(false);
+                    }} className={`block w-full rounded-md px-3 py-2 text-left text-sm ${board.id === selectedBoardId ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-100'}`}>
+                      {board.title}
+                    </button>
+                  ))}
+                  <div className="my-1 border-t border-gray-100" />
+                  <button type="button" role="menuitem" onClick={() => {
+                    setIsBoardMenuOpen(false);
+                    setIsCreateBoardOpen(true);
+                  }} className="block w-full rounded-md px-3 py-2 text-left text-sm font-medium text-blue-700 hover:bg-blue-50">
+                    + Create new board
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <h1 className="text-xl font-extrabold tracking-tight text-blue-600">
+              {currentPage === 'admin' ? 'Admin' : currentPage === 'settings' ? 'Settings' : 'Profile'}
+            </h1>
+          )}
           {(currentPage === 'board' || currentPage === 'backlog') && (
             <button type="button" disabled={isLoading || Boolean(loadError)} onClick={() => setIsCreateTaskOpen(true)} className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
               Create task
@@ -1038,12 +1172,30 @@ export function AuthenticatedBoard({
       {(currentPage === 'board' || currentPage === 'backlog') && isCreateTaskOpen && (
         <CreateTaskOverlay
           boards={boards}
+          selectedBoardId={selectedBoardId}
           assignees={assignees}
           onClose={() => setIsCreateTaskOpen(false)}
-          onCreated={(task) => {
+          onCreated={(task, boardId) => {
+            setSelectedBoardId(boardId);
+            window.localStorage.setItem('snappy-plan-selected-board', boardId);
+            setIsLoading(true);
             setTasks((previous) => [...previous, task]);
             navigateToPage(task.columnId === 'backlog' ? 'backlog' : 'board');
             setIsCreateTaskOpen(false);
+          }}
+        />
+      )}
+      {(currentPage === 'board' || currentPage === 'backlog') && isCreateBoardOpen && (
+        <CreateBoardOverlay
+          users={assignees}
+          onClose={() => setIsCreateBoardOpen(false)}
+          onCreated={(board) => {
+            setBoards((current) => [...current, board]);
+            setSelectedBoardId(board.id);
+            window.localStorage.setItem('snappy-plan-selected-board', board.id);
+            setIsLoading(true);
+            setTasks([]);
+            setIsCreateBoardOpen(false);
           }}
         />
       )}

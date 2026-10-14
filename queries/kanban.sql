@@ -28,15 +28,26 @@ INSERT INTO boards (title, owner_id)
 VALUES ($1, $2)
 RETURNING *;
 
+-- name: CreateBoardMember :exec
+INSERT INTO board_members (board_id, user_id)
+VALUES ($1, $2)
+ON CONFLICT (board_id, user_id) DO NOTHING;
+
 -- name: GetBoardByOwner :one
 SELECT * FROM boards
-WHERE owner_id = $1
+WHERE owner_id = $1 OR EXISTS (
+    SELECT 1 FROM board_members
+    WHERE board_id = boards.id AND user_id = $1
+)
 ORDER BY created_at ASC, id ASC
 LIMIT 1;
 
 -- name: GetBoardsByOwner :many
 SELECT * FROM boards
-WHERE owner_id = $1
+WHERE owner_id = $1 OR EXISTS (
+    SELECT 1 FROM board_members
+    WHERE board_id = boards.id AND user_id = $1
+)
 ORDER BY created_at ASC, id ASC;
 
 -- name: GetAllBoardsForAdmin :many
@@ -47,7 +58,12 @@ ORDER BY board.title ASC, owner.full_name ASC, board.id ASC;
 
 -- name: GetBoardByIDAndOwner :one
 SELECT * FROM boards
-WHERE id = sqlc.arg(board_id) AND owner_id = sqlc.arg(owner_id)
+WHERE id = sqlc.arg(board_id) AND (
+    owner_id = sqlc.arg(owner_id) OR EXISTS (
+        SELECT 1 FROM board_members
+        WHERE board_id = boards.id AND user_id = sqlc.arg(owner_id)
+    )
+)
 LIMIT 1;
 
 -- name: GetBoardByTaskAndOwner :one
@@ -56,7 +72,12 @@ FROM tasks AS task
 JOIN columns AS task_column ON task_column.id = task.column_id
 JOIN boards AS board ON board.id = task_column.board_id
 WHERE task.id = sqlc.arg(task_id)
-  AND board.owner_id = sqlc.arg(owner_id)
+  AND (
+      board.owner_id = sqlc.arg(owner_id) OR EXISTS (
+          SELECT 1 FROM board_members
+          WHERE board_id = board.id AND user_id = sqlc.arg(owner_id)
+      )
+  )
 LIMIT 1;
 
 -- name: GetBoardWithColumns :many
@@ -96,7 +117,21 @@ SELECT task.*
 FROM tasks AS task
 JOIN columns AS task_column ON task_column.id = task.column_id
 JOIN boards AS board ON board.id = task_column.board_id
-WHERE board.owner_id = $1
+WHERE board.owner_id = $1 OR EXISTS (
+    SELECT 1 FROM board_members
+    WHERE board_id = board.id AND user_id = $1
+)
+ORDER BY CASE task.priority
+    WHEN 'High' THEN 0
+    WHEN 'Medium' THEN 1
+    ELSE 2
+END, task.created_at ASC;
+
+-- name: GetTasksByBoard :many
+SELECT task.*
+FROM tasks AS task
+JOIN columns AS task_column ON task_column.id = task.column_id
+WHERE task_column.board_id = $1
 ORDER BY CASE task.priority
     WHEN 'High' THEN 0
     WHEN 'Medium' THEN 1
@@ -144,7 +179,12 @@ WHERE task.id = $2
       FROM columns AS task_column
       JOIN boards AS task_board ON task_board.id = task_column.board_id
       WHERE task_column.id = task.column_id
-        AND task_board.owner_id = $3
+        AND (
+            task_board.owner_id = $3 OR EXISTS (
+                SELECT 1 FROM board_members
+                WHERE board_id = task_board.id AND user_id = $3
+            )
+        )
   )
   AND EXISTS (
       SELECT 1
@@ -154,7 +194,12 @@ WHERE task.id = $2
           FROM columns AS destination
           WHERE destination.id = $1
       )
-        AND destination_board.owner_id = $3
+        AND (
+            destination_board.owner_id = $3 OR EXISTS (
+                SELECT 1 FROM board_members
+                WHERE board_id = destination_board.id AND user_id = $3
+            )
+        )
   )
 RETURNING task.*;
 
@@ -177,14 +222,24 @@ WHERE task.id = sqlc.arg(task_id)
       FROM columns AS task_column
       JOIN boards AS task_board ON task_board.id = task_column.board_id
       WHERE task_column.id = task.column_id
-        AND task_board.owner_id = sqlc.arg(owner_id)
+        AND (
+            task_board.owner_id = sqlc.arg(owner_id) OR EXISTS (
+                SELECT 1 FROM board_members
+                WHERE board_id = task_board.id AND user_id = sqlc.arg(owner_id)
+            )
+        )
   )
   AND EXISTS (
       SELECT 1
       FROM columns AS destination
       JOIN boards AS destination_board ON destination_board.id = destination.board_id
       WHERE destination.id = sqlc.arg(column_id)
-        AND destination_board.owner_id = sqlc.arg(owner_id)
+        AND (
+            destination_board.owner_id = sqlc.arg(owner_id) OR EXISTS (
+                SELECT 1 FROM board_members
+                WHERE board_id = destination_board.id AND user_id = sqlc.arg(owner_id)
+            )
+        )
   )
 RETURNING task.*;
 

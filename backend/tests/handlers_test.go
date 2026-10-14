@@ -59,6 +59,8 @@ type fakeDB struct {
 	sessionArgs        []any
 	createUserArgs     []any
 	createBoardErr     error
+	boardMemberArgs    [][]any
+	boardMemberErr     error
 	createSessionError error
 	createUserError    error
 	deleteSessionErr   error
@@ -86,6 +88,10 @@ func (writer *failingResponseWriter) Write([]byte) (int, error) {
 }
 
 func (db *fakeDB) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(query, "INSERT INTO board_members") {
+		db.boardMemberArgs = append(db.boardMemberArgs, args)
+		return pgconn.CommandTag{}, db.boardMemberErr
+	}
 	if strings.Contains(query, "DELETE FROM sessions") {
 		db.deleteSessionArgs = args
 		return pgconn.CommandTag{}, db.deleteSessionErr
@@ -149,6 +155,36 @@ func (db *fakeDB) Query(_ context.Context, query string, _ ...any) (pgx.Rows, er
 
 func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row {
 	switch {
+	case strings.Contains(query, "UPDATE tasks AS task") && strings.Contains(query, "state = CASE"):
+		db.moveTaskArgs = args
+		if db.moveTaskErr != nil {
+			return fakeRow{err: db.moveTaskErr}
+		}
+		db.task.ColumnID = args[0].(pgtype.UUID)
+		db.task.State = map[string]string{
+			"Backlog":     "Backlog",
+			"To Do":       "ToDo",
+			"In Progress": "InProgress",
+			"Complete":    "Complete",
+		}[db.column.Title]
+		if db.task.State == "Complete" {
+			db.task.CompletedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
+		} else {
+			db.task.CompletedAt = pgtype.Timestamptz{}
+		}
+		return fakeRow{values: taskValues(db.task)}
+	case strings.Contains(query, "UPDATE tasks AS task"):
+		db.updateTaskArgs = args
+		if db.updateTaskErr != nil {
+			return fakeRow{err: db.updateTaskErr}
+		}
+		db.task.ColumnID = args[0].(pgtype.UUID)
+		db.task.State = args[1].(string)
+		db.task.Title = args[2].(string)
+		db.task.Description = args[3].(pgtype.Text)
+		db.task.Priority = args[4].(string)
+		db.task.CompleteBy = args[5].(pgtype.Timestamptz)
+		return fakeRow{values: taskValues(db.task)}
 	case strings.Contains(query, "SET role ="):
 		db.updateUserRoleArgs = args
 		if db.updateUserRoleErr != nil {
@@ -226,37 +262,6 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 		db.task.Priority = args[4].(string)
 		db.task.AssignedToID = args[5].(pgtype.Text)
 		db.task.CompleteBy = args[6].(pgtype.Timestamptz)
-		return fakeRow{values: taskValues(db.task)}
-	case strings.Contains(query, "UPDATE tasks AS task"):
-		if strings.Contains(query, "state = CASE") {
-			db.moveTaskArgs = args
-			if db.moveTaskErr != nil {
-				return fakeRow{err: db.moveTaskErr}
-			}
-			db.task.ColumnID = args[0].(pgtype.UUID)
-			db.task.State = map[string]string{
-				"Backlog":     "Backlog",
-				"To Do":       "ToDo",
-				"In Progress": "InProgress",
-				"Complete":    "Complete",
-			}[db.column.Title]
-			if db.task.State == "Complete" {
-				db.task.CompletedAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
-			} else {
-				db.task.CompletedAt = pgtype.Timestamptz{}
-			}
-			return fakeRow{values: taskValues(db.task)}
-		}
-		db.updateTaskArgs = args
-		if db.updateTaskErr != nil {
-			return fakeRow{err: db.updateTaskErr}
-		}
-		db.task.ColumnID = args[0].(pgtype.UUID)
-		db.task.State = args[1].(string)
-		db.task.Title = args[2].(string)
-		db.task.Description = args[3].(pgtype.Text)
-		db.task.Priority = args[4].(string)
-		db.task.CompleteBy = args[5].(pgtype.Timestamptz)
 		return fakeRow{values: taskValues(db.task)}
 	case strings.Contains(query, "INSERT INTO users"):
 		db.createUserArgs = args
@@ -354,7 +359,13 @@ type fakeTx struct {
 	commitErr  error
 }
 
-func (tx *fakeTx) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+func (tx *fakeTx) Exec(ctx context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(query, "pg_advisory_xact_lock") {
+		return pgconn.CommandTag{}, tx.execErr
+	}
+	if strings.Contains(query, "INSERT INTO board_members") {
+		return tx.fakeDB.Exec(ctx, query, args...)
+	}
 	return pgconn.CommandTag{}, tx.execErr
 }
 
@@ -654,16 +665,42 @@ func TestCreateBoardEndpoint(t *testing.T) {
 		body       string
 		sessionErr error
 		boardErr   error
+		userErr    error
+		beginErr   error
+		commitErr  error
+		beginNil   bool
 		wantStatus int
 	}{
 		{name: "database session error", body: `{"title":"Board"}`, sessionErr: errors.New("database unavailable"), wantStatus: http.StatusInternalServerError},
 		{name: "invalid JSON", body: `{`, wantStatus: http.StatusBadRequest},
 		{name: "empty title", body: `{"title":" "}`, wantStatus: http.StatusBadRequest},
+		{name: "title exceeds maximum length", body: `{"title":"` + strings.Repeat("a", 101) + `"}`, wantStatus: http.StatusBadRequest},
+		{name: "missing transaction provider", body: `{"title":"Board"}`, beginNil: true, wantStatus: http.StatusInternalServerError},
+		{name: "transaction begin failure", body: `{"title":"Board"}`, beginErr: errors.New("begin failed"), wantStatus: http.StatusInternalServerError},
 		{name: "board insert failure", body: `{"title":"Board"}`, boardErr: errors.New("insert failed"), wantStatus: http.StatusInternalServerError},
+		{name: "invalid member", body: `{"title":"Board","user_ids":["bad-id"]}`, wantStatus: http.StatusBadRequest},
+		{name: "missing member", body: `{"title":"Board","user_ids":["member1"]}`, userErr: pgx.ErrNoRows, wantStatus: http.StatusBadRequest},
+		{name: "member lookup failure", body: `{"title":"Board","user_ids":["member1"]}`, userErr: errors.New("lookup failed"), wantStatus: http.StatusInternalServerError},
+		{name: "transaction commit failure", body: `{"title":"Board"}`, commitErr: errors.New("commit failed"), wantStatus: http.StatusInternalServerError},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			db := &fakeDB{session: dbgen.Session{Token: "token", UserID: "owner7"}, sessionErr: test.sessionErr, createBoardErr: test.boardErr}
-			response := send(newHandler(db, nil, false), http.MethodPost, "/api/boards", test.body,
+			db := &fakeDB{
+				session:        dbgen.Session{Token: "token", UserID: "owner7"},
+				sessionErr:     test.sessionErr,
+				createBoardErr: test.boardErr,
+				userErr:        test.userErr,
+			}
+			var begin func(context.Context) (backend.SetupTransaction, error)
+			if !test.beginNil {
+				tx := &fakeTx{fakeDB: db, commitErr: test.commitErr}
+				begin = func(context.Context) (backend.SetupTransaction, error) {
+					if test.beginErr != nil {
+						return nil, test.beginErr
+					}
+					return tx, nil
+				}
+			}
+			response := send(newHandler(db, begin, false), http.MethodPost, "/api/boards", test.body,
 				&http.Cookie{Name: "snappy_session", Value: "token"})
 			if response.Code != test.wantStatus {
 				t.Fatalf("status = %d, want %d", response.Code, test.wantStatus)
@@ -676,20 +713,50 @@ func TestCreateBoardEndpoint(t *testing.T) {
 		now := time.Now()
 		db := &fakeDB{
 			session: dbgen.Session{Token: "token", UserID: ownerID},
+			user:    dbgen.User{ID: ownerID, FullName: "Owner"},
 			board: dbgen.Board{
 				ID: newUUID(8), Title: "Family Board", OwnerID: ownerID,
 				CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
 				UpdatedAt: pgtype.Timestamptz{Time: now, Valid: true},
 			},
 		}
-		response := send(newHandler(db, nil, false), http.MethodPost, "/api/boards",
-			`{"title":" Family Board ","owner_id":"attacker-controlled"}`,
+		tx := &fakeTx{fakeDB: db}
+		response := send(newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false), http.MethodPost, "/api/boards",
+			`{"title":" Family Board ","user_ids":["member7","member7"],"owner_id":"attacker-controlled"}`,
 			&http.Cookie{Name: "snappy_session", Value: "token"})
-		if response.Code != http.StatusCreated {
+		if response.Code != http.StatusCreated || !tx.committed {
 			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusCreated, response.Body.String())
 		}
 		if db.boardArgs[0] != "Family Board" || db.boardArgs[1] != ownerID {
 			t.Fatalf("board args = %#v, want normalized title and session owner", db.boardArgs)
+		}
+		if len(db.boardMemberArgs) != 2 {
+			t.Fatalf("board member inserts = %#v, want owner and one deduplicated selected user", db.boardMemberArgs)
+		}
+		for _, args := range db.boardMemberArgs {
+			if args[0] != db.board.ID {
+				t.Fatalf("board member args = %#v, want created board ID", args)
+			}
+		}
+	})
+
+	t.Run("rolls back board creation if access cannot be granted", func(t *testing.T) {
+		db := &fakeDB{
+			session:        dbgen.Session{Token: "token", UserID: "owner7"},
+			user:           dbgen.User{ID: "member7", FullName: "Member"},
+			boardMemberErr: errors.New("membership insert failed"),
+		}
+		tx := &fakeTx{fakeDB: db}
+		response := send(newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false), http.MethodPost, "/api/boards",
+			`{"title":"Shared","user_ids":["member7"]}`,
+			&http.Cookie{Name: "snappy_session", Value: "token"})
+		if response.Code != http.StatusInternalServerError || tx.committed || !tx.rolledBack {
+			t.Fatalf("status=%d committed=%t rolledBack=%t",
+				response.Code, tx.committed, tx.rolledBack)
 		}
 	})
 }
@@ -720,6 +787,54 @@ func TestGetBoardsEndpoint(t *testing.T) {
 			t.Fatalf("boards = %#v", boards)
 		}
 	})
+}
+
+func TestGetTasksEndpoint(t *testing.T) {
+	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
+	t.Run("requires authentication", func(t *testing.T) {
+		response := send(newHandler(&fakeDB{}, nil, false), http.MethodGet, "/api/tasks?board_id="+newUUID(4).String(), "", nil)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
+		}
+	})
+
+	for _, test := range []struct {
+		name       string
+		boardID    string
+		boardErr   error
+		tasksErr   error
+		wantStatus int
+	}{
+		{name: "rejects an invalid board ID", boardID: "invalid", wantStatus: http.StatusBadRequest},
+		{name: "rejects an inaccessible board", boardID: newUUID(4).String(), boardErr: pgx.ErrNoRows, wantStatus: http.StatusNotFound},
+		{name: "reports a board access query error", boardID: newUUID(4).String(), boardErr: errors.New("lookup failed"), wantStatus: http.StatusInternalServerError},
+		{name: "reports a task query error", boardID: newUUID(4).String(), tasksErr: errors.New("task query failed"), wantStatus: http.StatusInternalServerError},
+		{name: "returns tasks for an accessible board", boardID: newUUID(4).String(), wantStatus: http.StatusOK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := &fakeDB{
+				session:  dbgen.Session{Token: "token", UserID: "owner7"},
+				board:    dbgen.Board{ID: newUUID(4), Title: "Shared", OwnerID: "owner1"},
+				boardErr: test.boardErr,
+				tasksErr: test.tasksErr,
+				tasks:    []dbgen.Task{{ID: newUUID(8), Title: "Board task"}},
+			}
+			response := send(newHandler(db, nil, false), http.MethodGet,
+				"/api/tasks?board_id="+test.boardID, "", cookie)
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", response.Code, test.wantStatus, response.Body.String())
+			}
+			if test.name == "returns tasks for an accessible board" {
+				var tasks []dbgen.Task
+				if err := json.Unmarshal(response.Body.Bytes(), &tasks); err != nil {
+					t.Fatalf("decode tasks: %v", err)
+				}
+				if len(tasks) != 1 || tasks[0].Title != "Board task" {
+					t.Fatalf("tasks = %#v", tasks)
+				}
+			}
+		})
+	}
 }
 
 func TestCreateTaskEndpoint(t *testing.T) {

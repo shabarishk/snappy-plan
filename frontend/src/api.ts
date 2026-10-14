@@ -63,18 +63,20 @@ export const checkHealth = async () => {
   return res.text();
 };
 
-export const createBoard = async (title: string, ownerId: string): Promise<Board> => {
+export const createBoard = async (title: string, userIds: string[]): Promise<Board> => {
   const res = await fetch('/api/boards', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, owner_id: ownerId })
+    credentials: 'same-origin',
+    body: JSON.stringify({ title, user_ids: userIds })
   });
-  if (!res.ok) throw new Error("Failed to create board");
+  if (!res.ok) throw new Error(await res.text());
   return res.json();
 };
 
-export const getTasks = async (): Promise<ApiTask[]> => {
-  const res = await fetch('/api/tasks', { credentials: 'same-origin' });
+export const getTasks = async (boardId?: string): Promise<ApiTask[]> => {
+  const path = boardId ? `/api/tasks?board_id=${encodeURIComponent(boardId)}` : '/api/tasks';
+  const res = await fetch(path, { credentials: 'same-origin' });
   if (!res.ok) throw new Error('Failed to load tasks');
   return res.json();
 };

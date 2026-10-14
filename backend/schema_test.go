@@ -20,7 +20,8 @@ type schemaTestTx struct {
 
 func (tx *schemaTestTx) Exec(_ context.Context, query string, _ ...any) (pgconn.CommandTag, error) {
 	tx.execCalls = append(tx.execCalls, query)
-	if (strings.Contains(query, "DO $$") || strings.Contains(query, "INSERT INTO boards")) && tx.execErr != nil {
+	if (strings.Contains(query, "DO $$") || strings.Contains(query, "INSERT INTO boards") ||
+		strings.Contains(query, "board_members")) && tx.execErr != nil {
 		return pgconn.CommandTag{}, tx.execErr
 	}
 	return pgconn.CommandTag{}, nil
@@ -149,9 +150,11 @@ func TestEnsurePersonalBoards(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EnsurePersonalBoards returned error: %v", err)
 		}
-		if len(tx.execCalls) != 2 || !strings.Contains(tx.execCalls[0], "pg_advisory_xact_lock") ||
+		if len(tx.execCalls) != 5 || !strings.Contains(tx.execCalls[0], "pg_advisory_xact_lock") ||
 			!strings.Contains(tx.execCalls[1], "INSERT INTO boards") ||
 			!strings.Contains(tx.execCalls[1], "WHERE NOT EXISTS") ||
+			!strings.Contains(tx.execCalls[2], "CREATE TABLE IF NOT EXISTS board_members") ||
+			!strings.Contains(tx.execCalls[4], "INSERT INTO board_members") ||
 			!tx.committed || tx.rolledBack {
 			t.Fatalf("personal board upgrade calls=%#v committed=%t rolledBack=%t",
 				tx.execCalls, tx.committed, tx.rolledBack)
@@ -165,6 +168,17 @@ func TestEnsurePersonalBoards(t *testing.T) {
 			return tx, nil
 		})
 		if !errors.Is(err, insertErr) || tx.committed || !tx.rolledBack {
+			t.Fatalf("error=%v committed=%t rolledBack=%t", err, tx.committed, tx.rolledBack)
+		}
+	})
+
+	t.Run("reports membership migration errors", func(t *testing.T) {
+		migrationErr := errors.New("membership migration failed")
+		tx := &schemaTestTx{execErr: migrationErr}
+		err := EnsurePersonalBoards(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if !errors.Is(err, migrationErr) || tx.committed || !tx.rolledBack {
 			t.Fatalf("error=%v committed=%t rolledBack=%t", err, tx.committed, tx.rolledBack)
 		}
 	})
