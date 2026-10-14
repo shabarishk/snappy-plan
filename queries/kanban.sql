@@ -185,3 +185,9 @@ SET email = $2,
     updated_at = NOW()
 WHERE id = $1
 RETURNING *;
+
+-- name: UpdateUserPassword :exec
+UPDATE users
+SET password_hash = $2,
+    updated_at = NOW()
+WHERE id = $1;

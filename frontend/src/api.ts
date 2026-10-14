@@ -92,6 +92,20 @@ export const updateProfile = async (profile: Pick<UserProfile, 'full_name' | 'em
   return res.json();
 };
 
+export const updatePassword = async (passwords: {
+  current_password: string;
+  new_password: string;
+  confirm_password: string;
+}): Promise<void> => {
+  const res = await fetch('/api/profile/password', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify(passwords),
+  });
+  if (!res.ok) throw new Error(await res.text());
+};
+
 export const createTask = async (task: CreateTaskRequest): Promise<ApiTask> => {
   const res = await fetch('/api/tasks', {
     method: 'POST',

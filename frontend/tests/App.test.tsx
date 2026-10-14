@@ -100,6 +100,7 @@ vi.mock('@dnd-kit/utilities', () => ({
 
 afterEach(() => {
   cleanup();
+  window.history.replaceState({}, '', '/');
   vi.unstubAllGlobals();
 });
 
@@ -156,6 +157,9 @@ describe('App board', () => {
   it('provides Home and a user menu with an editable profile', async () => {
     const fetchMock = mockBoardReads();
     fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/profile/password' && options?.method === 'PUT') {
+        return { ok: true, json: async () => ({ message: 'Password updated successfully' }) };
+      }
       if (url === '/api/profile' && options?.method === 'PUT') {
         const body = JSON.parse(options.body as string) as { full_name: string; email: string };
         return { ok: true, json: async () => ({ username: 'boardowner', ...body }) };
@@ -182,11 +186,40 @@ describe('App board', () => {
     fireEvent.click(userMenuButton);
     expect(screen.getByRole('menuitem', { name: 'Settings' })).toBeTruthy();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));
-    expect(screen.getByRole('menu')).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Settings', level: 1 })).toBeTruthy();
+    expect(window.location.pathname).toBe('/settings');
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(screen.getByRole('navigation', { name: 'Settings sections' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Profile settings' }).getAttribute('aria-current')).toBe('page');
+    expect(screen.getByRole('heading', { name: 'Change password' })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Current password'), { target: { value: 'old-password' } });
+    fireEvent.change(screen.getByLabelText('New password'), { target: { value: 'new-password' } });
+    fireEvent.change(screen.getByLabelText('Re-enter new password'), { target: { value: 'different-password' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save password' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('New password and confirmation do not match.');
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/profile/password', expect.anything());
+
+    fireEvent.change(screen.getByLabelText('Re-enter new password'), { target: { value: 'new-password' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save password' }));
+    expect((await screen.findByRole('status')).textContent).toContain('Password updated successfully.');
+    expect((screen.getByLabelText('Current password') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('New password') as HTMLInputElement).value).toBe('');
+    expect(fetchMock).toHaveBeenCalledWith('/api/profile/password', expect.objectContaining({
+      method: 'PUT',
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        current_password: 'old-password',
+        new_password: 'new-password',
+        confirm_password: 'new-password',
+      }),
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'User menu for boardowner' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Profile' }));
 
-    const profileHeading = await screen.findByRole('heading', { name: 'Profile' });
-    expect(profileHeading.closest('section')?.textContent).toContain('boardowner');
+    expect(await screen.findByRole('heading', { name: 'Profile', level: 1 })).toBeTruthy();
+    expect(window.location.pathname).toBe('/profile');
+    expect(screen.getByRole('region', { name: 'Profile details' }).textContent).toContain('boardowner');
     expect(screen.queryByRole('dialog')).toBeNull();
     expect((screen.getByLabelText('Full name') as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByLabelText('Email address') as HTMLInputElement).value).toBe('owner@example.com');
@@ -196,7 +229,7 @@ describe('App board', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => expect((screen.getByLabelText('Full name') as HTMLInputElement).disabled).toBe(true));
-    expect(screen.getByRole('heading', { name: 'Profile' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Profile', level: 1 })).toBeTruthy();
     expect((screen.getByLabelText('Full name') as HTMLInputElement).value).toBe('Updated Owner');
     expect(fetchMock).toHaveBeenCalledWith('/api/profile', expect.objectContaining({
       method: 'PUT',
@@ -206,6 +239,24 @@ describe('App board', () => {
     expect(screen.getByRole('button', { name: 'User menu for boardowner' }).textContent).toBe('U');
     fireEvent.click(screen.getByRole('button', { name: 'Home' }));
     expect(screen.getByRole('heading', { name: 'To Do' })).toBeTruthy();
+    expect(window.location.pathname).toBe('/');
+  });
+
+  it('opens the page selected by the current URL and follows browser history', async () => {
+    window.history.replaceState({}, '', '/settings');
+    vi.stubGlobal('fetch', mockBoardReads());
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Settings', level: 1 })).toBeTruthy();
+    expect(screen.getByLabelText('Current password')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Home' }));
+    expect(window.location.pathname).toBe('/');
+    expect(screen.getByRole('heading', { name: 'To Do' })).toBeTruthy();
+
+    window.history.back();
+    await waitFor(() => expect(window.location.pathname).toBe('/settings'));
+    expect(await screen.findByRole('heading', { name: 'Settings', level: 1 })).toBeTruthy();
   });
 
   it('moves backlog tasks between lanes and displays their priority and completion time', () => {
