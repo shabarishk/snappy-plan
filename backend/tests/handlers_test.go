@@ -61,6 +61,9 @@ type fakeDB struct {
 	createBoardErr     error
 	boardMemberArgs    [][]any
 	boardMemberErr     error
+	deleteBoardArgs    []any
+	deleteBoardRows    int64
+	deleteBoardErr     error
 	createSessionError error
 	createUserError    error
 	deleteSessionErr   error
@@ -88,6 +91,16 @@ func (writer *failingResponseWriter) Write([]byte) (int, error) {
 }
 
 func (db *fakeDB) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(query, "DELETE FROM boards") {
+		db.deleteBoardArgs = args
+		if db.deleteBoardErr != nil {
+			return pgconn.CommandTag{}, db.deleteBoardErr
+		}
+		if db.deleteBoardRows > 0 {
+			return pgconn.NewCommandTag("DELETE 1"), nil
+		}
+		return pgconn.NewCommandTag("DELETE 0"), nil
+	}
 	if strings.Contains(query, "INSERT INTO board_members") {
 		db.boardMemberArgs = append(db.boardMemberArgs, args)
 		return pgconn.CommandTag{}, db.boardMemberErr
@@ -787,6 +800,55 @@ func TestGetBoardsEndpoint(t *testing.T) {
 			t.Fatalf("boards = %#v", boards)
 		}
 	})
+}
+
+func TestDeleteBoardEndpoint(t *testing.T) {
+	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
+	t.Run("requires authentication", func(t *testing.T) {
+		response := send(newHandler(&fakeDB{}, nil, false), http.MethodDelete,
+			"/api/boards/"+newUUID(8).String(), "", nil)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
+		}
+	})
+
+	for _, test := range []struct {
+		name       string
+		boardID    string
+		rows       int64
+		deleteErr  error
+		sessionErr error
+		wantStatus int
+	}{
+		{name: "invalid board ID", boardID: "invalid", wantStatus: http.StatusBadRequest},
+		{name: "board does not belong to user", boardID: newUUID(8).String(), wantStatus: http.StatusNotFound},
+		{name: "session lookup error", boardID: newUUID(8).String(), sessionErr: errors.New("session lookup failed"), wantStatus: http.StatusInternalServerError},
+		{name: "database error", boardID: newUUID(8).String(), deleteErr: errors.New("delete failed"), wantStatus: http.StatusInternalServerError},
+		{name: "deletes owned board", boardID: newUUID(8).String(), rows: 1, wantStatus: http.StatusNoContent},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := &fakeDB{
+				session:         dbgen.Session{Token: "token", UserID: "owner7"},
+				sessionErr:      test.sessionErr,
+				deleteBoardRows: test.rows,
+				deleteBoardErr:  test.deleteErr,
+			}
+			response := send(newHandler(db, nil, false), http.MethodDelete,
+				"/api/boards/"+test.boardID, "", cookie)
+			if response.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d: %s", response.Code, test.wantStatus, response.Body.String())
+			}
+			if test.boardID != "invalid" && test.sessionErr == nil && test.deleteErr == nil {
+				boardID := pgtype.UUID{}
+				if err := boardID.Scan(test.boardID); err != nil {
+					t.Fatalf("parse test board ID: %v", err)
+				}
+				if len(db.deleteBoardArgs) != 2 || db.deleteBoardArgs[0] != boardID || db.deleteBoardArgs[1] != "owner7" {
+					t.Fatalf("delete args = %#v, want requested board and authenticated owner", db.deleteBoardArgs)
+				}
+			}
+		})
+	}
 }
 
 func TestGetTasksEndpoint(t *testing.T) {

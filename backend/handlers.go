@@ -46,6 +46,7 @@ func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, 
 	mux.HandleFunc("GET /api/auth/status", api.handleAuthStatus)
 	mux.HandleFunc("POST /api/boards", api.handleCreateBoard)
 	mux.HandleFunc("GET /api/boards", api.handleGetBoards)
+	mux.HandleFunc("DELETE /api/boards/{boardID}", api.handleDeleteBoard)
 	mux.HandleFunc("GET /api/tasks", api.handleGetTasks)
 	mux.HandleFunc("POST /api/tasks", api.handleCreateTask)
 	mux.HandleFunc("PATCH /api/tasks/{taskID}", api.handleMoveTask)
@@ -322,6 +323,38 @@ func (api *ApiConfig) handleGetBoards(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(boards); err != nil {
 		http.Error(w, "Failed to encode boards", http.StatusInternalServerError)
 	}
+}
+
+func (api *ApiConfig) handleDeleteBoard(w http.ResponseWriter, r *http.Request) {
+	session, ok, err := api.authenticatedSession(r)
+	if err != nil {
+		http.Error(w, "Failed to validate session", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	boardID := pgtype.UUID{}
+	if err := boardID.Scan(r.PathValue("boardID")); err != nil {
+		http.Error(w, "Board ID is invalid", http.StatusBadRequest)
+		return
+	}
+
+	deleted, err := api.DB.DeleteBoard(r.Context(), dbgen.DeleteBoardParams{
+		ID:      boardID,
+		OwnerID: session.UserID,
+	})
+	if err != nil {
+		http.Error(w, "Failed to delete board", http.StatusInternalServerError)
+		return
+	}
+	if deleted == 0 {
+		http.Error(w, "Board does not exist", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (api *ApiConfig) handleGetTasks(w http.ResponseWriter, r *http.Request) {
