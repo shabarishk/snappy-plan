@@ -28,6 +28,7 @@ type fakeDB struct {
 	session            dbgen.Session
 	sessionErr         error
 	board              dbgen.Board
+	boards             []dbgen.Board
 	boardErr           error
 	column             dbgen.Column
 	columnErr          error
@@ -42,6 +43,8 @@ type fakeDB struct {
 	assigneesErr       error
 	assignees          []dbgen.GetUsersForAssignmentRow
 	adminUsers         []dbgen.GetUsersForAdminRow
+	adminBoards        []dbgen.GetAllBoardsForAdminRow
+	adminBoardsErr     error
 	tasks              []dbgen.Task
 	boardArgs          []any
 	columnArgs         []any
@@ -59,6 +62,27 @@ type fakeDB struct {
 	createSessionError error
 	createUserError    error
 	deleteSessionErr   error
+}
+
+type failingResponseWriter struct {
+	header http.Header
+	status int
+	err    error
+}
+
+func (writer *failingResponseWriter) Header() http.Header {
+	if writer.header == nil {
+		writer.header = make(http.Header)
+	}
+	return writer.header
+}
+
+func (writer *failingResponseWriter) WriteHeader(status int) {
+	writer.status = status
+}
+
+func (writer *failingResponseWriter) Write([]byte) (int, error) {
+	return 0, writer.err
 }
 
 func (db *fakeDB) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
@@ -86,6 +110,21 @@ func (db *fakeDB) Query(_ context.Context, query string, _ ...any) (pgx.Rows, er
 		rows := make([][]any, len(db.tasks))
 		for i, task := range db.tasks {
 			rows[i] = taskValues(task)
+		}
+		return &fakeRows{values: rows}, nil
+	case strings.Contains(query, "FROM boards") && strings.Contains(query, "WHERE owner_id"):
+		rows := make([][]any, len(db.boards))
+		for i, board := range db.boards {
+			rows[i] = []any{board.ID, board.Title, board.OwnerID, board.CreatedAt, board.UpdatedAt}
+		}
+		return &fakeRows{values: rows}, nil
+	case strings.Contains(query, "FROM boards AS board"):
+		if db.adminBoardsErr != nil {
+			return nil, db.adminBoardsErr
+		}
+		rows := make([][]any, len(db.adminBoards))
+		for i, board := range db.adminBoards {
+			rows[i] = []any{board.ID, board.Title, board.OwnerID, board.FullName}
 		}
 		return &fakeRows{values: rows}, nil
 	case strings.Contains(query, "SELECT id, full_name, email, role"):
@@ -134,6 +173,11 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 	case strings.Contains(query, "FROM users") && strings.Contains(query, "WHERE id"):
 		return fakeRow{values: userValues(db.user), err: db.userErr}
 	case strings.Contains(query, "FROM tasks AS task") && strings.Contains(query, "WHERE task.id"):
+		return fakeRow{values: []any{
+			db.board.ID, db.board.Title, db.board.OwnerID, db.board.CreatedAt, db.board.UpdatedAt,
+		}, err: db.boardErr}
+	case strings.Contains(query, "FROM boards") && strings.Contains(query, "WHERE id") &&
+		strings.Contains(query, "owner_id"):
 		return fakeRow{values: []any{
 			db.board.ID, db.board.Title, db.board.OwnerID, db.board.CreatedAt, db.board.UpdatedAt,
 		}, err: db.boardErr}
@@ -424,6 +468,9 @@ func TestSetupEndpoint(t *testing.T) {
 			txDB.createUserArgs[0] != "adminuser" || txDB.createUserArgs[4] != "admin" {
 			t.Fatalf("status = %d; committed = %t; args = %#v", response.Code, tx.committed, txDB.createUserArgs)
 		}
+		if len(txDB.boardArgs) != 2 || txDB.boardArgs[0] != "Admin User" || txDB.boardArgs[1] != "adminuser" {
+			t.Fatalf("personal board args = %#v", txDB.boardArgs)
+		}
 		if err := bcrypt.CompareHashAndPassword([]byte(txDB.createUserArgs[2].(string)), []byte("password123")); err != nil {
 			t.Fatalf("password was not securely hashed: %v", err)
 		}
@@ -647,6 +694,34 @@ func TestCreateBoardEndpoint(t *testing.T) {
 	})
 }
 
+func TestGetBoardsEndpoint(t *testing.T) {
+	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
+	t.Run("requires authentication", func(t *testing.T) {
+		response := send(newHandler(&fakeDB{}, nil, false), http.MethodGet, "/api/boards", "", nil)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("returns boards owned by the session user", func(t *testing.T) {
+		board := dbgen.Board{ID: newUUID(8), Title: "Personal Board", OwnerID: "owner7"}
+		response := send(newHandler(&fakeDB{
+			session: dbgen.Session{Token: "token", UserID: "owner7"},
+			boards:  []dbgen.Board{board},
+		}, nil, false), http.MethodGet, "/api/boards", "", cookie)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+		}
+		var boards []dbgen.Board
+		if err := json.Unmarshal(response.Body.Bytes(), &boards); err != nil {
+			t.Fatalf("decode boards: %v", err)
+		}
+		if len(boards) != 1 || boards[0].Title != board.Title || boards[0].OwnerID != "owner7" {
+			t.Fatalf("boards = %#v", boards)
+		}
+	})
+}
+
 func TestCreateTaskEndpoint(t *testing.T) {
 	t.Run("requires authentication", func(t *testing.T) {
 		response := send(newHandler(&fakeDB{}, nil, false), http.MethodPost, "/api/tasks", `{"title":"Task"}`, nil)
@@ -660,6 +735,7 @@ func TestCreateTaskEndpoint(t *testing.T) {
 		`{"title":" "}`,
 		`{"title":"Task","state":"Complete"}`,
 		`{"title":"Task","priority":"Urgent"}`,
+		`{"title":"Task","board_id":"not-a-uuid"}`,
 		`{"title":"Task","assigned_to_id":"not-a-uuid"}`,
 		`{"title":"Task","complete_by":"not-a-date"}`,
 	} {
@@ -756,10 +832,11 @@ func TestCreateTaskEndpoint(t *testing.T) {
 			session:  dbgen.Session{Token: "token", UserID: ownerID},
 			boardErr: pgx.ErrNoRows,
 			board: dbgen.Board{
-				ID: newUUID(2), Title: "Snappy Plan", OwnerID: ownerID,
+				ID: newUUID(2), Title: "Board Owner", OwnerID: ownerID,
 				CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
 				UpdatedAt: pgtype.Timestamptz{Time: now, Valid: true},
 			},
+			user:      dbgen.User{ID: ownerID, FullName: "Board Owner"},
 			columnErr: pgx.ErrNoRows,
 			column: dbgen.Column{
 				ID: newUUID(3), BoardID: newUUID(2), Title: "To Do", Position: 1,
@@ -779,6 +856,9 @@ func TestCreateTaskEndpoint(t *testing.T) {
 		if !tx.committed {
 			t.Fatal("task transaction was not committed")
 		}
+		if len(db.boardArgs) != 2 || db.boardArgs[0] != "Board Owner" || db.boardArgs[1] != ownerID {
+			t.Fatalf("personal board args = %#v", db.boardArgs)
+		}
 		if len(db.taskArgs) != 7 || db.taskArgs[0] != db.column.ID || db.taskArgs[1] != "ToDo" ||
 			db.taskArgs[2] != "Call dentist" || db.taskArgs[4] != "Medium" {
 			t.Fatalf("task args = %#v", db.taskArgs)
@@ -789,6 +869,54 @@ func TestCreateTaskEndpoint(t *testing.T) {
 		}
 		if task.Title != "Call dentist" || task.State != "ToDo" || task.Priority != "Medium" {
 			t.Fatalf("created task = %#v", task)
+		}
+	})
+
+	t.Run("creates task on the selected owned board", func(t *testing.T) {
+		ownerID := "owner1"
+		boardID := newUUID(4)
+		db := &fakeDB{
+			session:   dbgen.Session{Token: "token", UserID: ownerID},
+			board:     dbgen.Board{ID: boardID, Title: "Project Board", OwnerID: ownerID},
+			columnErr: pgx.ErrNoRows,
+			column:    dbgen.Column{ID: newUUID(5), BoardID: boardID, Title: "Backlog"},
+		}
+		tx := &fakeTx{fakeDB: db}
+		handler := newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false)
+
+		response := send(handler, http.MethodPost, "/api/tasks",
+			`{"title":"Selected board task","board_id":"`+boardID.String()+`"}`,
+			&http.Cookie{Name: "snappy_session", Value: "token"})
+		if response.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusCreated, response.Body.String())
+		}
+		if len(db.columnArgs) != 3 || db.columnArgs[0] != boardID {
+			t.Fatalf("column args = %#v, want selected board %v", db.columnArgs, boardID)
+		}
+	})
+
+	t.Run("rejects a board that is not owned by the user", func(t *testing.T) {
+		ownerID := "owner1"
+		boardID := newUUID(4)
+		db := &fakeDB{
+			session:  dbgen.Session{Token: "token", UserID: ownerID},
+			boardErr: pgx.ErrNoRows,
+		}
+		tx := &fakeTx{fakeDB: db}
+		handler := newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false)
+
+		response := send(handler, http.MethodPost, "/api/tasks",
+			`{"title":"Other user's board task","board_id":"`+boardID.String()+`"}`,
+			&http.Cookie{Name: "snappy_session", Value: "token"})
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusBadRequest, response.Body.String())
+		}
+		if len(db.taskArgs) != 0 {
+			t.Fatalf("task was created on an unowned board: %#v", db.taskArgs)
 		}
 	})
 
@@ -1397,6 +1525,7 @@ func TestAdminUserEndpoints(t *testing.T) {
 					body   string
 				}{
 					{http.MethodGet, "/api/admin/users", ""},
+					{http.MethodGet, "/api/admin/boards", ""},
 					{http.MethodPost, "/api/admin/users", `{"username":"newuser","email":"new@example.com","password":"password123"}`},
 					{http.MethodPatch, "/api/admin/users/user1/role", `{"role":"admin"}`},
 				} {
@@ -1431,11 +1560,83 @@ func TestAdminUserEndpoints(t *testing.T) {
 		}
 	})
 
+	t.Run("lists all boards with owner details", func(t *testing.T) {
+		boardID := newUUID(7)
+		db := &fakeDB{
+			session: dbgen.Session{Token: "token", UserID: adminID},
+			user:    admin,
+			adminBoards: []dbgen.GetAllBoardsForAdminRow{{
+				ID: boardID, Title: "Personal board", OwnerID: "member", FullName: "Member User",
+			}},
+		}
+		response := send(newHandler(db, nil, false), http.MethodGet, "/api/admin/boards", "", cookie)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+		}
+		var boards []struct {
+			ID        pgtype.UUID `json:"id"`
+			Title     string      `json:"title"`
+			OwnerID   string      `json:"owner_id"`
+			OwnerName string      `json:"owner_name"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &boards); err != nil {
+			t.Fatalf("decode admin boards: %v", err)
+		}
+		if len(boards) != 1 || boards[0].ID != boardID || boards[0].Title != "Personal board" ||
+			boards[0].OwnerID != "member" || boards[0].OwnerName != "Member User" {
+			t.Fatalf("admin boards = %#v", boards)
+		}
+	})
+
+	t.Run("returns an empty list when there are no boards", func(t *testing.T) {
+		db := &fakeDB{
+			session: dbgen.Session{Token: "token", UserID: adminID},
+			user:    admin,
+		}
+		response := send(newHandler(db, nil, false), http.MethodGet, "/api/admin/boards", "", cookie)
+		if response.Code != http.StatusOK || response.Body.String() != "[]\n" {
+			t.Fatalf("status=%d body=%q, want empty board list", response.Code, response.Body.String())
+		}
+	})
+
+	t.Run("reports board query failures", func(t *testing.T) {
+		db := &fakeDB{
+			session:        dbgen.Session{Token: "token", UserID: adminID},
+			user:           admin,
+			adminBoardsErr: errors.New("query failed"),
+		}
+		response := send(newHandler(db, nil, false), http.MethodGet, "/api/admin/boards", "", cookie)
+		if response.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want %d", response.Code, http.StatusInternalServerError)
+		}
+	})
+
+	t.Run("reports response encoding failures", func(t *testing.T) {
+		handler := newHandler(&fakeDB{
+			session: dbgen.Session{Token: "token", UserID: adminID},
+			user:    admin,
+			adminBoards: []dbgen.GetAllBoardsForAdminRow{{
+				ID: newUUID(8), Title: "Board", OwnerID: "member", FullName: "Member",
+			}},
+		}, nil, false)
+		request := httptest.NewRequest(http.MethodGet, "/api/admin/boards", nil)
+		request.AddCookie(cookie)
+		writer := &failingResponseWriter{err: errors.New("write failed")}
+
+		handler.ServeHTTP(writer, request)
+		if writer.status != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want %d", writer.status, http.StatusInternalServerError)
+		}
+	})
+
 	t.Run("creates a regular user with a hashed password", func(t *testing.T) {
 		db := &fakeDB{session: dbgen.Session{Token: "token", UserID: adminID}, user: admin}
-		response := send(newHandler(db, nil, false), http.MethodPost, "/api/admin/users",
+		tx := &fakeTx{fakeDB: db}
+		response := send(newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false), http.MethodPost, "/api/admin/users",
 			`{"username":" NewUser ","email":"new@example.com","password":"password123"}`, cookie)
-		if response.Code != http.StatusCreated {
+		if response.Code != http.StatusCreated || !tx.committed {
 			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusCreated, response.Body.String())
 		}
 		if len(db.createUserArgs) != 5 || db.createUserArgs[0] != "newuser" ||
@@ -1443,11 +1644,31 @@ func TestAdminUserEndpoints(t *testing.T) {
 			db.createUserArgs[4] != "user" {
 			t.Fatalf("create user args = %#v", db.createUserArgs)
 		}
+		if len(db.boardArgs) != 2 || db.boardArgs[0] != "newuser" || db.boardArgs[1] != "newuser" {
+			t.Fatalf("personal board args = %#v", db.boardArgs)
+		}
 		if err := bcrypt.CompareHashAndPassword([]byte(db.createUserArgs[2].(string)), []byte("password123")); err != nil {
 			t.Fatalf("created password hash does not match: %v", err)
 		}
 		if strings.Contains(response.Body.String(), db.createUserArgs[2].(string)) {
 			t.Fatal("create user response exposed password hash")
+		}
+	})
+
+	t.Run("rolls back user creation if personal board creation fails", func(t *testing.T) {
+		db := &fakeDB{
+			session:        dbgen.Session{Token: "token", UserID: adminID},
+			user:           admin,
+			createBoardErr: errors.New("board insert failed"),
+		}
+		tx := &fakeTx{fakeDB: db}
+		response := send(newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false), http.MethodPost, "/api/admin/users",
+			`{"username":"newuser","email":"new@example.com","password":"password123"}`, cookie)
+		if response.Code != http.StatusInternalServerError || tx.committed || !tx.rolledBack {
+			t.Fatalf("status=%d committed=%t rolledBack=%t",
+				response.Code, tx.committed, tx.rolledBack)
 		}
 	})
 
@@ -1469,7 +1690,10 @@ func TestAdminUserEndpoints(t *testing.T) {
 					user:            admin,
 					createUserError: test.createErr,
 				}
-				response := send(newHandler(db, nil, false), http.MethodPost, "/api/admin/users", test.body, cookie)
+				tx := &fakeTx{fakeDB: db}
+				response := send(newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+					return tx, nil
+				}, false), http.MethodPost, "/api/admin/users", test.body, cookie)
 				if response.Code != test.wantStatus {
 					t.Fatalf("status = %d, want %d: %s", response.Code, test.wantStatus, response.Body.String())
 				}

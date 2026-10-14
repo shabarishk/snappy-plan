@@ -2,9 +2,13 @@
 
 // 1. Define types matching your Go structs
 export interface Board {
-  board_id: string;
+  id: string;
   title: string;
   owner_id: string;
+}
+
+export interface AdminBoard extends Board {
+  owner_name: string;
 }
 
 export interface ApiTask {
@@ -36,6 +40,7 @@ export interface AdminUser extends UserProfile {
 }
 
 export interface CreateTaskRequest {
+  board_id: string;
   title: string;
   description: string;
   assigned_to_id: string;
@@ -74,6 +79,12 @@ export const getTasks = async (): Promise<ApiTask[]> => {
   return res.json();
 };
 
+export const getBoards = async (): Promise<Board[]> => {
+  const res = await fetch('/api/boards', { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+};
+
 export const getTaskAssignees = async (): Promise<TaskAssignee[]> => {
   const res = await fetch('/api/users', { credentials: 'same-origin' });
   if (!res.ok) throw new Error('Failed to load users');
@@ -96,6 +107,12 @@ export const logout = async (): Promise<void> => {
 
 export const getAdminUsers = async (): Promise<AdminUser[]> => {
   const res = await fetch('/api/admin/users', { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+};
+
+export const getAdminBoards = async (): Promise<AdminBoard[]> => {
+  const res = await fetch('/api/admin/boards', { credentials: 'same-origin' });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 };

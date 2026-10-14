@@ -34,6 +34,22 @@ WHERE owner_id = $1
 ORDER BY created_at ASC, id ASC
 LIMIT 1;
 
+-- name: GetBoardsByOwner :many
+SELECT * FROM boards
+WHERE owner_id = $1
+ORDER BY created_at ASC, id ASC;
+
+-- name: GetAllBoardsForAdmin :many
+SELECT board.id, board.title, board.owner_id, owner.full_name
+FROM boards AS board
+JOIN users AS owner ON owner.id = board.owner_id
+ORDER BY board.title ASC, owner.full_name ASC, board.id ASC;
+
+-- name: GetBoardByIDAndOwner :one
+SELECT * FROM boards
+WHERE id = sqlc.arg(board_id) AND owner_id = sqlc.arg(owner_id)
+LIMIT 1;
+
 -- name: GetBoardByTaskAndOwner :one
 SELECT board.*
 FROM tasks AS task

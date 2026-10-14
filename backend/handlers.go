@@ -45,6 +45,7 @@ func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, 
 	mux.HandleFunc("POST /api/logout", api.handleLogout)
 	mux.HandleFunc("GET /api/auth/status", api.handleAuthStatus)
 	mux.HandleFunc("POST /api/boards", api.handleCreateBoard)
+	mux.HandleFunc("GET /api/boards", api.handleGetBoards)
 	mux.HandleFunc("GET /api/tasks", api.handleGetTasks)
 	mux.HandleFunc("POST /api/tasks", api.handleCreateTask)
 	mux.HandleFunc("PATCH /api/tasks/{taskID}", api.handleMoveTask)
@@ -54,6 +55,7 @@ func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, 
 	mux.HandleFunc("PUT /api/profile", api.handleUpdateProfile)
 	mux.HandleFunc("PUT /api/profile/password", api.handleUpdatePassword)
 	mux.HandleFunc("GET /api/admin/users", api.handleGetUsersForAdmin)
+	mux.HandleFunc("GET /api/admin/boards", api.handleGetBoardsForAdmin)
 	mux.HandleFunc("POST /api/admin/users", api.handleCreateUser)
 	mux.HandleFunc("PATCH /api/admin/users/{userID}/role", api.handlePromoteUser)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -180,6 +182,13 @@ func (api *ApiConfig) handleInitialSetup(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Failed to create admin user", http.StatusInternalServerError)
 		return
 	}
+	if _, err := txQueries.CreateBoard(r.Context(), dbgen.CreateBoardParams{
+		Title:   user.FullName,
+		OwnerID: user.ID,
+	}); err != nil {
+		http.Error(w, "Failed to create personal board", http.StatusInternalServerError)
+		return
+	}
 	if err := tx.Commit(r.Context()); err != nil {
 		http.Error(w, "Failed to create admin user", http.StatusInternalServerError)
 		return
@@ -245,6 +254,31 @@ func (api *ApiConfig) handleCreateBoard(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(board)
+}
+
+func (api *ApiConfig) handleGetBoards(w http.ResponseWriter, r *http.Request) {
+	session, ok, err := api.authenticatedSession(r)
+	if err != nil {
+		http.Error(w, "Failed to validate session", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	boards, err := api.DB.GetBoardsByOwner(r.Context(), session.UserID)
+	if err != nil {
+		http.Error(w, "Failed to load boards", http.StatusInternalServerError)
+		return
+	}
+	if boards == nil {
+		boards = []dbgen.Board{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(boards); err != nil {
+		http.Error(w, "Failed to encode boards", http.StatusInternalServerError)
+	}
 }
 
 func (api *ApiConfig) handleGetTasks(w http.ResponseWriter, r *http.Request) {
@@ -355,6 +389,37 @@ func (api *ApiConfig) handleGetUsersForAdmin(w http.ResponseWriter, r *http.Requ
 	}
 }
 
+func (api *ApiConfig) handleGetBoardsForAdmin(w http.ResponseWriter, r *http.Request) {
+	if _, ok := api.requireAdmin(w, r); !ok {
+		return
+	}
+	boards, err := api.DB.GetAllBoardsForAdmin(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to load boards", http.StatusInternalServerError)
+		return
+	}
+	responseBoards := make([]adminBoardResponse, 0, len(boards))
+	for _, board := range boards {
+		responseBoards = append(responseBoards, adminBoardResponse{
+			ID:        board.ID,
+			Title:     board.Title,
+			OwnerID:   board.OwnerID,
+			OwnerName: board.FullName,
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(responseBoards); err != nil {
+		http.Error(w, "Failed to encode boards", http.StatusInternalServerError)
+	}
+}
+
+type adminBoardResponse struct {
+	ID        pgtype.UUID `json:"id"`
+	Title     string      `json:"title"`
+	OwnerID   string      `json:"owner_id"`
+	OwnerName string      `json:"owner_name"`
+}
+
 func (api *ApiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	if _, ok := api.requireAdmin(w, r); !ok {
 		return
@@ -383,7 +448,18 @@ func (api *ApiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to secure password", http.StatusInternalServerError)
 		return
 	}
-	user, err := api.DB.CreateUser(r.Context(), dbgen.CreateUserParams{
+	if api.BeginTx == nil {
+		http.Error(w, "User creation is unavailable", http.StatusInternalServerError)
+		return
+	}
+	tx, err := api.BeginTx(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to start user creation", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback(context.Background())
+	txQueries := dbgen.New(tx)
+	user, err := txQueries.CreateUser(r.Context(), dbgen.CreateUserParams{
 		ID:           params.Username,
 		Email:        params.Email,
 		PasswordHash: string(passwordHash),
@@ -396,6 +472,17 @@ func (api *ApiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
+		http.Error(w, "Failed to create user", http.StatusInternalServerError)
+		return
+	}
+	if _, err := txQueries.CreateBoard(r.Context(), dbgen.CreateBoardParams{
+		Title:   user.FullName,
+		OwnerID: user.ID,
+	}); err != nil {
+		http.Error(w, "Failed to create personal board", http.StatusInternalServerError)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		http.Error(w, "Failed to create user", http.StatusInternalServerError)
 		return
 	}
@@ -637,6 +724,7 @@ func (api *ApiConfig) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Title        string  `json:"title"`
 		Description  string  `json:"description"`
+		BoardID      string  `json:"board_id"`
 		AssignedToID string  `json:"assigned_to_id"`
 		State        string  `json:"state"`
 		Priority     string  `json:"priority"`
@@ -665,6 +753,13 @@ func (api *ApiConfig) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	if params.Priority != "Low" && params.Priority != "Medium" && params.Priority != "High" {
 		http.Error(w, "Priority must be Low, Medium, or High", http.StatusBadRequest)
 		return
+	}
+	boardID := pgtype.UUID{}
+	if params.BoardID != "" {
+		if err := boardID.Scan(params.BoardID); err != nil {
+			http.Error(w, "Board ID is invalid", http.StatusBadRequest)
+			return
+		}
 	}
 
 	description := pgtype.Text{}
@@ -715,12 +810,29 @@ func (api *ApiConfig) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	txQueries := dbgen.New(tx)
-	board, err := txQueries.GetBoardByOwner(r.Context(), session.UserID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		board, err = txQueries.CreateBoard(r.Context(), dbgen.CreateBoardParams{
-			Title:   "Snappy Plan",
+	var board dbgen.Board
+	if boardID.Valid {
+		board, err = txQueries.GetBoardByIDAndOwner(r.Context(), dbgen.GetBoardByIDAndOwnerParams{
+			BoardID: boardID,
 			OwnerID: session.UserID,
 		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "Board does not exist", http.StatusBadRequest)
+			return
+		}
+	} else {
+		board, err = txQueries.GetBoardByOwner(r.Context(), session.UserID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			user, userErr := txQueries.GetUserByID(r.Context(), session.UserID)
+			if userErr != nil {
+				http.Error(w, "Failed to load task board owner", http.StatusInternalServerError)
+				return
+			}
+			board, err = txQueries.CreateBoard(r.Context(), dbgen.CreateBoardParams{
+				Title:   user.FullName,
+				OwnerID: session.UserID,
+			})
+		}
 	}
 	if err != nil {
 		http.Error(w, "Failed to load task board", http.StatusInternalServerError)

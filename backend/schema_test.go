@@ -20,7 +20,7 @@ type schemaTestTx struct {
 
 func (tx *schemaTestTx) Exec(_ context.Context, query string, _ ...any) (pgconn.CommandTag, error) {
 	tx.execCalls = append(tx.execCalls, query)
-	if strings.Contains(query, "DO $$") && tx.execErr != nil {
+	if (strings.Contains(query, "DO $$") || strings.Contains(query, "INSERT INTO boards")) && tx.execErr != nil {
 		return pgconn.CommandTag{}, tx.execErr
 	}
 	return pgconn.CommandTag{}, nil
@@ -103,6 +103,7 @@ func TestEnsureUserIDSchema(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EnsureUserIDSchema returned error: %v", err)
 		}
+
 		if len(tx.execCalls) != 2 || !strings.Contains(tx.execCalls[0], "pg_advisory_xact_lock") ||
 			!strings.Contains(tx.execCalls[1], "ALTER TABLE users ALTER COLUMN id TYPE VARCHAR(32)") ||
 			!strings.Contains(tx.execCalls[1], "REPLACE(owner_id::text, '-', '')") ||
@@ -135,6 +136,36 @@ func TestEnsureUserIDSchema(t *testing.T) {
 		}
 		if tx.committed || !tx.rolledBack {
 			t.Fatalf("transaction committed=%t rolledBack=%t", tx.committed, tx.rolledBack)
+		}
+	})
+}
+
+func TestEnsurePersonalBoards(t *testing.T) {
+	t.Run("creates missing boards in a transaction", func(t *testing.T) {
+		tx := &schemaTestTx{}
+		err := EnsurePersonalBoards(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if err != nil {
+			t.Fatalf("EnsurePersonalBoards returned error: %v", err)
+		}
+		if len(tx.execCalls) != 2 || !strings.Contains(tx.execCalls[0], "pg_advisory_xact_lock") ||
+			!strings.Contains(tx.execCalls[1], "INSERT INTO boards") ||
+			!strings.Contains(tx.execCalls[1], "WHERE NOT EXISTS") ||
+			!tx.committed || tx.rolledBack {
+			t.Fatalf("personal board upgrade calls=%#v committed=%t rolledBack=%t",
+				tx.execCalls, tx.committed, tx.rolledBack)
+		}
+	})
+
+	t.Run("reports insert errors", func(t *testing.T) {
+		insertErr := errors.New("insert failed")
+		tx := &schemaTestTx{execErr: insertErr}
+		err := EnsurePersonalBoards(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if !errors.Is(err, insertErr) || tx.committed || !tx.rolledBack {
+			t.Fatalf("error=%v committed=%t rolledBack=%t", err, tx.committed, tx.rolledBack)
 		}
 	})
 }
