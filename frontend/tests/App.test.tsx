@@ -290,6 +290,13 @@ describe('App board', () => {
     const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
       if (url === '/api/tasks') return { ok: true, json: async () => [] };
       if (url === '/api/boards') return { ok: true, json: async () => boardList };
+      if (url === '/api/admin/boards') return {
+        ok: true,
+        json: async () => [
+          { id: 'board-1', title: 'Admin Personal Board', owner_id: 'adminuser', owner_name: 'Admin User' },
+          { id: 'board-2', title: 'Member Board', owner_id: 'member', owner_name: 'Member User' },
+        ],
+      };
       if (url === '/api/users') return { ok: true, json: async () => [] };
       if (url === '/api/profile') return {
         ok: true,
@@ -340,6 +347,17 @@ describe('App board', () => {
     const userTile = await screen.findByRole('button', { name: 'User menu for adminuser' });
     expect(adminTile.compareDocumentPosition(userTile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(adminTile);
+    expect(await screen.findByRole('heading', { name: 'Create user' })).toBeTruthy();
+    expect(screen.getByRole('navigation', { name: 'Admin sections' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'User management' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'All boards' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Board management' }));
+    expect(await screen.findByRole('heading', { name: 'All boards' })).toBeTruthy();
+    expect(await screen.findByText('Member Board')).toBeTruthy();
+    expect(screen.getByText('Owned by Member User (member)')).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith('/api/admin/boards', { credentials: 'same-origin' });
+    expect(screen.queryByRole('heading', { name: 'Create user' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'User management' }));
     expect(await screen.findByRole('heading', { name: 'Create user' })).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'newuser' } });

@@ -7,6 +7,10 @@ export interface Board {
   owner_id: string;
 }
 
+export interface AdminBoard extends Board {
+  owner_name: string;
+}
+
 export interface ApiTask {
   id: string;
   title: string;
@@ -103,6 +107,12 @@ export const logout = async (): Promise<void> => {
 
 export const getAdminUsers = async (): Promise<AdminUser[]> => {
   const res = await fetch('/api/admin/users', { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+};
+
+export const getAdminBoards = async (): Promise<AdminBoard[]> => {
+  const res = await fetch('/api/admin/boards', { credentials: 'same-origin' });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 };

@@ -43,6 +43,8 @@ type fakeDB struct {
 	assigneesErr       error
 	assignees          []dbgen.GetUsersForAssignmentRow
 	adminUsers         []dbgen.GetUsersForAdminRow
+	adminBoards        []dbgen.GetAllBoardsForAdminRow
+	adminBoardsErr     error
 	tasks              []dbgen.Task
 	boardArgs          []any
 	columnArgs         []any
@@ -93,6 +95,15 @@ func (db *fakeDB) Query(_ context.Context, query string, _ ...any) (pgx.Rows, er
 		rows := make([][]any, len(db.boards))
 		for i, board := range db.boards {
 			rows[i] = []any{board.ID, board.Title, board.OwnerID, board.CreatedAt, board.UpdatedAt}
+		}
+		return &fakeRows{values: rows}, nil
+	case strings.Contains(query, "FROM boards AS board"):
+		if db.adminBoardsErr != nil {
+			return nil, db.adminBoardsErr
+		}
+		rows := make([][]any, len(db.adminBoards))
+		for i, board := range db.adminBoards {
+			rows[i] = []any{board.ID, board.Title, board.OwnerID, board.FullName}
 		}
 		return &fakeRows{values: rows}, nil
 	case strings.Contains(query, "SELECT id, full_name, email, role"):
@@ -1493,6 +1504,7 @@ func TestAdminUserEndpoints(t *testing.T) {
 					body   string
 				}{
 					{http.MethodGet, "/api/admin/users", ""},
+					{http.MethodGet, "/api/admin/boards", ""},
 					{http.MethodPost, "/api/admin/users", `{"username":"newuser","email":"new@example.com","password":"password123"}`},
 					{http.MethodPatch, "/api/admin/users/user1/role", `{"role":"admin"}`},
 				} {
@@ -1524,6 +1536,34 @@ func TestAdminUserEndpoints(t *testing.T) {
 		}
 		if strings.Contains(response.Body.String(), "password_hash") {
 			t.Fatal("user list exposed password hashes")
+		}
+	})
+
+	t.Run("lists all boards with owner details", func(t *testing.T) {
+		boardID := newUUID(7)
+		db := &fakeDB{
+			session: dbgen.Session{Token: "token", UserID: adminID},
+			user:    admin,
+			adminBoards: []dbgen.GetAllBoardsForAdminRow{{
+				ID: boardID, Title: "Personal board", OwnerID: "member", FullName: "Member User",
+			}},
+		}
+		response := send(newHandler(db, nil, false), http.MethodGet, "/api/admin/boards", "", cookie)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+		}
+		var boards []struct {
+			ID        pgtype.UUID `json:"id"`
+			Title     string      `json:"title"`
+			OwnerID   string      `json:"owner_id"`
+			OwnerName string      `json:"owner_name"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &boards); err != nil {
+			t.Fatalf("decode admin boards: %v", err)
+		}
+		if len(boards) != 1 || boards[0].ID != boardID || boards[0].Title != "Personal board" ||
+			boards[0].OwnerID != "member" || boards[0].OwnerName != "Member User" {
+			t.Fatalf("admin boards = %#v", boards)
 		}
 	})
 

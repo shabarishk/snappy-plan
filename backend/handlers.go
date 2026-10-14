@@ -55,6 +55,7 @@ func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, 
 	mux.HandleFunc("PUT /api/profile", api.handleUpdateProfile)
 	mux.HandleFunc("PUT /api/profile/password", api.handleUpdatePassword)
 	mux.HandleFunc("GET /api/admin/users", api.handleGetUsersForAdmin)
+	mux.HandleFunc("GET /api/admin/boards", api.handleGetBoardsForAdmin)
 	mux.HandleFunc("POST /api/admin/users", api.handleCreateUser)
 	mux.HandleFunc("PATCH /api/admin/users/{userID}/role", api.handlePromoteUser)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
@@ -386,6 +387,37 @@ func (api *ApiConfig) handleGetUsersForAdmin(w http.ResponseWriter, r *http.Requ
 	if err := json.NewEncoder(w).Encode(responseUsers); err != nil {
 		http.Error(w, "Failed to encode users", http.StatusInternalServerError)
 	}
+}
+
+func (api *ApiConfig) handleGetBoardsForAdmin(w http.ResponseWriter, r *http.Request) {
+	if _, ok := api.requireAdmin(w, r); !ok {
+		return
+	}
+	boards, err := api.DB.GetAllBoardsForAdmin(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to load boards", http.StatusInternalServerError)
+		return
+	}
+	responseBoards := make([]adminBoardResponse, 0, len(boards))
+	for _, board := range boards {
+		responseBoards = append(responseBoards, adminBoardResponse{
+			ID:        board.ID,
+			Title:     board.Title,
+			OwnerID:   board.OwnerID,
+			OwnerName: board.FullName,
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(responseBoards); err != nil {
+		http.Error(w, "Failed to encode boards", http.StatusInternalServerError)
+	}
+}
+
+type adminBoardResponse struct {
+	ID        pgtype.UUID `json:"id"`
+	Title     string      `json:"title"`
+	OwnerID   string      `json:"owner_id"`
+	OwnerName string      `json:"owner_name"`
 }
 
 func (api *ApiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {

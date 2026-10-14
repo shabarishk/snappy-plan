@@ -6,7 +6,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { AuthWrapper } from './Auth';
 import { sortTasksByPriority, type TaskPriority } from './taskPriority';
-import { createTask as persistTask, createUser, getAdminUsers, getBoards, getProfile, getTaskAssignees, getTasks, logout, moveTask as persistMoveTask, promoteUserToAdmin, updatePassword, updateProfile, updateTask as persistUpdateTask, type AdminUser, type ApiTask, type Board, type TaskAssignee, type UserProfile } from './api';
+import { createTask as persistTask, createUser, getAdminBoards, getAdminUsers, getBoards, getProfile, getTaskAssignees, getTasks, logout, moveTask as persistMoveTask, promoteUserToAdmin, updatePassword, updateProfile, updateTask as persistUpdateTask, type AdminBoard, type AdminUser, type ApiTask, type Board, type TaskAssignee, type UserProfile } from './api';
 
 // --- Types ---
 type TaskState = 'Backlog' | 'ToDo' | 'InProgress' | 'Complete';
@@ -588,12 +588,16 @@ function SettingsPage() {
 }
 
 function AdminPage({ currentUsername }: { currentUsername: string }) {
+  const [selectedSection, setSelectedSection] = useState<'users' | 'boards'>('users');
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [boards, setBoards] = useState<AdminBoard[]>([]);
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [boardsError, setBoardsError] = useState('');
+  const [isBoardsLoading, setIsBoardsLoading] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -612,6 +616,21 @@ function AdminPage({ currentUsername }: { currentUsername: string }) {
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    getAdminBoards()
+      .then((loadedBoards) => {
+        if (!cancelled) setBoards(loadedBoards);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setBoardsError(err instanceof Error ? err.message : 'Failed to load boards');
+      })
+      .finally(() => {
+        if (!cancelled) setIsBoardsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
   const handleCreateUser = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError('');
@@ -626,6 +645,9 @@ function AdminPage({ currentUsername }: { currentUsername: string }) {
       setEmail('');
       setPassword('');
       setSuccess(`User ${newUser.username} created.`);
+      getAdminBoards()
+        .then(setBoards)
+        .catch((err: unknown) => setBoardsError(err instanceof Error ? err.message : 'Failed to load boards'));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create user');
     } finally {
@@ -651,31 +673,54 @@ function AdminPage({ currentUsername }: { currentUsername: string }) {
   };
 
   return (
-    <section aria-label="Admin" className="mx-auto w-full max-w-5xl space-y-6">
-      <section aria-labelledby="create-user-title" className="rounded-xl bg-white p-6 shadow-sm">
-        <h2 id="create-user-title" className="mb-4 text-lg font-bold text-gray-800">Create user</h2>
-        <form onSubmit={handleCreateUser} className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div>
-            <label htmlFor="admin-username" className="mb-1 block text-sm font-medium text-gray-700">Username</label>
-            <input id="admin-username" required minLength={1} maxLength={32} pattern="[A-Za-z0-9]+" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
-          </div>
-          <div>
-            <label htmlFor="admin-email" className="mb-1 block text-sm font-medium text-gray-700">Email address</label>
-            <input id="admin-email" type="email" required maxLength={255} autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
-          </div>
-          <div>
-            <label htmlFor="admin-password" className="mb-1 block text-sm font-medium text-gray-700">Password</label>
-            <input id="admin-password" type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
-          </div>
-          <div className="sm:col-span-3">
-            <button type="submit" disabled={isSaving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
-              {isSaving ? 'Saving…' : 'Create user'}
-            </button>
-          </div>
-        </form>
-      </section>
+    <section aria-label="Admin" className="mx-auto w-full max-w-7xl">
+      <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
+        <nav aria-label="Admin sections" className="rounded-xl bg-white p-2 shadow-sm">
+          <button
+            type="button"
+            aria-current={selectedSection === 'users' ? 'page' : undefined}
+            onClick={() => setSelectedSection('users')}
+            className={`w-full rounded-lg px-3 py-2 text-left text-sm font-medium ${selectedSection === 'users' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-100'}`}
+          >
+            User management
+          </button>
+          <button
+            type="button"
+            aria-current={selectedSection === 'boards' ? 'page' : undefined}
+            onClick={() => setSelectedSection('boards')}
+            className={`w-full rounded-lg px-3 py-2 text-left text-sm font-medium ${selectedSection === 'boards' ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-100'}`}
+          >
+            Board management
+          </button>
+        </nav>
+        <div className="min-w-0 rounded-xl bg-white p-6 shadow-sm">
+      {selectedSection === 'users' ? (
+      <section aria-labelledby="user-management-title" className="space-y-4">
+        <h2 id="user-management-title" className="text-xl font-bold text-gray-800">User management</h2>
+        <section aria-labelledby="create-user-title" className="rounded-xl bg-white p-6 shadow-sm">
+          <h3 id="create-user-title" className="mb-4 text-lg font-bold text-gray-800">Create user</h3>
+          <form onSubmit={handleCreateUser} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="admin-username" className="mb-1 block text-sm font-medium text-gray-700">Username</label>
+              <input id="admin-username" required minLength={1} maxLength={32} pattern="[A-Za-z0-9]+" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
+            </div>
+            <div>
+              <label htmlFor="admin-email" className="mb-1 block text-sm font-medium text-gray-700">Email address</label>
+              <input id="admin-email" type="email" required maxLength={255} autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
+            </div>
+            <div>
+              <label htmlFor="admin-password" className="mb-1 block text-sm font-medium text-gray-700">Password</label>
+              <input id="admin-password" type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
+            </div>
+            <div className="flex items-end">
+              <button type="submit" disabled={isSaving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+                {isSaving ? 'Saving…' : 'Create user'}
+              </button>
+            </div>
+          </form>
+        </section>
 
-      <section aria-labelledby="manage-users-title" className="rounded-xl bg-white p-6 shadow-sm">
+        <section aria-labelledby="manage-users-title" className="rounded-xl bg-white p-6 shadow-sm">
         <h2 id="manage-users-title" className="mb-4 text-lg font-bold text-gray-800">Manage users</h2>
         {error && <p role="alert" className="mb-3 text-sm text-red-700">{error}</p>}
         {success && <p role="status" className="mb-3 text-sm text-green-700">{success}</p>}
@@ -715,7 +760,33 @@ function AdminPage({ currentUsername }: { currentUsername: string }) {
             </table>
           </div>
         )}
+        </section>
       </section>
+      ) : (
+      <section aria-labelledby="manage-boards-title" className="space-y-4">
+        <h2 id="manage-boards-title" className="text-xl font-bold text-gray-800">Board management</h2>
+        <section aria-label="All boards" className="rounded-xl bg-white p-6 shadow-sm">
+          <h3 className="mb-4 text-lg font-bold text-gray-800">All boards</h3>
+          {boardsError && <p role="alert" className="mb-3 text-sm text-red-700">{boardsError}</p>}
+          {isBoardsLoading ? (
+            <p className="text-sm text-gray-600">Loading boards…</p>
+          ) : boards.length === 0 ? (
+            <p className="text-sm text-gray-600">No boards found.</p>
+          ) : (
+            <ul className="divide-y divide-gray-100">
+              {boards.map((board) => (
+                <li key={board.id} className="py-3 first:pt-0 last:pb-0">
+                  <p className="font-medium text-gray-800">{board.title}</p>
+                  <p className="mt-1 text-sm text-gray-500">Owned by {board.owner_name} ({board.owner_id})</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </section>
+      )}
+        </div>
+      </div>
     </section>
   );
 }
