@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App, { AuthenticatedBoard, type Task } from '../src/App';
 import { sortTasksByPriority } from '../src/taskPriority';
@@ -240,6 +240,120 @@ describe('App board', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Home' }));
     expect(screen.getByRole('heading', { name: 'To Do' })).toBeTruthy();
     expect(window.location.pathname).toBe('/');
+  });
+
+  it('logs out from the user menu and returns to the login screen', async () => {
+    let authChecks = 0;
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/auth/status') {
+        authChecks += 1;
+        return { ok: true, json: async () => ({ authenticated: authChecks === 1 }) };
+      }
+      if (url === '/api/setup/status') return { ok: true, json: async () => ({ setup_required: false }) };
+      if (url === '/api/tasks' || url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({
+          username: 'boardowner',
+          full_name: 'Board Owner',
+          email: 'owner@example.com',
+          role: 'user',
+        }),
+      };
+      if (url === '/api/logout') return { ok: true, status: 204 };
+      return { ok: false, text: async () => 'Unexpected request' };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'User menu for boardowner' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Log out' }));
+
+    expect(await screen.findByRole('heading', { name: 'Welcome Back' })).toBeTruthy();
+    expect(window.location.pathname).toBe('/');
+    expect(fetchMock).toHaveBeenCalledWith('/api/logout', {
+      method: 'POST',
+      credentials: 'same-origin',
+    });
+    expect(authChecks).toBe(2);
+  });
+
+  it('shows the admin tile to admins and supports creating and promoting users', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/tasks') return { ok: true, json: async () => [] };
+      if (url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({
+          username: 'adminuser',
+          full_name: 'Admin User',
+          email: 'admin@example.com',
+          role: 'admin',
+        }),
+      };
+      if (url === '/api/admin/users' && options?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({
+            username: 'newuser',
+            full_name: 'newuser',
+            email: 'new@example.com',
+            role: 'user',
+          }),
+        };
+      }
+      if (url === '/api/admin/users/member/role' && options?.method === 'PATCH') {
+        return {
+          ok: true,
+          json: async () => ({
+            username: 'member',
+            full_name: 'Member User',
+            email: 'member@example.com',
+            role: 'admin',
+          }),
+        };
+      }
+      if (url === '/api/admin/users') return {
+        ok: true,
+        json: async () => [{
+          username: 'member',
+          full_name: 'Member User',
+          email: 'member@example.com',
+          role: 'user',
+        }],
+      };
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    const adminTile = await screen.findByRole('button', { name: 'Admin' });
+    const userTile = await screen.findByRole('button', { name: 'User menu for adminuser' });
+    expect(adminTile.compareDocumentPosition(userTile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(adminTile);
+    expect(await screen.findByRole('heading', { name: 'Create user' })).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'newuser' } });
+    fireEvent.change(screen.getByLabelText('Email address'), { target: { value: 'new@example.com' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create user' }));
+    expect((await screen.findByRole('status')).textContent).toContain('User newuser created.');
+    expect(fetchMock).toHaveBeenCalledWith('/api/admin/users', expect.objectContaining({
+      method: 'POST',
+      credentials: 'same-origin',
+      body: JSON.stringify({ username: 'newuser', email: 'new@example.com', password: 'password123' }),
+    }));
+
+    const memberRow = screen.getByText('member').closest('tr');
+    expect(memberRow).toBeTruthy();
+    fireEvent.click(within(memberRow as HTMLElement).getByRole('button', { name: 'Make admin' }));
+    expect((await screen.findByRole('status')).textContent).toContain('member is now an administrator.');
+    expect(fetchMock).toHaveBeenCalledWith('/api/admin/users/member/role', expect.objectContaining({
+      method: 'PATCH',
+      credentials: 'same-origin',
+      body: JSON.stringify({ role: 'admin' }),
+    }));
+    expect(screen.getAllByText('admin', { selector: 'td' })).toHaveLength(1);
   });
 
   it('opens the page selected by the current URL and follows browser history', async () => {

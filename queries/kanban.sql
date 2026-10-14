@@ -19,6 +19,10 @@ RETURNING *;
 SELECT * FROM sessions
 WHERE token = $1 AND expires_at > NOW();
 
+-- name: DeleteSession :exec
+DELETE FROM sessions
+WHERE token = $1;
+
 -- name: CreateBoard :one
 INSERT INTO boards (title, owner_id)
 VALUES ($1, $2)
@@ -173,10 +177,22 @@ SELECT id, full_name
 FROM users
 ORDER BY full_name ASC, id ASC;
 
+-- name: GetUsersForAdmin :many
+SELECT id, full_name, email, role
+FROM users
+ORDER BY full_name ASC, id ASC;
+
 -- name: GetUserByID :one
 SELECT * FROM users
 WHERE id = $1
 LIMIT 1;
+
+-- name: UpdateUserRole :one
+UPDATE users
+SET role = $2,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING *;
 
 -- name: UpdateUserProfile :one
 UPDATE users

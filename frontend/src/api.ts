@@ -28,6 +28,11 @@ export interface UserProfile {
   username: string;
   full_name: string;
   email: string;
+  role: 'admin' | 'user';
+}
+
+export interface AdminUser extends UserProfile {
+  username: string;
 }
 
 export interface CreateTaskRequest {
@@ -77,6 +82,46 @@ export const getTaskAssignees = async (): Promise<TaskAssignee[]> => {
 
 export const getProfile = async (): Promise<UserProfile> => {
   const res = await fetch('/api/profile', { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+};
+
+export const logout = async (): Promise<void> => {
+  const res = await fetch('/api/logout', {
+    method: 'POST',
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(await res.text());
+};
+
+export const getAdminUsers = async (): Promise<AdminUser[]> => {
+  const res = await fetch('/api/admin/users', { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+};
+
+export const createUser = async (user: {
+  username: string;
+  email: string;
+  password: string;
+}): Promise<AdminUser> => {
+  const res = await fetch('/api/admin/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify(user),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+};
+
+export const promoteUserToAdmin = async (username: string): Promise<AdminUser> => {
+  const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}/role`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ role: 'admin' }),
+  });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 };

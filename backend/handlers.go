@@ -42,6 +42,7 @@ func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, 
 	mux.HandleFunc("GET /api/setup/status", api.handleSetupStatus)
 	mux.HandleFunc("POST /api/setup", api.handleInitialSetup)
 	mux.HandleFunc("POST /api/login", api.handleLogin)
+	mux.HandleFunc("POST /api/logout", api.handleLogout)
 	mux.HandleFunc("GET /api/auth/status", api.handleAuthStatus)
 	mux.HandleFunc("POST /api/boards", api.handleCreateBoard)
 	mux.HandleFunc("GET /api/tasks", api.handleGetTasks)
@@ -52,6 +53,9 @@ func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, 
 	mux.HandleFunc("GET /api/profile", api.handleGetProfile)
 	mux.HandleFunc("PUT /api/profile", api.handleUpdateProfile)
 	mux.HandleFunc("PUT /api/profile/password", api.handleUpdatePassword)
+	mux.HandleFunc("GET /api/admin/users", api.handleGetUsersForAdmin)
+	mux.HandleFunc("POST /api/admin/users", api.handleCreateUser)
+	mux.HandleFunc("PATCH /api/admin/users/{userID}/role", api.handlePromoteUser)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Snappy Plan Backend is running!"))
 	})
@@ -293,10 +297,174 @@ func (api *ApiConfig) handleGetUsersForAssignment(w http.ResponseWriter, r *http
 	}
 }
 
+type adminUserResponse struct {
+	Username string `json:"username"`
+	FullName string `json:"full_name"`
+	Email    string `json:"email"`
+	Role     string `json:"role"`
+}
+
+func (api *ApiConfig) requireAdmin(w http.ResponseWriter, r *http.Request) (dbgen.Session, bool) {
+	session, ok, err := api.authenticatedSession(r)
+	if err != nil {
+		http.Error(w, "Failed to validate session", http.StatusInternalServerError)
+		return dbgen.Session{}, false
+	}
+	if !ok {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return dbgen.Session{}, false
+	}
+
+	user, err := api.DB.GetUserByID(r.Context(), session.UserID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return dbgen.Session{}, false
+	}
+	if err != nil {
+		http.Error(w, "Failed to validate administrator", http.StatusInternalServerError)
+		return dbgen.Session{}, false
+	}
+	if user.Role != "admin" {
+		http.Error(w, "Administrator access required", http.StatusForbidden)
+		return dbgen.Session{}, false
+	}
+	return session, true
+}
+
+func (api *ApiConfig) handleGetUsersForAdmin(w http.ResponseWriter, r *http.Request) {
+	if _, ok := api.requireAdmin(w, r); !ok {
+		return
+	}
+	users, err := api.DB.GetUsersForAdmin(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to load users", http.StatusInternalServerError)
+		return
+	}
+	responseUsers := make([]adminUserResponse, 0, len(users))
+	for _, user := range users {
+		responseUsers = append(responseUsers, adminUserResponse{
+			Username: user.ID,
+			FullName: user.FullName,
+			Email:    user.Email,
+			Role:     user.Role,
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(responseUsers); err != nil {
+		http.Error(w, "Failed to encode users", http.StatusInternalServerError)
+	}
+}
+
+func (api *ApiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	if _, ok := api.requireAdmin(w, r); !ok {
+		return
+	}
+	var params struct {
+		Username string `json:"username"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&params); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+	params.Username = strings.ToLower(strings.TrimSpace(params.Username))
+	params.Email = strings.TrimSpace(params.Email)
+	address, err := mail.ParseAddress(params.Email)
+	if !isAlphanumeric(params.Username) || len(params.Username) > 32 ||
+		utf8.RuneCountInString(params.Email) > 255 || err != nil || address.Address != params.Email ||
+		len(params.Password) < 8 || len(params.Password) > 72 {
+		http.Error(w, "Provide an alphanumeric username of at most 32 characters, a valid email, and a password of 8 to 72 bytes", http.StatusBadRequest)
+		return
+	}
+
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(params.Password), bcrypt.DefaultCost)
+	if err != nil {
+		http.Error(w, "Failed to secure password", http.StatusInternalServerError)
+		return
+	}
+	user, err := api.DB.CreateUser(r.Context(), dbgen.CreateUserParams{
+		ID:           params.Username,
+		Email:        params.Email,
+		PasswordHash: string(passwordHash),
+		FullName:     params.Username,
+		Role:         "user",
+	})
+	var databaseError *pgconn.PgError
+	if errors.As(err, &databaseError) && databaseError.Code == "23505" {
+		http.Error(w, "Username or email address is already in use", http.StatusConflict)
+		return
+	}
+	if err != nil {
+		http.Error(w, "Failed to create user", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(adminUserResponse{
+		Username: user.ID,
+		FullName: user.FullName,
+		Email:    user.Email,
+		Role:     user.Role,
+	}); err != nil {
+		http.Error(w, "Failed to encode created user", http.StatusInternalServerError)
+	}
+}
+
+func (api *ApiConfig) handlePromoteUser(w http.ResponseWriter, r *http.Request) {
+	session, ok := api.requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	userID := strings.ToLower(strings.TrimSpace(r.PathValue("userID")))
+	if !isAlphanumeric(userID) || len(userID) > 32 {
+		http.Error(w, "Username is invalid", http.StatusBadRequest)
+		return
+	}
+	if userID == session.UserID {
+		http.Error(w, "You cannot change your own administrator role", http.StatusBadRequest)
+		return
+	}
+	var params struct {
+		Role string `json:"role"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&params); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+	if params.Role != "admin" {
+		http.Error(w, "Role must be admin", http.StatusBadRequest)
+		return
+	}
+
+	user, err := api.DB.UpdateUserRole(r.Context(), dbgen.UpdateUserRoleParams{
+		ID: userID, Role: params.Role,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "Failed to update user role", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(adminUserResponse{
+		Username: user.ID,
+		FullName: user.FullName,
+		Email:    user.Email,
+		Role:     user.Role,
+	}); err != nil {
+		http.Error(w, "Failed to encode updated user", http.StatusInternalServerError)
+	}
+}
+
 type profileResponse struct {
 	Username string `json:"username"`
 	FullName string `json:"full_name"`
 	Email    string `json:"email"`
+	Role     string `json:"role"`
 }
 
 func (api *ApiConfig) handleGetProfile(w http.ResponseWriter, r *http.Request) {
@@ -325,6 +493,7 @@ func (api *ApiConfig) handleGetProfile(w http.ResponseWriter, r *http.Request) {
 		Username: user.ID,
 		FullName: user.FullName,
 		Email:    user.Email,
+		Role:     user.Role,
 	}); err != nil {
 		http.Error(w, "Failed to encode profile", http.StatusInternalServerError)
 	}
@@ -382,6 +551,7 @@ func (api *ApiConfig) handleUpdateProfile(w http.ResponseWriter, r *http.Request
 		Username: user.ID,
 		FullName: user.FullName,
 		Email:    user.Email,
+		Role:     user.Role,
 	}); err != nil {
 		http.Error(w, "Failed to encode profile", http.StatusInternalServerError)
 	}
@@ -931,6 +1101,30 @@ func (api *ApiConfig) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"authenticated": true})
+}
+
+func (api *ApiConfig) handleLogout(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("snappy_session")
+	if err == nil {
+		if err := api.DB.DeleteSession(r.Context(), cookie.Value); err != nil {
+			http.Error(w, "Failed to log out", http.StatusInternalServerError)
+			return
+		}
+	} else if !errors.Is(err, http.ErrNoCookie) {
+		http.Error(w, "Failed to log out", http.StatusInternalServerError)
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "snappy_session",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   api.SecureCookie,
+		SameSite: http.SameSiteStrictMode,
+	})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (api *ApiConfig) authenticatedSession(r *http.Request) (dbgen.Session, bool, error) {
