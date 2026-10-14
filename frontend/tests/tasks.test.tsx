@@ -49,9 +49,10 @@ describe('Tasks', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Mock drag without target' }));
       fireEvent.click(screen.getByRole('button', { name: 'Mock drag over Complete' }));
       rerender(<AuthenticatedBoard tasks={tasks} setTasks={setTasks} />);
-      expect(screen.getByText('Completed', { exact: false })).toBeTruthy();
+      expect(screen.queryByText('Completed', { exact: false })).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: 'Mock drag end' }));
       rerender(<AuthenticatedBoard tasks={tasks} setTasks={setTasks} />);
+      expect(screen.getByText('Completed', { exact: false })).toBeTruthy();
       expect(screen.getAllByText('Test task')).toHaveLength(1);
     });
   
