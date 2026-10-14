@@ -51,6 +51,7 @@ func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, 
 	mux.HandleFunc("GET /api/users", api.handleGetUsersForAssignment)
 	mux.HandleFunc("GET /api/profile", api.handleGetProfile)
 	mux.HandleFunc("PUT /api/profile", api.handleUpdateProfile)
+	mux.HandleFunc("PUT /api/profile/password", api.handleUpdatePassword)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Snappy Plan Backend is running!"))
 	})
@@ -383,6 +384,72 @@ func (api *ApiConfig) handleUpdateProfile(w http.ResponseWriter, r *http.Request
 		Email:    user.Email,
 	}); err != nil {
 		http.Error(w, "Failed to encode profile", http.StatusInternalServerError)
+	}
+}
+
+func (api *ApiConfig) handleUpdatePassword(w http.ResponseWriter, r *http.Request) {
+	session, ok, err := api.authenticatedSession(r)
+	if err != nil {
+		http.Error(w, "Failed to validate session", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	var params struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+		ConfirmPassword string `json:"confirm_password"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&params); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+	if params.NewPassword == "" || params.NewPassword != params.ConfirmPassword {
+		http.Error(w, "New password must be non-empty and match the confirmation", http.StatusBadRequest)
+		return
+	}
+	if len(params.NewPassword) < 8 || len(params.NewPassword) > 72 {
+		http.Error(w, "New password must be between 8 and 72 bytes", http.StatusBadRequest)
+		return
+	}
+	if params.CurrentPassword == "" {
+		http.Error(w, "Current password is required", http.StatusBadRequest)
+		return
+	}
+
+	user, err := api.DB.GetUserByID(r.Context(), session.UserID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "Failed to load account", http.StatusInternalServerError)
+		return
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(params.CurrentPassword)); err != nil {
+		http.Error(w, "Current password is incorrect", http.StatusUnauthorized)
+		return
+	}
+
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(params.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		http.Error(w, "Failed to secure new password", http.StatusInternalServerError)
+		return
+	}
+	if err := api.DB.UpdateUserPassword(r.Context(), dbgen.UpdateUserPasswordParams{
+		ID:           session.UserID,
+		PasswordHash: string(passwordHash),
+	}); err != nil {
+		http.Error(w, "Failed to update password", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{"message": "Password updated successfully"}); err != nil {
+		http.Error(w, "Failed to encode password update response", http.StatusInternalServerError)
 	}
 }
 

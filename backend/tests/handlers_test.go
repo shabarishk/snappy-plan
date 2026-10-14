@@ -37,6 +37,7 @@ type fakeDB struct {
 	moveTaskErr        error
 	updateTaskErr      error
 	updateProfileErr   error
+	updatePasswordErr  error
 	tasksErr           error
 	assigneesErr       error
 	assignees          []dbgen.GetUsersForAssignmentRow
@@ -47,6 +48,7 @@ type fakeDB struct {
 	moveTaskArgs       []any
 	updateTaskArgs     []any
 	updateProfileArgs  []any
+	updatePasswordArgs []any
 	sessionArgs        []any
 	createUserArgs     []any
 	createBoardErr     error
@@ -54,7 +56,15 @@ type fakeDB struct {
 	createUserError    error
 }
 
-func (db *fakeDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+func (db *fakeDB) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(query, "UPDATE users") && strings.Contains(query, "password_hash") {
+		db.updatePasswordArgs = args
+		if db.updatePasswordErr != nil {
+			return pgconn.CommandTag{}, db.updatePasswordErr
+		}
+		db.user.ID = args[0].(string)
+		db.user.PasswordHash = args[1].(string)
+	}
 	return pgconn.CommandTag{}, nil
 }
 
@@ -1286,6 +1296,142 @@ func TestProfileEndpoints(t *testing.T) {
 			if response.Code != http.StatusInternalServerError {
 				t.Errorf("%s status = %d, want %d", method, response.Code, http.StatusInternalServerError)
 			}
+		}
+	})
+}
+
+func TestUpdatePasswordEndpoint(t *testing.T) {
+	const ownerID = "owner1"
+	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
+	validBody := `{"current_password":"password123","new_password":"new-password","confirm_password":"new-password"}`
+
+	t.Run("requires authentication", func(t *testing.T) {
+		response := send(newHandler(&fakeDB{}, nil, false), http.MethodPut,
+			"/api/profile/password", validBody, nil)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("updates password after validating current password", func(t *testing.T) {
+		user := newUser("password123")
+		user.ID = ownerID
+		db := &fakeDB{
+			session: dbgen.Session{Token: "token", UserID: ownerID},
+			user:    user,
+		}
+		response := send(newHandler(db, nil, false), http.MethodPut,
+			"/api/profile/password", validBody, cookie)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+		}
+		if len(db.updatePasswordArgs) != 2 || db.updatePasswordArgs[0] != ownerID {
+			t.Fatalf("password update args = %#v", db.updatePasswordArgs)
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(db.user.PasswordHash), []byte("new-password")); err != nil {
+			t.Fatalf("stored password hash does not match new password: %v", err)
+		}
+		var body map[string]string
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if body["message"] != "Password updated successfully" {
+			t.Fatalf("response = %#v", body)
+		}
+	})
+
+	t.Run("rejects invalid password fields", func(t *testing.T) {
+		for _, body := range []string{
+			`{`,
+			`{"current_password":"password123","new_password":"","confirm_password":""}`,
+			`{"current_password":"password123","new_password":"new-password","confirm_password":"different-password"}`,
+			`{"current_password":"","new_password":"new-password","confirm_password":"new-password"}`,
+			`{"current_password":"password123","new_password":"short","confirm_password":"short"}`,
+			`{"current_password":"password123","new_password":"` + strings.Repeat("a", 73) + `","confirm_password":"` + strings.Repeat("a", 73) + `"}`,
+		} {
+			user := newUser("password123")
+			user.ID = ownerID
+			db := &fakeDB{
+				session: dbgen.Session{Token: "token", UserID: ownerID},
+				user:    user,
+			}
+			response := send(newHandler(db, nil, false), http.MethodPut,
+				"/api/profile/password", body, cookie)
+			if response.Code != http.StatusBadRequest {
+				t.Errorf("body %q status = %d, want %d", body, response.Code, http.StatusBadRequest)
+			}
+			if len(db.updatePasswordArgs) != 0 {
+				t.Errorf("invalid password request wrote to database: %#v", db.updatePasswordArgs)
+			}
+		}
+	})
+
+	t.Run("rejects an incorrect current password", func(t *testing.T) {
+		user := newUser("password123")
+		user.ID = ownerID
+		db := &fakeDB{
+			session: dbgen.Session{Token: "token", UserID: ownerID},
+			user:    user,
+		}
+		body := `{"current_password":"incorrect","new_password":"new-password","confirm_password":"new-password"}`
+		response := send(newHandler(db, nil, false), http.MethodPut,
+			"/api/profile/password", body, cookie)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
+		}
+		if len(db.updatePasswordArgs) != 0 {
+			t.Fatalf("incorrect current password updated database: %#v", db.updatePasswordArgs)
+		}
+	})
+
+	t.Run("reports lookup, session, and update failures", func(t *testing.T) {
+		for _, test := range []struct {
+			name       string
+			db         *fakeDB
+			wantStatus int
+		}{
+			{
+				name: "session validation failure",
+				db: &fakeDB{
+					session:    dbgen.Session{Token: "token", UserID: ownerID},
+					sessionErr: errors.New("session query failed"),
+				},
+				wantStatus: http.StatusInternalServerError,
+			},
+			{
+				name: "missing user",
+				db: &fakeDB{
+					session: dbgen.Session{Token: "token", UserID: ownerID},
+					userErr: pgx.ErrNoRows,
+				},
+				wantStatus: http.StatusNotFound,
+			},
+			{
+				name: "user lookup failure",
+				db: &fakeDB{
+					session: dbgen.Session{Token: "token", UserID: ownerID},
+					userErr: errors.New("user query failed"),
+				},
+				wantStatus: http.StatusInternalServerError,
+			},
+			{
+				name: "password update failure",
+				db: &fakeDB{
+					session:           dbgen.Session{Token: "token", UserID: ownerID},
+					user:              newUser("password123"),
+					updatePasswordErr: errors.New("password update failed"),
+				},
+				wantStatus: http.StatusInternalServerError,
+			},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				test.db.user.ID = ownerID
+				response := send(newHandler(test.db, nil, false), http.MethodPut,
+					"/api/profile/password", validBody, cookie)
+				if response.Code != test.wantStatus {
+					t.Fatalf("status = %d, want %d: %s", response.Code, test.wantStatus, response.Body.String())
+				}
+			})
 		}
 	})
 }
