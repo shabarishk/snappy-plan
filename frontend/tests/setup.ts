@@ -15,40 +15,44 @@ vi.mock('@dnd-kit/core', async () => {
     DndContext: ({
       children,
       onDragStart,
-      onDragOver,
       onDragEnd,
     }: {
       children: React.ReactNode;
       onDragStart: (event: never) => void;
-      onDragOver: (event: never) => void;
-      onDragEnd: () => void;
-    }) => React.createElement(React.Fragment, null,
-      children,
-      React.createElement('button', {
-        onClick: () => onDragStart({
+      onDragEnd: (event: never) => void;
+    }) => {
+      const [over, setOver] = React.useState<{ id: string; data: { current: { type: string } } } | null>(null);
+      const active = { id: task.id, data: { current: { type: 'Task', task } } };
+
+      return React.createElement(React.Fragment, null,
+        children,
+        React.createElement('button', {
+          onClick: () => onDragStart({
           active: { id: task.id, data: { current: { type: 'Task', task } } },
-        } as never),
-      }, 'Mock drag start'),
-      React.createElement('button', {
-        onClick: () => onDragOver({
-          active: { id: task.id, data: { current: { type: 'Task', task } } },
-          over: { id: 'complete', data: { current: { type: 'Column' } } },
-        } as never),
-      }, 'Mock drag over Complete'),
-      React.createElement('button', {
-        onClick: () => onDragOver({
-          active: { id: task.id, data: { current: { type: 'Task', task } } },
-          over: { id: 'in-progress', data: { current: { type: 'Column' } } },
-        } as never),
-      }, 'Mock drag over In Progress'),
-      React.createElement('button', {
-        onClick: () => onDragOver({
-          active: { id: task.id, data: { current: { type: 'Task', task } } },
-          over: null,
-        } as never),
-      }, 'Mock drag without target'),
-      React.createElement('button', { onClick: onDragEnd }, 'Mock drag end'),
-    ),
+          } as never),
+        }, 'Mock drag start'),
+        React.createElement('button', {
+          onClick: () => {
+            const destination = { id: 'complete', data: { current: { type: 'Column' } } };
+            setOver(destination);
+          },
+        }, 'Mock drag over Complete'),
+        React.createElement('button', {
+          onClick: () => {
+            const destination = { id: 'in-progress', data: { current: { type: 'Column' } } };
+            setOver(destination);
+          },
+        }, 'Mock drag over In Progress'),
+        React.createElement('button', {
+          onClick: () => {
+            setOver(null);
+          },
+        }, 'Mock drag without target'),
+        React.createElement('button', {
+          onClick: () => onDragEnd({ active, over } as never),
+        }, 'Mock drag end'),
+      );
+    },
     DragOverlay: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
     closestCorners: vi.fn(),
     KeyboardSensor: vi.fn(),

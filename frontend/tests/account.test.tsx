@@ -5,6 +5,28 @@ import App from '../src/App';
 import { boardList, mockBoardReads } from './appTestUtils';
 
 describe('Account', () => {
+  it('closes the user menu when clicking outside it', async () => {
+    const fetchMock = mockBoardReads();
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
+      if (url.startsWith('/api/tasks?board_id=') || url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'User menu for boardowner' }));
+    expect(screen.getByRole('menu', { name: 'User menu' })).toBeTruthy();
+
+    fireEvent.pointerDown(document.body);
+
+    expect(screen.queryByRole('menu', { name: 'User menu' })).toBeNull();
+  });
+
   it('provides Home and a user menu with an editable profile', async () => {
       const fetchMock = mockBoardReads();
       fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {

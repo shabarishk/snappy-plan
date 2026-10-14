@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DndContext, DragOverlay, closestCorners, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
-import type { DragStartEvent, DragOverEvent } from '@dnd-kit/core';
+import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core';
 import { deleteBoard as persistDeleteBoard, getBoards, getProfile, getTaskAssignees, getTasks, logout, moveTask as persistMoveTask } from './api';
 import type { Board, TaskAssignee, UserProfile } from './api';
 import type { ColumnId, Task } from './taskModel';
@@ -31,6 +31,8 @@ export function AuthenticatedBoard({
   const [selectedBoardId, setSelectedBoardId] = useState('');
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
+  const boardMenuRef = useRef<HTMLDivElement>(null);
   const [logoutError, setLogoutError] = useState('');
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
@@ -58,6 +60,30 @@ export function AuthenticatedBoard({
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
+
+  useEffect(() => {
+    if (!isProfileMenuOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && !profileMenuRef.current?.contains(event.target)) {
+        setIsProfileMenuOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [isProfileMenuOpen]);
+
+  useEffect(() => {
+    if (!isBoardMenuOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && !boardMenuRef.current?.contains(event.target)) {
+        setIsBoardMenuOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [isBoardMenuOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -111,28 +137,6 @@ export function AuthenticatedBoard({
     }
   };
 
-  const onDragOver = (event: DragOverEvent) => {
-    const { active, over } = event;
-    if (!over) return;
-    const activeId = active.id;
-    const overId = over.id;
-    if (activeId === overId) return;
-
-    const isActiveTask = active.data.current?.type === 'Task';
-    const destinationColumn = over.data.current?.type === 'Column'
-      ? COLUMNS.find((column) => column.id === overId.toString())
-      : undefined;
-    if (isActiveTask && destinationColumn) {
-      setTasks((prev) => {
-        const activeIndex = prev.findIndex((t) => t.id === activeId);
-        if (activeIndex < 0) return prev;
-        const newTasks = [...prev];
-        newTasks[activeIndex] = moveTaskToColumn(newTasks[activeIndex], destinationColumn.id);
-        return newTasks;
-      });
-    }
-  };
-
   const persistTaskMove = async (task: Task, destination: ColumnId) => {
     if (task.columnId === destination) return;
     setMoveError('');
@@ -148,10 +152,18 @@ export function AuthenticatedBoard({
     }
   };
 
-  const onDragEnd = () => {
-    const movedTask = activeTask && tasks.find((task) => task.id === activeTask.id);
-    if (activeTask && movedTask && movedTask.columnId !== activeTask.columnId) {
-      void persistTaskMove(activeTask, movedTask.columnId);
+  const onDragEnd = (event: DragEndEvent) => {
+    const task = tasks.find((current) => current.id === event.active.id);
+    const destinationColumn = event.over?.data.current?.type === 'Column'
+      ? COLUMNS.find((column) => column.id === event.over?.id.toString())
+      : undefined;
+
+    if (task && destinationColumn && task.columnId !== destinationColumn.id) {
+      const movedTask = moveTaskToColumn(task, destinationColumn.id);
+      setTasks((previous) => previous.map((current) =>
+        current.id === task.id ? movedTask : current
+      ));
+      void persistTaskMove(task, destinationColumn.id);
     }
     setActiveTask(null);
   };
@@ -217,7 +229,7 @@ export function AuthenticatedBoard({
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 4v16m6-16v16" />
           </svg>
         </button>
-        <div className="mt-auto flex flex-col items-center gap-2">
+        <div ref={profileMenuRef} className="mt-auto flex flex-col items-center gap-2">
           {profile?.role === 'admin' && (
             <button
               type="button"
@@ -275,7 +287,7 @@ export function AuthenticatedBoard({
       <header className="bg-white p-4 shadow-sm z-10 flex justify-between items-center shrink-0">
         <div className="flex items-center gap-3">
           {(currentPage === 'board' || currentPage === 'backlog') ? (
-            <div className="relative">
+            <div ref={boardMenuRef} className="relative">
               <button
                 type="button"
                 aria-label={`Current board: ${selectedBoard?.title ?? 'No boards'}`}
@@ -375,11 +387,13 @@ export function AuthenticatedBoard({
         <TaskDetailsOverlay
           key={selectedTask.id}
           task={selectedTask}
+          boards={boards}
+          selectedBoardId={selectedBoardId}
           onClose={() => setSelectedTaskId(null)}
-          onSaved={(updatedTask) => {
-            setTasks((previous) => previous.map((task) =>
-              task.id === updatedTask.id ? updatedTask : task
-            ));
+          onSaved={(updatedTask, assignedBoardId) => {
+            setTasks((previous) => assignedBoardId === selectedBoardId
+              ? previous.map((task) => task.id === updatedTask.id ? updatedTask : task)
+              : previous.filter((task) => task.id !== updatedTask.id));
             setSelectedTaskId(null);
           }}
         />
@@ -439,7 +453,6 @@ export function AuthenticatedBoard({
           sensors={sensors}
           collisionDetection={closestCorners}
           onDragStart={onDragStart}
-          onDragOver={onDragOver}
           onDragEnd={onDragEnd}
         >
           {/* Backlog is managed separately; the main board keeps its active workflow lanes. */}

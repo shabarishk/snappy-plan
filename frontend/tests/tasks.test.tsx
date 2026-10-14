@@ -49,9 +49,10 @@ describe('Tasks', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Mock drag without target' }));
       fireEvent.click(screen.getByRole('button', { name: 'Mock drag over Complete' }));
       rerender(<AuthenticatedBoard tasks={tasks} setTasks={setTasks} />);
-      expect(screen.getByText('Completed', { exact: false })).toBeTruthy();
+      expect(screen.queryByText('Completed', { exact: false })).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: 'Mock drag end' }));
       rerender(<AuthenticatedBoard tasks={tasks} setTasks={setTasks} />);
+      expect(screen.getByText('Completed', { exact: false })).toBeTruthy();
       expect(screen.getAllByText('Test task')).toHaveLength(1);
     });
   
@@ -149,12 +150,53 @@ describe('Tasks', () => {
       expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-1', expect.objectContaining({
         method: 'PUT',
         body: JSON.stringify({
+          board_id: 'board-1',
           title: 'Updated task title',
           description: 'Updated details',
           priority: 'High',
           state: 'InProgress',
           complete_by: new Date('2026-10-20T09:30').toISOString(),
         }),
+      }));
+    });
+
+  it('moves a task to the selected board from the details overlay', async () => {
+      const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+        if (url === '/api/boards') return { ok: true, json: async () => boardList };
+        if (url === '/api/tasks/task-1' && options?.method === 'PUT') {
+          return { ok: true, json: async () => taskResponse({
+            id: 'task-1',
+            title: 'Board transfer task',
+            state: 'ToDo',
+          }) };
+        }
+        if (url.startsWith('/api/tasks?board_id=')) return {
+          ok: true,
+          json: async () => [taskResponse({
+            id: 'task-1',
+            title: 'Board transfer task',
+            state: 'ToDo',
+          })],
+        };
+        if (url === '/api/users') return { ok: true, json: async () => [] };
+        if (url === '/api/profile') return {
+          ok: true,
+          json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+        };
+        return { ok: true, json: async () => ({ authenticated: true }) };
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      render(<App />);
+
+      fireEvent.click(await screen.findByText('Board transfer task'));
+      fireEvent.change(screen.getByLabelText('Board'), { target: { value: 'board-2' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Task details' })).toBeNull());
+      expect(screen.queryByText('Board transfer task')).toBeNull();
+      expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-1', expect.objectContaining({
+        method: 'PUT',
+        body: expect.stringContaining('"board_id":"board-2"'),
       }));
     });
   

@@ -26,8 +26,10 @@ type fakeDB struct {
 	session                dbgen.Session
 	sessionErr             error
 	board                  dbgen.Board
+	destinationBoard       dbgen.Board
 	boards                 []dbgen.Board
 	boardErr               error
+	destinationBoardErr    error
 	column                 dbgen.Column
 	columnErr              error
 	task                   dbgen.Task
@@ -246,9 +248,17 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 		}, err: db.boardErr}
 	case strings.Contains(query, "FROM boards") && strings.Contains(query, "WHERE id") &&
 		strings.Contains(query, "owner_id"):
+		board := db.board
+		err := db.boardErr
+		if len(args) > 0 {
+			if boardID, ok := args[0].(pgtype.UUID); ok && db.destinationBoard.ID.Valid && boardID == db.destinationBoard.ID {
+				board = db.destinationBoard
+				err = db.destinationBoardErr
+			}
+		}
 		return fakeRow{values: []any{
-			db.board.ID, db.board.Title, db.board.OwnerID, db.board.CreatedAt, db.board.UpdatedAt,
-		}, err: db.boardErr}
+			board.ID, board.Title, board.OwnerID, board.CreatedAt, board.UpdatedAt,
+		}, err: err}
 	case strings.Contains(query, "FROM boards") && strings.Contains(query, "WHERE owner_id"):
 		return fakeRow{values: []any{
 			db.board.ID, db.board.Title, db.board.OwnerID, db.board.CreatedAt, db.board.UpdatedAt,

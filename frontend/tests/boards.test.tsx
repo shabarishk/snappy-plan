@@ -25,7 +25,13 @@ describe('Boards', () => {
       vi.stubGlobal('fetch', fetchMock);
       render(<App />);
   
-      fireEvent.click(await screen.findByRole('button', { name: 'Current board: Board Owner' }));
+      const boardMenuButton = await screen.findByRole('button', { name: 'Current board: Board Owner' });
+      fireEvent.click(boardMenuButton);
+      expect(screen.getByRole('menu', { name: 'Switch board' })).toBeTruthy();
+      fireEvent.pointerDown(document.body);
+      expect(screen.queryByRole('menu', { name: 'Switch board' })).toBeNull();
+
+      fireEvent.click(boardMenuButton);
       fireEvent.click(screen.getByRole('menuitem', { name: 'Project Board' }));
       expect(await screen.findByRole('button', { name: 'Current board: Project Board' })).toBeTruthy();
       expect(fetchMock).toHaveBeenCalledWith('/api/tasks?board_id=board-2', { credentials: 'same-origin' });

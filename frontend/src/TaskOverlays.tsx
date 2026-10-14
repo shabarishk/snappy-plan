@@ -121,15 +121,20 @@ export function CreateTaskOverlay({
 
 export function TaskDetailsOverlay({
   task,
+  boards,
+  selectedBoardId,
   onClose,
   onSaved,
 }: {
   task: Task;
+  boards: Board[];
+  selectedBoardId: string;
   onClose: () => void;
-  onSaved: (task: Task) => void;
+  onSaved: (task: Task, boardId: string) => void;
 }) {
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? '');
+  const [boardId, setBoardId] = useState(selectedBoardId);
   const [priority, setPriority] = useState<TaskPriority>(task.priority);
   const [state, setState] = useState<TaskState>(task.state);
   const [completeBy, setCompleteBy] = useState(() => {
@@ -146,13 +151,14 @@ export function TaskDetailsOverlay({
     setError('');
     try {
       const updated = await persistUpdateTask(task.id, {
+        board_id: boardId,
         title,
         description,
         priority,
         state,
         complete_by: completeBy ? new Date(completeBy).toISOString() : null,
       });
-      onSaved(toBoardTask(updated));
+      onSaved(toBoardTask(updated), boardId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update task');
     } finally {
@@ -184,6 +190,12 @@ export function TaskDetailsOverlay({
           <div>
             <label htmlFor="edit-task-description" className="mb-1 block text-sm font-medium text-gray-700">Description</label>
             <textarea id="edit-task-description" value={description} onChange={(event) => setDescription(event.target.value)} rows={4} className="w-full rounded-lg border border-gray-300 p-2" />
+          </div>
+          <div>
+            <label htmlFor="edit-task-board" className="mb-1 block text-sm font-medium text-gray-700">Board</label>
+            <select id="edit-task-board" required value={boardId} onChange={(event) => setBoardId(event.target.value)} className="w-full rounded-lg border border-gray-300 p-2">
+              {boards.map((board) => <option key={board.id} value={board.id}>{board.title}</option>)}
+            </select>
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
