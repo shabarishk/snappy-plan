@@ -161,6 +161,29 @@ ORDER BY CASE task.priority
     ELSE 2
 END, task.created_at ASC;
 
+-- name: MoveDueBacklogTasksToTodo :exec
+UPDATE tasks AS task
+SET column_id = todo.id,
+    state = 'ToDo',
+    updated_at = NOW()
+FROM columns AS backlog
+JOIN boards AS board ON board.id = backlog.board_id
+JOIN columns AS todo ON todo.board_id = board.id
+WHERE task.column_id = backlog.id
+  AND task.state = 'Backlog'
+  AND LOWER(TRIM(backlog.title)) = 'backlog'
+  AND LOWER(TRIM(todo.title)) IN ('todo', 'to do', 'to-do')
+  AND task.complete_by < NOW() + INTERVAL '2 days'
+  AND (
+      board.owner_id = sqlc.arg(owner_id) OR EXISTS (
+          SELECT 1 FROM board_members
+          WHERE board_id = board.id AND user_id = sqlc.arg(owner_id)
+      )
+  )
+  AND (
+      sqlc.narg(board_id)::UUID IS NULL OR board.id = sqlc.narg(board_id)
+  );
+
 -- name: GetTasksByColumn :many
 SELECT * FROM tasks
 WHERE column_id = $1

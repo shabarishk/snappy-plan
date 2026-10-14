@@ -37,6 +37,8 @@ type fakeDB struct {
 	createColumnErr        error
 	moveTaskErr            error
 	updateTaskErr          error
+	moveDueTasksErr        error
+	moveDueTasksArgs       []any
 	updateProfileErr       error
 	updatePasswordErr      error
 	tasksErr               error
@@ -96,6 +98,10 @@ func (writer *failingResponseWriter) Write([]byte) (int, error) {
 }
 
 func (db *fakeDB) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(query, "UPDATE tasks AS task") && strings.Contains(query, "state = 'ToDo'") {
+		db.moveDueTasksArgs = args
+		return pgconn.CommandTag{}, db.moveDueTasksErr
+	}
 	if strings.Contains(query, "DELETE FROM boards") {
 		db.deleteBoardArgs = args
 		db.deleteBoardQuery = query
