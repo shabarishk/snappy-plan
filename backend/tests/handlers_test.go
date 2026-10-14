@@ -52,14 +52,20 @@ type fakeDB struct {
 	updateUserRoleErr  error
 	updateUserRoleArgs []any
 	updatePasswordArgs []any
+	deleteSessionArgs  []any
 	sessionArgs        []any
 	createUserArgs     []any
 	createBoardErr     error
 	createSessionError error
 	createUserError    error
+	deleteSessionErr   error
 }
 
 func (db *fakeDB) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(query, "DELETE FROM sessions") {
+		db.deleteSessionArgs = args
+		return pgconn.CommandTag{}, db.deleteSessionErr
+	}
 	if strings.Contains(query, "UPDATE users") && strings.Contains(query, "password_hash") {
 		db.updatePasswordArgs = args
 		if db.updatePasswordErr != nil {
@@ -544,6 +550,48 @@ func TestLoginAndAuthStatusEndpoints(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLogoutEndpoint(t *testing.T) {
+	t.Run("deletes session and expires cookie", func(t *testing.T) {
+		db := &fakeDB{}
+		response := send(newHandler(db, nil, true), http.MethodPost, "/api/logout", "",
+			&http.Cookie{Name: "snappy_session", Value: "session-token"})
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusNoContent, response.Body.String())
+		}
+		if len(db.deleteSessionArgs) != 1 || db.deleteSessionArgs[0] != "session-token" {
+			t.Fatalf("delete session args = %#v", db.deleteSessionArgs)
+		}
+		cookies := response.Result().Cookies()
+		if len(cookies) != 1 || cookies[0].Name != "snappy_session" ||
+			cookies[0].Value != "" || cookies[0].MaxAge >= 0 ||
+			!cookies[0].HttpOnly || !cookies[0].Secure ||
+			cookies[0].SameSite != http.SameSiteStrictMode {
+			t.Fatalf("unexpected logout cookie: %#v", cookies)
+		}
+	})
+
+	t.Run("clears cookie when there is no session", func(t *testing.T) {
+		response := send(newHandler(&fakeDB{}, nil, false), http.MethodPost, "/api/logout", "", nil)
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("status = %d, want %d", response.Code, http.StatusNoContent)
+		}
+		if len(response.Result().Cookies()) != 1 || response.Result().Cookies()[0].MaxAge >= 0 {
+			t.Fatalf("logout cookie was not expired: %#v", response.Result().Cookies())
+		}
+	})
+
+	t.Run("reports database errors without clearing cookie", func(t *testing.T) {
+		response := send(newHandler(&fakeDB{deleteSessionErr: errors.New("delete failed")}, nil, false),
+			http.MethodPost, "/api/logout", "", &http.Cookie{Name: "snappy_session", Value: "token"})
+		if response.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want %d", response.Code, http.StatusInternalServerError)
+		}
+		if len(response.Result().Cookies()) != 0 {
+			t.Fatalf("logout unexpectedly cleared cookie: %#v", response.Result().Cookies())
+		}
+	})
 }
 
 func TestCreateBoardEndpoint(t *testing.T) {

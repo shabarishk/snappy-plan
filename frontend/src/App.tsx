@@ -6,7 +6,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { AuthWrapper } from './Auth';
 import { sortTasksByPriority, type TaskPriority } from './taskPriority';
-import { createTask as persistTask, createUser, getAdminUsers, getProfile, getTaskAssignees, getTasks, moveTask as persistMoveTask, promoteUserToAdmin, updatePassword, updateProfile, updateTask as persistUpdateTask, type AdminUser, type ApiTask, type TaskAssignee, type UserProfile } from './api';
+import { createTask as persistTask, createUser, getAdminUsers, getProfile, getTaskAssignees, getTasks, logout, moveTask as persistMoveTask, promoteUserToAdmin, updatePassword, updateProfile, updateTask as persistUpdateTask, type AdminUser, type ApiTask, type TaskAssignee, type UserProfile } from './api';
 
 // --- Types ---
 type TaskState = 'Backlog' | 'ToDo' | 'InProgress' | 'Complete';
@@ -712,9 +712,11 @@ function AdminPage({ currentUsername }: { currentUsername: string }) {
 export function AuthenticatedBoard({
   tasks,
   setTasks,
+  onLoggedOut,
 }: {
   tasks: Task[];
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
+  onLoggedOut?: () => void;
 }) {
   const [currentPage, setCurrentPage] = useState<AppPage>(() => pageFromPath(window.location.pathname));
   const [activeTask, setActiveTask] = useState<Task | null>(null);
@@ -722,6 +724,8 @@ export function AuthenticatedBoard({
   const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [moveError, setMoveError] = useState('');
@@ -834,6 +838,19 @@ export function AuthenticatedBoard({
     || profile?.username.charAt(0).toUpperCase()
     || '?';
 
+  const handleLogout = async () => {
+    setLogoutError('');
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      window.history.replaceState({}, '', '/');
+      onLoggedOut?.();
+    } catch (err) {
+      setLogoutError(err instanceof Error ? err.message : 'Failed to log out');
+      setIsLoggingOut(false);
+    }
+  };
+
   return (
     <div className="flex h-screen min-h-0 bg-gray-200 font-sans">
       <aside aria-label="Sidebar" className="relative z-20 flex w-16 shrink-0 flex-col items-center border-r border-gray-200 bg-white py-4">
@@ -883,6 +900,7 @@ export function AuthenticatedBoard({
           </button>
           {isProfileMenuOpen && (
             <div role="menu" aria-label="User menu" className="absolute bottom-4 left-full ml-2 w-40 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
+              {logoutError && <p role="alert" className="px-3 py-2 text-xs text-red-700">{logoutError}</p>}
               <button type="button" role="menuitem" onClick={() => {
                 setIsProfileMenuOpen(false);
                 setIsCreateTaskOpen(false);
@@ -895,6 +913,9 @@ export function AuthenticatedBoard({
                 setSelectedTaskId(null);
                 navigateToPage('settings');
               }} className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">Settings</button>
+              <button type="button" role="menuitem" disabled={isLoggingOut} onClick={() => void handleLogout()} className="w-full rounded-md px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50 disabled:opacity-50">
+                {isLoggingOut ? 'Logging out…' : 'Log out'}
+              </button>
             </div>
           )}
         </div>
@@ -1025,5 +1046,5 @@ export default function App() {
     return <AuthWrapper onAuthenticated={handleAuthenticated} />;
   }
 
-  return <AuthenticatedBoard tasks={tasks} setTasks={setTasks} />;
+  return <AuthenticatedBoard tasks={tasks} setTasks={setTasks} onLoggedOut={() => setIsAuthenticated(false)} />;
 }

@@ -42,6 +42,7 @@ func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, 
 	mux.HandleFunc("GET /api/setup/status", api.handleSetupStatus)
 	mux.HandleFunc("POST /api/setup", api.handleInitialSetup)
 	mux.HandleFunc("POST /api/login", api.handleLogin)
+	mux.HandleFunc("POST /api/logout", api.handleLogout)
 	mux.HandleFunc("GET /api/auth/status", api.handleAuthStatus)
 	mux.HandleFunc("POST /api/boards", api.handleCreateBoard)
 	mux.HandleFunc("GET /api/tasks", api.handleGetTasks)
@@ -1100,6 +1101,30 @@ func (api *ApiConfig) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]bool{"authenticated": true})
+}
+
+func (api *ApiConfig) handleLogout(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("snappy_session")
+	if err == nil {
+		if err := api.DB.DeleteSession(r.Context(), cookie.Value); err != nil {
+			http.Error(w, "Failed to log out", http.StatusInternalServerError)
+			return
+		}
+	} else if !errors.Is(err, http.ErrNoCookie) {
+		http.Error(w, "Failed to log out", http.StatusInternalServerError)
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "snappy_session",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   api.SecureCookie,
+		SameSite: http.SameSiteStrictMode,
+	})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (api *ApiConfig) authenticatedSession(r *http.Request) (dbgen.Session, bool, error) {

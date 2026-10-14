@@ -19,6 +19,10 @@ RETURNING *;
 SELECT * FROM sessions
 WHERE token = $1 AND expires_at > NOW();
 
+-- name: DeleteSession :exec
+DELETE FROM sessions
+WHERE token = $1;
+
 -- name: CreateBoard :one
 INSERT INTO boards (title, owner_id)
 VALUES ($1, $2)

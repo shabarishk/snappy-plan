@@ -242,6 +242,42 @@ describe('App board', () => {
     expect(window.location.pathname).toBe('/');
   });
 
+  it('logs out from the user menu and returns to the login screen', async () => {
+    let authChecks = 0;
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/auth/status') {
+        authChecks += 1;
+        return { ok: true, json: async () => ({ authenticated: authChecks === 1 }) };
+      }
+      if (url === '/api/setup/status') return { ok: true, json: async () => ({ setup_required: false }) };
+      if (url === '/api/tasks' || url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({
+          username: 'boardowner',
+          full_name: 'Board Owner',
+          email: 'owner@example.com',
+          role: 'user',
+        }),
+      };
+      if (url === '/api/logout') return { ok: true, status: 204 };
+      return { ok: false, text: async () => 'Unexpected request' };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'User menu for boardowner' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Log out' }));
+
+    expect(await screen.findByRole('heading', { name: 'Welcome Back' })).toBeTruthy();
+    expect(window.location.pathname).toBe('/');
+    expect(fetchMock).toHaveBeenCalledWith('/api/logout', {
+      method: 'POST',
+      credentials: 'same-origin',
+    });
+    expect(authChecks).toBe(2);
+  });
+
   it('shows the admin tile to admins and supports creating and promoting users', async () => {
     const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
       if (url === '/api/tasks') return { ok: true, json: async () => [] };

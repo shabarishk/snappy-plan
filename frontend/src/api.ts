@@ -86,6 +86,14 @@ export const getProfile = async (): Promise<UserProfile> => {
   return res.json();
 };
 
+export const logout = async (): Promise<void> => {
+  const res = await fetch('/api/logout', {
+    method: 'POST',
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(await res.text());
+};
+
 export const getAdminUsers = async (): Promise<AdminUser[]> => {
   const res = await fetch('/api/admin/users', { credentials: 'same-origin' });
   if (!res.ok) throw new Error(await res.text());
