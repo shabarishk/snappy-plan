@@ -27,10 +27,8 @@ func (api *ApiConfig) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 
 	var tasks []dbgen.Task
 	boardIDValue := r.URL.Query().Get("board_id")
-	if boardIDValue == "" {
-		tasks, err = api.DB.GetTasksByOwner(r.Context(), session.UserID)
-	} else {
-		boardID := pgtype.UUID{}
+	boardID := pgtype.UUID{}
+	if boardIDValue != "" {
 		if err := boardID.Scan(boardIDValue); err != nil {
 			http.Error(w, "Board ID is invalid", http.StatusBadRequest)
 			return
@@ -45,7 +43,18 @@ func (api *ApiConfig) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Failed to validate board access", http.StatusInternalServerError)
 			return
 		}
+	}
+	if err := api.DB.MoveDueBacklogTasksToTodo(r.Context(), dbgen.MoveDueBacklogTasksToTodoParams{
+		OwnerID: session.UserID,
+		BoardID: boardID,
+	}); err != nil {
+		http.Error(w, "Failed to move due backlog tasks", http.StatusInternalServerError)
+		return
+	}
+	if boardID.Valid {
 		tasks, err = api.DB.GetTasksByBoard(r.Context(), boardID)
+	} else {
+		tasks, err = api.DB.GetTasksByOwner(r.Context(), session.UserID)
 	}
 	if err != nil {
 		http.Error(w, "Failed to load tasks", http.StatusInternalServerError)

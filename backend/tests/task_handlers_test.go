@@ -30,21 +30,24 @@ func TestGetTasksEndpoint(t *testing.T) {
 		boardID    string
 		boardErr   error
 		tasksErr   error
+		moveErr    error
 		wantStatus int
 	}{
 		{name: "rejects an invalid board ID", boardID: "invalid", wantStatus: http.StatusBadRequest},
 		{name: "rejects an inaccessible board", boardID: newUUID(4).String(), boardErr: pgx.ErrNoRows, wantStatus: http.StatusNotFound},
 		{name: "reports a board access query error", boardID: newUUID(4).String(), boardErr: errors.New("lookup failed"), wantStatus: http.StatusInternalServerError},
+		{name: "reports a due-task update error", boardID: newUUID(4).String(), moveErr: errors.New("update failed"), wantStatus: http.StatusInternalServerError},
 		{name: "reports a task query error", boardID: newUUID(4).String(), tasksErr: errors.New("task query failed"), wantStatus: http.StatusInternalServerError},
 		{name: "returns tasks for an accessible board", boardID: newUUID(4).String(), wantStatus: http.StatusOK},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			db := &fakeDB{
-				session:  dbgen.Session{Token: "token", UserID: "owner7"},
-				board:    dbgen.Board{ID: newUUID(4), Title: "Shared", OwnerID: "owner1"},
-				boardErr: test.boardErr,
-				tasksErr: test.tasksErr,
-				tasks:    []dbgen.Task{{ID: newUUID(8), Title: "Board task"}},
+				session:         dbgen.Session{Token: "token", UserID: "owner7"},
+				board:           dbgen.Board{ID: newUUID(4), Title: "Shared", OwnerID: "owner1"},
+				boardErr:        test.boardErr,
+				tasksErr:        test.tasksErr,
+				moveDueTasksErr: test.moveErr,
+				tasks:           []dbgen.Task{{ID: newUUID(8), Title: "Board task"}},
 			}
 			response := send(newHandler(db, nil, false), http.MethodGet,
 				"/api/tasks?board_id="+test.boardID, "", cookie)
@@ -52,6 +55,10 @@ func TestGetTasksEndpoint(t *testing.T) {
 				t.Fatalf("status = %d, want %d: %s", response.Code, test.wantStatus, response.Body.String())
 			}
 			if test.name == "returns tasks for an accessible board" {
+				if len(db.moveDueTasksArgs) != 2 || db.moveDueTasksArgs[0] != "owner7" ||
+					db.moveDueTasksArgs[1] != newUUID(4) {
+					t.Fatalf("due-task update args = %#v", db.moveDueTasksArgs)
+				}
 				var tasks []dbgen.Task
 				if err := json.Unmarshal(response.Body.Bytes(), &tasks); err != nil {
 					t.Fatalf("decode tasks: %v", err)
