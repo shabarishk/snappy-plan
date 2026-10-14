@@ -387,11 +387,13 @@ export function AuthenticatedBoard({
         <TaskDetailsOverlay
           key={selectedTask.id}
           task={selectedTask}
+          boards={boards}
+          selectedBoardId={selectedBoardId}
           onClose={() => setSelectedTaskId(null)}
-          onSaved={(updatedTask) => {
-            setTasks((previous) => previous.map((task) =>
-              task.id === updatedTask.id ? updatedTask : task
-            ));
+          onSaved={(updatedTask, assignedBoardId) => {
+            setTasks((previous) => assignedBoardId === selectedBoardId
+              ? previous.map((task) => task.id === updatedTask.id ? updatedTask : task)
+              : previous.filter((task) => task.id !== updatedTask.id));
             setSelectedTaskId(null);
           }}
         />

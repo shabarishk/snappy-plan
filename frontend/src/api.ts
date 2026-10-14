@@ -50,6 +50,7 @@ export interface CreateTaskRequest {
 }
 
 export interface UpdateTaskRequest {
+  board_id: string;
   title: string;
   description: string;
   priority: ApiTask['priority'];

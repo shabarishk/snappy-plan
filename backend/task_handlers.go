@@ -364,6 +364,7 @@ func (api *ApiConfig) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var params struct {
+		BoardID     string  `json:"board_id"`
 		Title       string  `json:"title"`
 		Description string  `json:"description"`
 		Priority    string  `json:"priority"`
@@ -382,6 +383,13 @@ func (api *ApiConfig) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	if params.Priority != "Low" && params.Priority != "Medium" && params.Priority != "High" {
 		http.Error(w, "Priority must be Low, Medium, or High", http.StatusBadRequest)
 		return
+	}
+	boardID := pgtype.UUID{}
+	if params.BoardID != "" {
+		if err := boardID.Scan(params.BoardID); err != nil {
+			http.Error(w, "Board ID is invalid", http.StatusBadRequest)
+			return
+		}
 	}
 
 	columnTitle := ""
@@ -444,12 +452,26 @@ func (api *ApiConfig) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to load task", http.StatusInternalServerError)
 		return
 	}
+	destinationBoard := board
+	if params.BoardID != "" {
+		destinationBoard, err = txQueries.GetBoardByIDAndOwner(r.Context(), dbgen.GetBoardByIDAndOwnerParams{
+			BoardID: boardID, OwnerID: session.UserID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "Board does not exist", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, "Failed to load destination board", http.StatusInternalServerError)
+			return
+		}
+	}
 	column, err := txQueries.GetColumnByBoardAndTitle(r.Context(), dbgen.GetColumnByBoardAndTitleParams{
-		BoardID: board.ID, Title: columnTitle,
+		BoardID: destinationBoard.ID, Title: columnTitle,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		column, err = txQueries.CreateColumn(r.Context(), dbgen.CreateColumnParams{
-			BoardID: board.ID, Title: columnTitle, Position: columnPosition,
+			BoardID: destinationBoard.ID, Title: columnTitle, Position: columnPosition,
 		})
 	}
 	if err != nil {

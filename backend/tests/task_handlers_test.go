@@ -464,6 +464,7 @@ func TestUpdateTaskEndpoint(t *testing.T) {
 		{name: "title too long", path: "/api/tasks/" + taskID.String(), body: `{"title":"` + strings.Repeat("x", 256) + `","priority":"Low","state":"Backlog"}`, want: http.StatusBadRequest},
 		{name: "invalid priority", path: "/api/tasks/" + taskID.String(), body: `{"title":"Task","priority":"Urgent","state":"Backlog"}`, want: http.StatusBadRequest},
 		{name: "invalid state", path: "/api/tasks/" + taskID.String(), body: `{"title":"Task","priority":"Low","state":"Blocked"}`, want: http.StatusBadRequest},
+		{name: "invalid board ID", path: "/api/tasks/" + taskID.String(), body: `{"title":"Task","priority":"Low","state":"Backlog","board_id":"not-a-uuid"}`, want: http.StatusBadRequest},
 		{name: "invalid due date", path: "/api/tasks/" + taskID.String(), body: `{"title":"Task","priority":"Low","state":"Backlog","complete_by":"not-a-date"}`, want: http.StatusBadRequest},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -560,6 +561,53 @@ func TestUpdateTaskEndpoint(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("moves task to the selected board lane", func(t *testing.T) {
+		sourceBoardID := newUUID(4)
+		destinationBoardID := newUUID(5)
+		columnID := newUUID(6)
+		db := &fakeDB{
+			session:          dbgen.Session{Token: "token", UserID: ownerID},
+			board:            dbgen.Board{ID: sourceBoardID, OwnerID: ownerID},
+			destinationBoard: dbgen.Board{ID: destinationBoardID, OwnerID: ownerID},
+			column:           dbgen.Column{ID: columnID, BoardID: destinationBoardID, Title: "In Progress"},
+			columnErr:        pgx.ErrNoRows,
+		}
+		tx := &fakeTx{fakeDB: db}
+		handler := newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false)
+		requestBody := `{"board_id":"` + destinationBoardID.String() + `","title":"Updated","description":"","priority":"Low","state":"InProgress"}`
+		response := send(handler, http.MethodPut, "/api/tasks/"+taskID.String(), requestBody, cookie)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+		}
+		if len(db.columnArgs) != 3 || db.columnArgs[0] != destinationBoardID {
+			t.Fatalf("created lane args = %#v, want destination board %v", db.columnArgs, destinationBoardID)
+		}
+		if len(db.updateTaskArgs) != 8 || db.updateTaskArgs[0] != columnID {
+			t.Fatalf("task update args = %#v, want destination lane %v", db.updateTaskArgs, columnID)
+		}
+	})
+
+	t.Run("rejects inaccessible destination board", func(t *testing.T) {
+		destinationBoardID := newUUID(5)
+		db := &fakeDB{
+			session:             dbgen.Session{Token: "token", UserID: ownerID},
+			board:               dbgen.Board{ID: newUUID(4), OwnerID: ownerID},
+			destinationBoard:    dbgen.Board{ID: destinationBoardID},
+			destinationBoardErr: pgx.ErrNoRows,
+		}
+		tx := &fakeTx{fakeDB: db}
+		handler := newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false)
+		requestBody := `{"board_id":"` + destinationBoardID.String() + `","title":"Updated","priority":"Low","state":"ToDo"}`
+		response := send(handler, http.MethodPut, "/api/tasks/"+taskID.String(), requestBody, cookie)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusBadRequest, response.Body.String())
+		}
+	})
 
 	t.Run("persists all editable fields and state", func(t *testing.T) {
 		columnID := newUUID(3)
