@@ -844,6 +844,7 @@ function AdminPage({ currentUsername }: { currentUsername: string }) {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [boards, setBoards] = useState<AdminBoard[]>([]);
   const [username, setUsername] = useState('');
+  const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -889,11 +890,12 @@ function AdminPage({ currentUsername }: { currentUsername: string }) {
     setSuccess('');
     setIsSaving(true);
     try {
-      const newUser = await createUser({ username, email, password });
+      const newUser = await createUser({ username, full_name: fullName, email, password });
       setUsers((currentUsers) => [...currentUsers, newUser].sort((left, right) =>
         left.full_name.localeCompare(right.full_name) || left.username.localeCompare(right.username)
       ));
       setUsername('');
+      setFullName('');
       setEmail('');
       setPassword('');
       setSuccess(`User ${newUser.username} created.`);
@@ -955,6 +957,10 @@ function AdminPage({ currentUsername }: { currentUsername: string }) {
             <div>
               <label htmlFor="admin-username" className="mb-1 block text-sm font-medium text-gray-700">Username</label>
               <input id="admin-username" required minLength={1} maxLength={32} pattern="[A-Za-z0-9]+" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
+            </div>
+            <div>
+              <label htmlFor="admin-full-name" className="mb-1 block text-sm font-medium text-gray-700">Full name</label>
+              <input id="admin-full-name" required maxLength={100} autoComplete="name" value={fullName} onChange={(event) => setFullName(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
             </div>
             <div>
               <label htmlFor="admin-email" className="mb-1 block text-sm font-medium text-gray-700">Email address</label>

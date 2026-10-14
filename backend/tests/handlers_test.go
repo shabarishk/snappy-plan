@@ -1824,16 +1824,16 @@ func TestAdminUserEndpoints(t *testing.T) {
 		response := send(newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
 			return tx, nil
 		}, false), http.MethodPost, "/api/admin/users",
-			`{"username":" NewUser ","email":"new@example.com","password":"password123"}`, cookie)
+			`{"username":" NewUser ","full_name":" New User ","email":"new@example.com","password":"password123"}`, cookie)
 		if response.Code != http.StatusCreated || !tx.committed {
 			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusCreated, response.Body.String())
 		}
 		if len(db.createUserArgs) != 5 || db.createUserArgs[0] != "newuser" ||
-			db.createUserArgs[1] != "new@example.com" || db.createUserArgs[3] != "newuser" ||
+			db.createUserArgs[1] != "new@example.com" || db.createUserArgs[3] != "New User" ||
 			db.createUserArgs[4] != "user" {
 			t.Fatalf("create user args = %#v", db.createUserArgs)
 		}
-		if len(db.boardArgs) != 2 || db.boardArgs[0] != "newuser" || db.boardArgs[1] != "newuser" {
+		if len(db.boardArgs) != 2 || db.boardArgs[0] != "New User" || db.boardArgs[1] != "newuser" {
 			t.Fatalf("personal board args = %#v", db.boardArgs)
 		}
 		if err := bcrypt.CompareHashAndPassword([]byte(db.createUserArgs[2].(string)), []byte("password123")); err != nil {
@@ -1854,7 +1854,7 @@ func TestAdminUserEndpoints(t *testing.T) {
 		response := send(newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
 			return tx, nil
 		}, false), http.MethodPost, "/api/admin/users",
-			`{"username":"newuser","email":"new@example.com","password":"password123"}`, cookie)
+			`{"username":"newuser","full_name":"New User","email":"new@example.com","password":"password123"}`, cookie)
 		if response.Code != http.StatusInternalServerError || tx.committed || !tx.rolledBack {
 			t.Fatalf("status=%d committed=%t rolledBack=%t",
 				response.Code, tx.committed, tx.rolledBack)
@@ -1869,9 +1869,12 @@ func TestAdminUserEndpoints(t *testing.T) {
 			wantStatus int
 		}{
 			{name: "invalid username", body: `{"username":"bad name","email":"new@example.com","password":"password123"}`, wantStatus: http.StatusBadRequest},
+			{name: "missing full name", body: `{"username":"newuser","email":"new@example.com","password":"password123"}`, wantStatus: http.StatusBadRequest},
+			{name: "blank full name", body: `{"username":"newuser","full_name":"  ","email":"new@example.com","password":"password123"}`, wantStatus: http.StatusBadRequest},
+			{name: "full name too long", body: `{"username":"newuser","full_name":"` + strings.Repeat("a", 101) + `","email":"new@example.com","password":"password123"}`, wantStatus: http.StatusBadRequest},
 			{name: "invalid email", body: `{"username":"newuser","email":"not-email","password":"password123"}`, wantStatus: http.StatusBadRequest},
 			{name: "short password", body: `{"username":"newuser","email":"new@example.com","password":"short"}`, wantStatus: http.StatusBadRequest},
-			{name: "duplicate", body: `{"username":"newuser","email":"new@example.com","password":"password123"}`, createErr: &pgconn.PgError{Code: "23505"}, wantStatus: http.StatusConflict},
+			{name: "duplicate", body: `{"username":"newuser","full_name":"New User","email":"new@example.com","password":"password123"}`, createErr: &pgconn.PgError{Code: "23505"}, wantStatus: http.StatusConflict},
 		} {
 			t.Run(test.name, func(t *testing.T) {
 				db := &fakeDB{

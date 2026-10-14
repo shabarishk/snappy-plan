@@ -202,11 +202,20 @@ describe('App board', () => {
 
   it('manages owned and shared boards from the sidebar Boards view', async () => {
     const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
-      if (url.endsWith('/members')) return { ok: true, json: async () => ({ user_ids: [] }) };
+      if (url.endsWith('/members') && options?.method === 'PUT') {
+        return { ok: true, json: async () => ({ user_ids: ['teammate'] }) };
+      }
+      if (url.endsWith('/members')) return { ok: true, json: async () => ({ user_ids: ['teammate'] }) };
       if (url.startsWith('/api/boards/') && options?.method === 'DELETE') return { ok: true };
       if (url === '/api/boards') return { ok: true, json: async () => boardList };
       if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
-      if (url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/users') return {
+        ok: true,
+        json: async () => [
+          { id: 'boardowner', full_name: 'Board Owner' },
+          { id: 'teammate', full_name: 'Project Teammate' },
+        ],
+      };
       if (url === '/api/profile') return {
         ok: true,
         json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
@@ -228,9 +237,26 @@ describe('App board', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Manage Board Owner' }));
     expect(await screen.findByRole('dialog', { name: 'Manage Board Owner' })).toBeTruthy();
+    const teammateAccess = await screen.findByLabelText('Project Teammate (teammate)') as HTMLInputElement;
+    expect(teammateAccess.checked).toBe(true);
+    fireEvent.click(teammateAccess);
+    expect(teammateAccess.checked).toBe(false);
+    fireEvent.click(teammateAccess);
+    fireEvent.click(screen.getByRole('button', { name: 'Save access' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Manage Board Owner' })).toBeNull());
+    expect(fetchMock).toHaveBeenCalledWith('/api/boards/board-1/members', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ user_ids: ['teammate'] }),
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Manage Board Owner' }));
+    await screen.findByRole('dialog', { name: 'Manage Board Owner' });
     fireEvent.click(screen.getByRole('button', { name: 'Delete board' }));
     expect(screen.getByText('This option will delete the board')).toBeTruthy();
     expect(fetchMock).not.toHaveBeenCalledWith('/api/boards/board-1', expect.objectContaining({ method: 'DELETE' }));
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete board' }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
     await waitFor(() => expect(screen.queryByText('Board Owner', { selector: 'h3' })).toBeNull());
     expect(fetchMock).toHaveBeenCalledWith('/api/boards/board-1', {
@@ -287,6 +313,33 @@ describe('App board', () => {
     expect(await screen.findByText("You don't have any boards yet. Create one below to get started.")).toBeTruthy();
     expect(window.localStorage.getItem('snappy-plan-selected-board')).toBeNull();
     expect(deleteAttempts).toBe(2);
+  });
+
+  it('reports board access loading and saving failures', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url.endsWith('/members') && options?.method === 'PUT') {
+        return { ok: false, text: async () => 'Cannot update board access' };
+      }
+      if (url.endsWith('/members')) return { ok: false, text: async () => 'Cannot load board access' };
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
+      if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
+      if (url === '/api/users') return { ok: true, json: async () => [{ id: 'teammate', full_name: 'Project Teammate' }] };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    await screen.findByRole('button', { name: 'Current board: Board Owner' });
+    fireEvent.click(screen.getByRole('button', { name: 'Boards' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Manage Board Owner' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Cannot load board access');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save access' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Cannot update board access');
   });
 
   it('provides Home and a user menu with an editable profile', async () => {
@@ -417,6 +470,8 @@ describe('App board', () => {
 
   it('shows the admin tile to admins and supports creating and promoting users', async () => {
     const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url.endsWith('/members')) return { ok: true, json: async () => ({ user_ids: [] }) };
+      if (url.startsWith('/api/boards/') && options?.method === 'DELETE') return { ok: true };
       if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
       if (url === '/api/boards') return { ok: true, json: async () => boardList };
       if (url === '/api/admin/boards') return {
@@ -441,7 +496,7 @@ describe('App board', () => {
           ok: true,
           json: async () => ({
             username: 'newuser',
-            full_name: 'newuser',
+            full_name: 'New User',
             email: 'new@example.com',
             role: 'user',
           }),
@@ -485,11 +540,21 @@ describe('App board', () => {
     expect(await screen.findByText('Member Board')).toBeTruthy();
     expect(screen.getByText('Owned by Member User (member)')).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledWith('/api/admin/boards', { credentials: 'same-origin' });
+    fireEvent.click(screen.getByRole('button', { name: 'Manage Member Board' }));
+    expect(await screen.findByRole('dialog', { name: 'Manage Member Board' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete board' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Manage Member Board' })).toBeNull());
+    expect(fetchMock).toHaveBeenCalledWith('/api/boards/board-2', {
+      method: 'DELETE',
+      credentials: 'same-origin',
+    });
     expect(screen.queryByRole('heading', { name: 'Create user' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'User management' }));
     expect(await screen.findByRole('heading', { name: 'Create user' })).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'newuser' } });
+    fireEvent.change(screen.getByLabelText('Full name'), { target: { value: 'New User' } });
     fireEvent.change(screen.getByLabelText('Email address'), { target: { value: 'new@example.com' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create user' }));
@@ -497,7 +562,7 @@ describe('App board', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/admin/users', expect.objectContaining({
       method: 'POST',
       credentials: 'same-origin',
-      body: JSON.stringify({ username: 'newuser', email: 'new@example.com', password: 'password123' }),
+      body: JSON.stringify({ username: 'newuser', full_name: 'New User', email: 'new@example.com', password: 'password123' }),
     }));
 
     const memberRow = screen.getByText('member').closest('tr');

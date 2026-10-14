@@ -643,6 +643,7 @@ func (api *ApiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	var params struct {
 		Username string `json:"username"`
+		FullName string `json:"full_name"`
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
@@ -651,12 +652,14 @@ func (api *ApiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	params.Username = strings.ToLower(strings.TrimSpace(params.Username))
+	params.FullName = strings.TrimSpace(params.FullName)
 	params.Email = strings.TrimSpace(params.Email)
 	address, err := mail.ParseAddress(params.Email)
 	if !isAlphanumeric(params.Username) || len(params.Username) > 32 ||
+		params.FullName == "" || utf8.RuneCountInString(params.FullName) > 100 ||
 		utf8.RuneCountInString(params.Email) > 255 || err != nil || address.Address != params.Email ||
 		len(params.Password) < 8 || len(params.Password) > 72 {
-		http.Error(w, "Provide an alphanumeric username of at most 32 characters, a valid email, and a password of 8 to 72 bytes", http.StatusBadRequest)
+		http.Error(w, "Provide an alphanumeric username of at most 32 characters, a full name of at most 100 characters, a valid email, and a password of 8 to 72 bytes", http.StatusBadRequest)
 		return
 	}
 
@@ -680,7 +683,7 @@ func (api *ApiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		ID:           params.Username,
 		Email:        params.Email,
 		PasswordHash: string(passwordHash),
-		FullName:     params.Username,
+		FullName:     params.FullName,
 		Role:         "user",
 	})
 	var databaseError *pgconn.PgError

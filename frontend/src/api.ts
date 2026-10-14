@@ -146,6 +146,7 @@ export const getAdminBoards = async (): Promise<AdminBoard[]> => {
 
 export const createUser = async (user: {
   username: string;
+  full_name: string;
   email: string;
   password: string;
 }): Promise<AdminUser> => {
