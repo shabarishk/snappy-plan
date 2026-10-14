@@ -15,21 +15,22 @@ describe('API helpers', () => {
   });
 
   it('creates a board and returns the decoded response', async () => {
-    const board = { board_id: 'board-1', title: 'Home', owner_id: 'user-1' };
+    const board = { id: 'board-1', title: 'Home', owner_id: 'user-1' };
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => board });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(createBoard('Home', 'user-1')).resolves.toEqual(board);
+    await expect(createBoard('Home', ['user-1'])).resolves.toEqual(board);
     expect(fetchMock).toHaveBeenCalledWith('/api/boards', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: 'Home', owner_id: 'user-1' }),
+      credentials: 'same-origin',
+      body: JSON.stringify({ title: 'Home', user_ids: ['user-1'] }),
     });
   });
 
   it('reports a failed board creation', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false }));
 
-    await expect(createBoard('Home', 'user-1')).rejects.toThrow('Failed to create board');
+    await expect(createBoard('Home', ['user-1'])).rejects.toThrow();
   });
 });

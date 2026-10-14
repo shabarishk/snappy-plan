@@ -227,7 +227,8 @@ func (api *ApiConfig) handleCreateBoard(w http.ResponseWriter, r *http.Request) 
 	}
 
 	type parameters struct {
-		Title string `json:"title"`
+		Title   string   `json:"title"`
+		UserIDs []string `json:"user_ids"`
 	}
 
 	var params parameters
@@ -236,18 +237,60 @@ func (api *ApiConfig) handleCreateBoard(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	params.Title = strings.TrimSpace(params.Title)
-	if params.Title == "" {
-		http.Error(w, "Board title is required", http.StatusBadRequest)
+	if params.Title == "" || len(params.Title) > 100 {
+		http.Error(w, "Board title is required and must be at most 100 bytes", http.StatusBadRequest)
 		return
 	}
 
-	board, err := api.DB.CreateBoard(r.Context(), dbgen.CreateBoardParams{
+	if api.BeginTx == nil {
+		http.Error(w, "Board creation is unavailable", http.StatusInternalServerError)
+		return
+	}
+	tx, err := api.BeginTx(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to start board creation", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback(context.Background())
+	txQueries := dbgen.New(tx)
+	board, err := txQueries.CreateBoard(r.Context(), dbgen.CreateBoardParams{
 		Title:   params.Title,
 		OwnerID: session.UserID,
 	})
-
 	if err != nil {
 		http.Error(w, "Failed to create board", http.StatusInternalServerError)
+		return
+	}
+	memberIDs := map[string]struct{}{session.UserID: {}}
+	for _, userID := range params.UserIDs {
+		userID = strings.TrimSpace(userID)
+		if !isAlphanumeric(userID) || len(userID) > 32 {
+			http.Error(w, "Board member ID is invalid", http.StatusBadRequest)
+			return
+		}
+		if _, exists := memberIDs[userID]; exists {
+			continue
+		}
+		if _, err := txQueries.GetUserByID(r.Context(), userID); errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "Board member does not exist", http.StatusBadRequest)
+			return
+		} else if err != nil {
+			http.Error(w, "Failed to validate board member", http.StatusInternalServerError)
+			return
+		}
+		memberIDs[userID] = struct{}{}
+	}
+	for userID := range memberIDs {
+		if err := txQueries.CreateBoardMember(r.Context(), dbgen.CreateBoardMemberParams{
+			BoardID: board.ID,
+			UserID:  userID,
+		}); err != nil {
+			http.Error(w, "Failed to grant board access", http.StatusInternalServerError)
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		http.Error(w, "Failed to save board", http.StatusInternalServerError)
 		return
 	}
 
@@ -292,7 +335,28 @@ func (api *ApiConfig) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tasks, err := api.DB.GetTasksByOwner(r.Context(), session.UserID)
+	var tasks []dbgen.Task
+	boardIDValue := r.URL.Query().Get("board_id")
+	if boardIDValue == "" {
+		tasks, err = api.DB.GetTasksByOwner(r.Context(), session.UserID)
+	} else {
+		boardID := pgtype.UUID{}
+		if err := boardID.Scan(boardIDValue); err != nil {
+			http.Error(w, "Board ID is invalid", http.StatusBadRequest)
+			return
+		}
+		if _, err := api.DB.GetBoardByIDAndOwner(r.Context(), dbgen.GetBoardByIDAndOwnerParams{
+			BoardID: boardID,
+			OwnerID: session.UserID,
+		}); errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "Board does not exist", http.StatusNotFound)
+			return
+		} else if err != nil {
+			http.Error(w, "Failed to validate board access", http.StatusInternalServerError)
+			return
+		}
+		tasks, err = api.DB.GetTasksByBoard(r.Context(), boardID)
+	}
 	if err != nil {
 		http.Error(w, "Failed to load tasks", http.StatusInternalServerError)
 		return

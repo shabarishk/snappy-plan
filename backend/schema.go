@@ -153,6 +153,26 @@ func EnsurePersonalBoards(ctx context.Context, beginTx func(context.Context) (Se
 	`); err != nil {
 		return fmt.Errorf("create missing personal boards: %w", err)
 	}
+	if _, err := tx.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS board_members (
+			board_id UUID NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+			user_id VARCHAR(32) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (board_id, user_id)
+		)
+	`); err != nil {
+		return fmt.Errorf("create board access table: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "CREATE INDEX IF NOT EXISTS idx_board_members_user ON board_members(user_id, board_id)"); err != nil {
+		return fmt.Errorf("index board access table: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO board_members (board_id, user_id)
+		SELECT id, owner_id FROM boards
+		ON CONFLICT (board_id, user_id) DO NOTHING
+	`); err != nil {
+		return fmt.Errorf("grant board owner access: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit personal board upgrade: %w", err)
 	}
