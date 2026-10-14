@@ -234,8 +234,49 @@ describe('App board', () => {
     await waitFor(() => expect(window.localStorage.getItem('snappy-plan-selected-board')).toBe('board-2'));
     expect(fetchMock).toHaveBeenCalledWith('/api/tasks?board_id=board-2', { credentials: 'same-origin' });
 
+    fireEvent.click(screen.getByRole('button', { name: 'Open board' }));
+    expect(await screen.findByRole('button', { name: 'Current board: Project Board' })).toBeTruthy();
+    expect(window.location.pathname).toBe('/');
+    fireEvent.click(screen.getByRole('button', { name: 'Boards' }));
+    await screen.findByRole('heading', { name: 'Your boards' });
+
     fireEvent.click(screen.getByRole('button', { name: '+ Create new board' }));
     expect(screen.getByRole('dialog', { name: 'Create a new board' })).toBeTruthy();
+  });
+
+  it('reports board deletion failures and clears selection after deleting the last board', async () => {
+    let deleteAttempts = 0;
+    const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url.startsWith('/api/boards/') && options?.method === 'DELETE') {
+        deleteAttempts += 1;
+        return deleteAttempts === 1
+          ? { ok: false, text: async () => 'Cannot delete board' }
+          : { ok: true };
+      }
+      if (url === '/api/boards') return {
+        ok: true,
+        json: async () => [boardList[0]],
+      };
+      if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
+      if (url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    await screen.findByRole('button', { name: 'Current board: Board Owner' });
+    fireEvent.click(screen.getByRole('button', { name: 'Boards' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete Board Owner' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Cannot delete board');
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete Board Owner' }));
+
+    expect(await screen.findByText("You don't have any boards yet. Create one below to get started.")).toBeTruthy();
+    expect(window.localStorage.getItem('snappy-plan-selected-board')).toBeNull();
+    expect(deleteAttempts).toBe(2);
   });
 
   it('provides Home and a user menu with an editable profile', async () => {
