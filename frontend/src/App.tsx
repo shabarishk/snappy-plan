@@ -6,7 +6,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { AuthWrapper } from './Auth';
 import { sortTasksByPriority, type TaskPriority } from './taskPriority';
-import { createTask as persistTask, getProfile, getTaskAssignees, getTasks, moveTask as persistMoveTask, updatePassword, updateProfile, updateTask as persistUpdateTask, type ApiTask, type TaskAssignee, type UserProfile } from './api';
+import { createTask as persistTask, createUser, getAdminUsers, getProfile, getTaskAssignees, getTasks, moveTask as persistMoveTask, promoteUserToAdmin, updatePassword, updateProfile, updateTask as persistUpdateTask, type AdminUser, type ApiTask, type TaskAssignee, type UserProfile } from './api';
 
 // --- Types ---
 type TaskState = 'Backlog' | 'ToDo' | 'InProgress' | 'Complete';
@@ -38,15 +38,17 @@ const COLUMN_STATES: Record<ColumnId, TaskState> = {
   complete: 'Complete',
 };
 
-type AppPage = 'board' | 'backlog' | 'profile' | 'settings';
+type AppPage = 'board' | 'backlog' | 'profile' | 'settings' | 'admin';
 
 function pageFromPath(pathname: string): AppPage {
+  if (pathname === '/admin') return 'admin';
   if (pathname === '/profile') return 'profile';
   if (pathname === '/settings') return 'settings';
   return 'board';
 }
 
 function pathForPage(page: AppPage): string {
+  if (page === 'admin') return '/admin';
   if (page === 'profile') return '/profile';
   if (page === 'settings') return '/settings';
   return '/';
@@ -574,6 +576,139 @@ function SettingsPage() {
   );
 }
 
+function AdminPage({ currentUsername }: { currentUsername: string }) {
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getAdminUsers()
+      .then((loadedUsers) => {
+        if (!cancelled) setUsers(loadedUsers);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load users');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleCreateUser = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError('');
+    setSuccess('');
+    setIsSaving(true);
+    try {
+      const newUser = await createUser({ username, email, password });
+      setUsers((currentUsers) => [...currentUsers, newUser].sort((left, right) =>
+        left.full_name.localeCompare(right.full_name) || left.username.localeCompare(right.username)
+      ));
+      setUsername('');
+      setEmail('');
+      setPassword('');
+      setSuccess(`User ${newUser.username} created.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create user');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handlePromoteUser = async (user: AdminUser) => {
+    setError('');
+    setSuccess('');
+    setIsSaving(true);
+    try {
+      const updatedUser = await promoteUserToAdmin(user.username);
+      setUsers((currentUsers) => currentUsers.map((currentUser) =>
+        currentUser.username === updatedUser.username ? updatedUser : currentUser
+      ));
+      setSuccess(`${updatedUser.username} is now an administrator.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to promote user');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <section aria-label="Admin" className="mx-auto w-full max-w-5xl space-y-6">
+      <section aria-labelledby="create-user-title" className="rounded-xl bg-white p-6 shadow-sm">
+        <h2 id="create-user-title" className="mb-4 text-lg font-bold text-gray-800">Create user</h2>
+        <form onSubmit={handleCreateUser} className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div>
+            <label htmlFor="admin-username" className="mb-1 block text-sm font-medium text-gray-700">Username</label>
+            <input id="admin-username" required minLength={1} maxLength={32} pattern="[A-Za-z0-9]+" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
+          </div>
+          <div>
+            <label htmlFor="admin-email" className="mb-1 block text-sm font-medium text-gray-700">Email address</label>
+            <input id="admin-email" type="email" required maxLength={255} autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
+          </div>
+          <div>
+            <label htmlFor="admin-password" className="mb-1 block text-sm font-medium text-gray-700">Password</label>
+            <input id="admin-password" type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
+          </div>
+          <div className="sm:col-span-3">
+            <button type="submit" disabled={isSaving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+              {isSaving ? 'Saving…' : 'Create user'}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section aria-labelledby="manage-users-title" className="rounded-xl bg-white p-6 shadow-sm">
+        <h2 id="manage-users-title" className="mb-4 text-lg font-bold text-gray-800">Manage users</h2>
+        {error && <p role="alert" className="mb-3 text-sm text-red-700">{error}</p>}
+        {success && <p role="status" className="mb-3 text-sm text-green-700">{success}</p>}
+        {isLoading ? (
+          <p className="text-sm text-gray-600">Loading users…</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 text-gray-500">
+                  <th scope="col" className="px-3 py-2 font-medium">Username</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Email</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Role</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((user) => (
+                  <tr key={user.username} className="border-b border-gray-100 last:border-0">
+                    <td className="px-3 py-3 font-medium text-gray-800">{user.username}</td>
+                    <td className="px-3 py-3 text-gray-600">{user.email}</td>
+                    <td className="px-3 py-3 capitalize text-gray-600">{user.role}</td>
+                    <td className="px-3 py-3">
+                      {user.role === 'user' && user.username !== currentUsername ? (
+                        <button type="button" disabled={isSaving} onClick={() => void handlePromoteUser(user)} className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+                          Make admin
+                        </button>
+                      ) : user.username === currentUsername ? (
+                        <span className="text-xs text-gray-500">You</span>
+                      ) : (
+                        <span className="text-xs text-gray-500">Administrator</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </section>
+  );
+}
+
 export function AuthenticatedBoard({
   tasks,
   setTasks,
@@ -714,7 +849,27 @@ export function AuthenticatedBoard({
             <path strokeLinecap="round" strokeLinejoin="round" d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V10Z" />
           </svg>
         </button>
-        <div className="mt-auto">
+        <div className="mt-auto flex flex-col items-center gap-2">
+          {profile?.role === 'admin' && (
+            <button
+              type="button"
+              aria-label="Admin"
+              title="Admin"
+              aria-current={currentPage === 'admin' ? 'page' : undefined}
+              onClick={() => {
+                setIsProfileMenuOpen(false);
+                setIsCreateTaskOpen(false);
+                setSelectedTaskId(null);
+                navigateToPage('admin');
+              }}
+              className={`flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'admin' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3 4.5 6v5.5c0 4.8 3.2 7.8 7.5 9.5 4.3-1.7 7.5-4.7 7.5-9.5V6L12 3Z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="m9 12 2 2 4-4" />
+              </svg>
+            </button>
+          )}
           <button
             type="button"
             aria-label={`User menu for ${profile?.username ?? 'user'}`}
@@ -748,7 +903,7 @@ export function AuthenticatedBoard({
       <header className="bg-white p-4 shadow-sm z-10 flex justify-between items-center shrink-0">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-extrabold text-blue-600 tracking-tight">
-            {currentPage === 'settings' ? 'Settings' : currentPage === 'profile' ? 'Profile' : 'Snappy Plan'}
+            {currentPage === 'admin' ? 'Admin' : currentPage === 'settings' ? 'Settings' : currentPage === 'profile' ? 'Profile' : 'Snappy Plan'}
           </h1>
           {(currentPage === 'board' || currentPage === 'backlog') && (
             <button type="button" disabled={isLoading || Boolean(loadError)} onClick={() => setIsCreateTaskOpen(true)} className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
@@ -802,7 +957,11 @@ export function AuthenticatedBoard({
 
       {/* Main content area takes up remaining height */}
       <main className="board-main flex-1 p-4">
-        {currentPage === 'settings' ? (
+        {currentPage === 'admin' ? (
+          profile?.role === 'admin'
+            ? <AdminPage currentUsername={profile.username} />
+            : <p role="alert" className="p-4 text-sm text-red-700">Administrator access required.</p>
+        ) : currentPage === 'settings' ? (
           <SettingsPage />
         ) : currentPage === 'profile' ? (
           profile

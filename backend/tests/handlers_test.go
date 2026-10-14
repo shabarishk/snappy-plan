@@ -41,6 +41,7 @@ type fakeDB struct {
 	tasksErr           error
 	assigneesErr       error
 	assignees          []dbgen.GetUsersForAssignmentRow
+	adminUsers         []dbgen.GetUsersForAdminRow
 	tasks              []dbgen.Task
 	boardArgs          []any
 	columnArgs         []any
@@ -48,6 +49,8 @@ type fakeDB struct {
 	moveTaskArgs       []any
 	updateTaskArgs     []any
 	updateProfileArgs  []any
+	updateUserRoleErr  error
+	updateUserRoleArgs []any
 	updatePasswordArgs []any
 	sessionArgs        []any
 	createUserArgs     []any
@@ -79,6 +82,12 @@ func (db *fakeDB) Query(_ context.Context, query string, _ ...any) (pgx.Rows, er
 			rows[i] = taskValues(task)
 		}
 		return &fakeRows{values: rows}, nil
+	case strings.Contains(query, "SELECT id, full_name, email, role"):
+		rows := make([][]any, len(db.adminUsers))
+		for i, user := range db.adminUsers {
+			rows[i] = []any{user.ID, user.FullName, user.Email, user.Role}
+		}
+		return &fakeRows{values: rows}, nil
 	case strings.Contains(query, "SELECT id, full_name"):
 		if db.assigneesErr != nil {
 			return nil, db.assigneesErr
@@ -95,6 +104,14 @@ func (db *fakeDB) Query(_ context.Context, query string, _ ...any) (pgx.Rows, er
 
 func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row {
 	switch {
+	case strings.Contains(query, "SET role ="):
+		db.updateUserRoleArgs = args
+		if db.updateUserRoleErr != nil {
+			return fakeRow{err: db.updateUserRoleErr}
+		}
+		db.user.ID = args[0].(string)
+		db.user.Role = args[1].(string)
+		return fakeRow{values: userValues(db.user)}
 	case strings.Contains(query, "UPDATE users"):
 		db.updateProfileArgs = args
 		if db.updateProfileErr != nil {
@@ -932,7 +949,10 @@ func TestUpdateTaskEndpoint(t *testing.T) {
 		{name: "invalid due date", path: "/api/tasks/" + taskID.String(), body: `{"title":"Task","priority":"Low","state":"Backlog","complete_by":"not-a-date"}`, want: http.StatusBadRequest},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			db := &fakeDB{session: dbgen.Session{Token: "token", UserID: ownerID}}
+			db := &fakeDB{
+				session: dbgen.Session{Token: "token", UserID: ownerID},
+				user:    dbgen.User{Role: "user"},
+			}
 			response := send(newHandler(db, nil, false), http.MethodPut, test.path, test.body, cookie)
 			if response.Code != test.want {
 				t.Fatalf("status = %d, want %d: %s", response.Code, test.want, response.Body.String())
@@ -1225,7 +1245,10 @@ func TestProfileEndpoints(t *testing.T) {
 	})
 
 	t.Run("updates full name and email", func(t *testing.T) {
-		db := &fakeDB{session: dbgen.Session{Token: "token", UserID: ownerID}}
+		db := &fakeDB{
+			session: dbgen.Session{Token: "token", UserID: ownerID},
+			user:    dbgen.User{Role: "user"},
+		}
 		response := send(newHandler(db, nil, false), http.MethodPut, "/api/profile",
 			`{"full_name":"Updated User","email":"updated@example.com"}`, cookie)
 		if response.Code != http.StatusOK {
@@ -1240,7 +1263,7 @@ func TestProfileEndpoints(t *testing.T) {
 			t.Fatalf("decode profile: %v", err)
 		}
 		if body["username"] != ownerID || body["full_name"] != "Updated User" ||
-			body["email"] != "updated@example.com" || len(body) != 3 {
+			body["email"] != "updated@example.com" || body["role"] != "user" || len(body) != 4 {
 			t.Fatalf("updated profile = %#v", body)
 		}
 	})
@@ -1298,6 +1321,137 @@ func TestProfileEndpoints(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestAdminUserEndpoints(t *testing.T) {
+	const adminID = "admin1"
+	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
+	admin := newUser("password123")
+
+	t.Run("requires administrator privileges", func(t *testing.T) {
+		for _, test := range []struct {
+			name   string
+			user   dbgen.User
+			cookie *http.Cookie
+			want   int
+		}{
+			{name: "unauthenticated", want: http.StatusUnauthorized},
+			{name: "regular user", user: dbgen.User{ID: "user1", Role: "user"}, cookie: cookie, want: http.StatusForbidden},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				db := &fakeDB{
+					session: dbgen.Session{Token: "token", UserID: test.user.ID},
+					user:    test.user,
+				}
+				for _, request := range []struct {
+					method string
+					path   string
+					body   string
+				}{
+					{http.MethodGet, "/api/admin/users", ""},
+					{http.MethodPost, "/api/admin/users", `{"username":"newuser","email":"new@example.com","password":"password123"}`},
+					{http.MethodPatch, "/api/admin/users/user1/role", `{"role":"admin"}`},
+				} {
+					response := send(newHandler(db, nil, false), request.method, request.path, request.body, test.cookie)
+					if response.Code != test.want {
+						t.Errorf("%s %s status = %d, want %d", request.method, request.path, response.Code, test.want)
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("lists users without exposing password hashes", func(t *testing.T) {
+		db := &fakeDB{
+			session:    dbgen.Session{Token: "token", UserID: adminID},
+			user:       admin,
+			adminUsers: []dbgen.GetUsersForAdminRow{{ID: "member", FullName: "Member", Email: "member@example.com", Role: "user"}},
+		}
+		response := send(newHandler(db, nil, false), http.MethodGet, "/api/admin/users", "", cookie)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+		}
+		var users []adminUserResponseTest
+		if err := json.Unmarshal(response.Body.Bytes(), &users); err != nil {
+			t.Fatalf("decode admin users: %v", err)
+		}
+		if len(users) != 1 || users[0].Username != "member" || users[0].Role != "user" {
+			t.Fatalf("admin users = %#v", users)
+		}
+		if strings.Contains(response.Body.String(), "password_hash") {
+			t.Fatal("user list exposed password hashes")
+		}
+	})
+
+	t.Run("creates a regular user with a hashed password", func(t *testing.T) {
+		db := &fakeDB{session: dbgen.Session{Token: "token", UserID: adminID}, user: admin}
+		response := send(newHandler(db, nil, false), http.MethodPost, "/api/admin/users",
+			`{"username":" NewUser ","email":"new@example.com","password":"password123"}`, cookie)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusCreated, response.Body.String())
+		}
+		if len(db.createUserArgs) != 5 || db.createUserArgs[0] != "newuser" ||
+			db.createUserArgs[1] != "new@example.com" || db.createUserArgs[3] != "newuser" ||
+			db.createUserArgs[4] != "user" {
+			t.Fatalf("create user args = %#v", db.createUserArgs)
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(db.createUserArgs[2].(string)), []byte("password123")); err != nil {
+			t.Fatalf("created password hash does not match: %v", err)
+		}
+		if strings.Contains(response.Body.String(), db.createUserArgs[2].(string)) {
+			t.Fatal("create user response exposed password hash")
+		}
+	})
+
+	t.Run("rejects invalid and duplicate users", func(t *testing.T) {
+		for _, test := range []struct {
+			name       string
+			body       string
+			createErr  error
+			wantStatus int
+		}{
+			{name: "invalid username", body: `{"username":"bad name","email":"new@example.com","password":"password123"}`, wantStatus: http.StatusBadRequest},
+			{name: "invalid email", body: `{"username":"newuser","email":"not-email","password":"password123"}`, wantStatus: http.StatusBadRequest},
+			{name: "short password", body: `{"username":"newuser","email":"new@example.com","password":"short"}`, wantStatus: http.StatusBadRequest},
+			{name: "duplicate", body: `{"username":"newuser","email":"new@example.com","password":"password123"}`, createErr: &pgconn.PgError{Code: "23505"}, wantStatus: http.StatusConflict},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				db := &fakeDB{
+					session:         dbgen.Session{Token: "token", UserID: adminID},
+					user:            admin,
+					createUserError: test.createErr,
+				}
+				response := send(newHandler(db, nil, false), http.MethodPost, "/api/admin/users", test.body, cookie)
+				if response.Code != test.wantStatus {
+					t.Fatalf("status = %d, want %d: %s", response.Code, test.wantStatus, response.Body.String())
+				}
+			})
+		}
+	})
+
+	t.Run("promotes another user but not the current admin", func(t *testing.T) {
+		db := &fakeDB{session: dbgen.Session{Token: "token", UserID: adminID}, user: admin}
+		response := send(newHandler(db, nil, false), http.MethodPatch, "/api/admin/users/member/role",
+			`{"role":"admin"}`, cookie)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+		}
+		if len(db.updateUserRoleArgs) != 2 || db.updateUserRoleArgs[0] != "member" ||
+			db.updateUserRoleArgs[1] != "admin" {
+			t.Fatalf("role update args = %#v", db.updateUserRoleArgs)
+		}
+
+		selfPromotion := send(newHandler(db, nil, false), http.MethodPatch,
+			"/api/admin/users/"+adminID+"/role", `{"role":"admin"}`, cookie)
+		if selfPromotion.Code != http.StatusBadRequest {
+			t.Fatalf("self-promotion status = %d, want %d", selfPromotion.Code, http.StatusBadRequest)
+		}
+	})
+}
+
+type adminUserResponseTest struct {
+	Username string `json:"username"`
+	Role     string `json:"role"`
 }
 
 func TestUpdatePasswordEndpoint(t *testing.T) {
