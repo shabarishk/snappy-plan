@@ -87,6 +87,14 @@ export const getBoards = async (): Promise<Board[]> => {
   return res.json();
 };
 
+export const deleteBoard = async (boardId: string): Promise<void> => {
+  const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(await res.text());
+};
+
 export const getTaskAssignees = async (): Promise<TaskAssignee[]> => {
   const res = await fetch('/api/users', { credentials: 'same-origin' });
   if (!res.ok) throw new Error('Failed to load users');

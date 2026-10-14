@@ -50,6 +50,10 @@ WHERE owner_id = $1 OR EXISTS (
 )
 ORDER BY created_at ASC, id ASC;
 
+-- name: DeleteBoard :execrows
+DELETE FROM boards
+WHERE id = $1 AND owner_id = $2;
+
 -- name: GetAllBoardsForAdmin :many
 SELECT board.id, board.title, board.owner_id, owner.full_name
 FROM boards AS board

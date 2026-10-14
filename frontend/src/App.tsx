@@ -6,7 +6,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { AuthWrapper } from './Auth';
 import { sortTasksByPriority, type TaskPriority } from './taskPriority';
-import { createBoard as persistCreateBoard, createTask as persistTask, createUser, getAdminBoards, getAdminUsers, getBoards, getProfile, getTaskAssignees, getTasks, logout, moveTask as persistMoveTask, promoteUserToAdmin, updatePassword, updateProfile, updateTask as persistUpdateTask, type AdminBoard, type AdminUser, type ApiTask, type Board, type TaskAssignee, type UserProfile } from './api';
+import { createBoard as persistCreateBoard, createTask as persistTask, createUser, deleteBoard as persistDeleteBoard, getAdminBoards, getAdminUsers, getBoards, getProfile, getTaskAssignees, getTasks, logout, moveTask as persistMoveTask, promoteUserToAdmin, updatePassword, updateProfile, updateTask as persistUpdateTask, type AdminBoard, type AdminUser, type ApiTask, type Board, type TaskAssignee, type UserProfile } from './api';
 
 // --- Types ---
 type TaskState = 'Backlog' | 'ToDo' | 'InProgress' | 'Complete';
@@ -38,10 +38,11 @@ const COLUMN_STATES: Record<ColumnId, TaskState> = {
   complete: 'Complete',
 };
 
-type AppPage = 'board' | 'backlog' | 'profile' | 'settings' | 'admin';
+type AppPage = 'board' | 'backlog' | 'boards' | 'profile' | 'settings' | 'admin';
 
 function pageFromPath(pathname: string): AppPage {
   if (pathname === '/admin') return 'admin';
+  if (pathname === '/boards') return 'boards';
   if (pathname === '/profile') return 'profile';
   if (pathname === '/settings') return 'settings';
   return 'board';
@@ -49,6 +50,7 @@ function pageFromPath(pathname: string): AppPage {
 
 function pathForPage(page: AppPage): string {
   if (page === 'admin') return '/admin';
+  if (page === 'boards') return '/boards';
   if (page === 'profile') return '/profile';
   if (page === 'settings') return '/settings';
   return '/';
@@ -252,6 +254,81 @@ function CreateBoardOverlay({
         </form>
       </section>
     </div>
+  );
+}
+
+function BoardsPage({
+  boards,
+  username,
+  onOpenBoard,
+  onCreateBoard,
+  onDeleteBoard,
+}: {
+  boards: Board[];
+  username: string;
+  onOpenBoard: (board: Board) => void;
+  onCreateBoard: () => void;
+  onDeleteBoard: (board: Board) => Promise<void>;
+}) {
+  const [deletingBoardId, setDeletingBoardId] = useState('');
+  const [error, setError] = useState('');
+
+  const handleDelete = async (board: Board) => {
+    setError('');
+    setDeletingBoardId(board.id);
+    try {
+      await onDeleteBoard(board);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete board');
+    } finally {
+      setDeletingBoardId('');
+    }
+  };
+
+  return (
+    <section aria-labelledby="boards-title" className="mx-auto flex h-full max-w-3xl flex-col">
+      <header className="mb-6">
+        <h2 id="boards-title" className="text-2xl font-bold text-gray-900">Your boards</h2>
+        <p className="mt-1 text-sm text-gray-600">Manage your boards and the boards shared with you.</p>
+      </header>
+      {error && <p role="alert" className="mb-4 rounded-lg bg-red-100 p-3 text-sm text-red-700">{error}</p>}
+      <ul aria-label="Boards" className="min-h-0 flex-1 overflow-y-auto divide-y divide-gray-200 rounded-xl border border-gray-200 bg-white">
+        {boards.length === 0 ? (
+          <li className="px-5 py-8 text-center text-sm text-gray-500">You don't have any boards yet. Create one below to get started.</li>
+        ) : boards.map((board) => {
+          const isOwner = board.owner_id === username;
+          return (
+            <li key={board.id} className="flex items-center justify-between gap-4 px-5 py-4">
+              <div className="min-w-0">
+                <h3 className="truncate font-semibold text-gray-900">{board.title}</h3>
+                <p className="text-sm text-gray-500">{isOwner ? 'Created by you' : 'Shared with you'}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <button type="button" onClick={() => onOpenBoard(board)} className="rounded-lg px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50">
+                  Open board
+                </button>
+                {isOwner && (
+                  <button
+                    type="button"
+                    disabled={deletingBoardId === board.id}
+                    aria-label={`Delete ${board.title}`}
+                    onClick={() => void handleDelete(board)}
+                    className="rounded-lg px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                  >
+                    {deletingBoardId === board.id ? 'Deleting…' : 'Delete'}
+                  </button>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="mt-auto border-t border-gray-200 pt-5">
+        <button type="button" onClick={onCreateBoard} className="w-full rounded-lg bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700">
+          + Create new board
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -1037,12 +1114,30 @@ export function AuthenticatedBoard({
           type="button"
           aria-label="Home"
           title="Home"
-          aria-current={currentPage === 'board' ? 'page' : undefined}
+          aria-current={currentPage === 'board' || currentPage === 'backlog' ? 'page' : undefined}
           onClick={() => navigateToPage('board')}
-          className={`flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'board' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+          className={`flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'board' || currentPage === 'backlog' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
         >
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
             <path strokeLinecap="round" strokeLinejoin="round" d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V10Z" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          aria-label="Boards"
+          title="Boards"
+          aria-current={currentPage === 'boards' ? 'page' : undefined}
+          onClick={() => {
+            setIsProfileMenuOpen(false);
+            setIsCreateTaskOpen(false);
+            setSelectedTaskId(null);
+            navigateToPage('boards');
+          }}
+          className={`mt-2 flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'boards' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 4v16m6-16v16" />
           </svg>
         </button>
         <div className="mt-auto flex flex-col items-center gap-2">
@@ -1141,7 +1236,7 @@ export function AuthenticatedBoard({
             </div>
           ) : (
             <h1 className="text-xl font-extrabold tracking-tight text-blue-600">
-              {currentPage === 'admin' ? 'Admin' : currentPage === 'settings' ? 'Settings' : 'Profile'}
+              {currentPage === 'admin' ? 'Admin' : currentPage === 'settings' ? 'Settings' : currentPage === 'boards' ? 'Boards' : 'Profile'}
             </h1>
           )}
           {(currentPage === 'board' || currentPage === 'backlog') && (
@@ -1185,7 +1280,7 @@ export function AuthenticatedBoard({
           }}
         />
       )}
-      {(currentPage === 'board' || currentPage === 'backlog') && isCreateBoardOpen && (
+      {(currentPage === 'board' || currentPage === 'backlog' || currentPage === 'boards') && isCreateBoardOpen && (
         <CreateBoardOverlay
           users={assignees}
           onClose={() => setIsCreateBoardOpen(false)}
@@ -1225,6 +1320,40 @@ export function AuthenticatedBoard({
           profile
             ? <ProfilePage profile={profile} onSaved={setProfile} />
             : <p role={loadError ? 'alert' : undefined} className="p-4 text-sm text-gray-600">{loadError || 'Loading profile…'}</p>
+        ) : currentPage === 'boards' ? (
+          profile
+            ? <BoardsPage
+              boards={boards}
+              username={profile.username}
+              onOpenBoard={(board) => {
+                setSelectedBoardId(board.id);
+                window.localStorage.setItem('snappy-plan-selected-board', board.id);
+                setTasks([]);
+                setIsLoading(true);
+                setIsBoardMenuOpen(false);
+                navigateToPage('board');
+              }}
+              onCreateBoard={() => setIsCreateBoardOpen(true)}
+              onDeleteBoard={async (board) => {
+                await persistDeleteBoard(board.id);
+                const remainingBoards = boards.filter((current) => current.id !== board.id);
+                setBoards(remainingBoards);
+                if (selectedBoardId === board.id) {
+                  const nextBoard = remainingBoards[0];
+                  if (nextBoard) {
+                    setSelectedBoardId(nextBoard.id);
+                    window.localStorage.setItem('snappy-plan-selected-board', nextBoard.id);
+                    setIsLoading(true);
+                  } else {
+                    setSelectedBoardId('');
+                    window.localStorage.removeItem('snappy-plan-selected-board');
+                    setTasks([]);
+                    setIsLoading(false);
+                  }
+                }
+              }}
+            />
+            : <p role={loadError ? 'alert' : undefined} className="p-4 text-sm text-gray-600">{loadError || 'Loading boards…'}</p>
         ) : (
           <>
         {(loadError || moveError) && <p role="alert" className="mb-3 rounded bg-red-100 p-3 text-sm text-red-700">{loadError || moveError}</p>}
