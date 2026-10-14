@@ -202,6 +202,7 @@ describe('App board', () => {
 
   it('manages owned and shared boards from the sidebar Boards view', async () => {
     const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url.endsWith('/members')) return { ok: true, json: async () => ({ user_ids: [] }) };
       if (url.startsWith('/api/boards/') && options?.method === 'DELETE') return { ok: true };
       if (url === '/api/boards') return { ok: true, json: async () => boardList };
       if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
@@ -222,10 +223,15 @@ describe('App board', () => {
     expect(window.location.pathname).toBe('/boards');
     expect(screen.getByText('Created by you')).toBeTruthy();
     expect(screen.getByText('Shared with you')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Delete Board Owner' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Delete Project Board' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Manage Board Owner' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Manage Project Board' })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete Board Owner' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Manage Board Owner' }));
+    expect(await screen.findByRole('dialog', { name: 'Manage Board Owner' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete board' }));
+    expect(screen.getByText('This option will delete the board')).toBeTruthy();
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/boards/board-1', expect.objectContaining({ method: 'DELETE' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
     await waitFor(() => expect(screen.queryByText('Board Owner', { selector: 'h3' })).toBeNull());
     expect(fetchMock).toHaveBeenCalledWith('/api/boards/board-1', {
       method: 'DELETE',
@@ -247,6 +253,7 @@ describe('App board', () => {
   it('reports board deletion failures and clears selection after deleting the last board', async () => {
     let deleteAttempts = 0;
     const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url.endsWith('/members')) return { ok: true, json: async () => ({ user_ids: [] }) };
       if (url.startsWith('/api/boards/') && options?.method === 'DELETE') {
         deleteAttempts += 1;
         return deleteAttempts === 1
@@ -270,9 +277,12 @@ describe('App board', () => {
 
     await screen.findByRole('button', { name: 'Current board: Board Owner' });
     fireEvent.click(screen.getByRole('button', { name: 'Boards' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete Board Owner' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Manage Board Owner' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete board' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
     expect((await screen.findByRole('alert')).textContent).toContain('Cannot delete board');
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete Board Owner' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete board' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
 
     expect(await screen.findByText("You don't have any boards yet. Create one below to get started.")).toBeTruthy();
     expect(window.localStorage.getItem('snappy-plan-selected-board')).toBeNull();

@@ -33,6 +33,20 @@ INSERT INTO board_members (board_id, user_id)
 VALUES ($1, $2)
 ON CONFLICT (board_id, user_id) DO NOTHING;
 
+-- name: GetBoardByID :one
+SELECT * FROM boards
+WHERE id = $1;
+
+-- name: GetBoardMemberIDs :many
+SELECT user_id FROM board_members
+WHERE board_id = $1
+ORDER BY user_id ASC;
+
+-- name: DeleteBoardMembersExceptOwner :exec
+DELETE FROM board_members AS member
+USING boards AS board
+WHERE member.board_id = board.id AND board.id = $1 AND member.user_id <> board.owner_id;
+
 -- name: GetBoardByOwner :one
 SELECT * FROM boards
 WHERE owner_id = $1 OR EXISTS (
