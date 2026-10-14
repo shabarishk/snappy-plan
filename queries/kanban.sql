@@ -51,8 +51,13 @@ WHERE owner_id = $1 OR EXISTS (
 ORDER BY created_at ASC, id ASC;
 
 -- name: DeleteBoard :execrows
-DELETE FROM boards
-WHERE id = $1 AND owner_id = $2;
+DELETE FROM boards AS board
+WHERE board.id = $1 AND (
+    board.owner_id = $2 OR EXISTS (
+        SELECT 1 FROM users AS user_account
+        WHERE user_account.id = $2 AND user_account.role = 'admin'
+    )
+);
 
 -- name: GetAllBoardsForAdmin :many
 SELECT board.id, board.title, board.owner_id, owner.full_name

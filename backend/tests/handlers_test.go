@@ -62,6 +62,7 @@ type fakeDB struct {
 	boardMemberArgs    [][]any
 	boardMemberErr     error
 	deleteBoardArgs    []any
+	deleteBoardQuery   string
 	deleteBoardRows    int64
 	deleteBoardErr     error
 	createSessionError error
@@ -93,10 +94,13 @@ func (writer *failingResponseWriter) Write([]byte) (int, error) {
 func (db *fakeDB) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
 	if strings.Contains(query, "DELETE FROM boards") {
 		db.deleteBoardArgs = args
+		db.deleteBoardQuery = query
 		if db.deleteBoardErr != nil {
 			return pgconn.CommandTag{}, db.deleteBoardErr
 		}
-		if db.deleteBoardRows > 0 {
+		canDelete := db.board.OwnerID == args[1].(string) ||
+			(strings.Contains(query, "role = 'admin'") && db.user.Role == "admin")
+		if canDelete && db.deleteBoardRows > 0 {
 			return pgconn.NewCommandTag("DELETE 1"), nil
 		}
 		return pgconn.NewCommandTag("DELETE 0"), nil
@@ -818,18 +822,23 @@ func TestDeleteBoardEndpoint(t *testing.T) {
 		rows       int64
 		deleteErr  error
 		sessionErr error
+		role       string
+		boardOwner string
 		wantStatus int
 	}{
 		{name: "invalid board ID", boardID: "invalid", wantStatus: http.StatusBadRequest},
-		{name: "board does not belong to user", boardID: newUUID(8).String(), wantStatus: http.StatusNotFound},
+		{name: "board does not belong to user", boardID: newUUID(8).String(), rows: 1, role: "user", boardOwner: "other", wantStatus: http.StatusNotFound},
 		{name: "session lookup error", boardID: newUUID(8).String(), sessionErr: errors.New("session lookup failed"), wantStatus: http.StatusInternalServerError},
 		{name: "database error", boardID: newUUID(8).String(), deleteErr: errors.New("delete failed"), wantStatus: http.StatusInternalServerError},
-		{name: "deletes owned board", boardID: newUUID(8).String(), rows: 1, wantStatus: http.StatusNoContent},
+		{name: "deletes owned board", boardID: newUUID(8).String(), rows: 1, role: "user", boardOwner: "owner7", wantStatus: http.StatusNoContent},
+		{name: "admin deletes any board", boardID: newUUID(8).String(), rows: 1, role: "admin", boardOwner: "other", wantStatus: http.StatusNoContent},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			db := &fakeDB{
 				session:         dbgen.Session{Token: "token", UserID: "owner7"},
 				sessionErr:      test.sessionErr,
+				user:            dbgen.User{ID: "owner7", Role: test.role},
+				board:           dbgen.Board{OwnerID: test.boardOwner},
 				deleteBoardRows: test.rows,
 				deleteBoardErr:  test.deleteErr,
 			}
@@ -845,6 +854,9 @@ func TestDeleteBoardEndpoint(t *testing.T) {
 				}
 				if len(db.deleteBoardArgs) != 2 || db.deleteBoardArgs[0] != boardID || db.deleteBoardArgs[1] != "owner7" {
 					t.Fatalf("delete args = %#v, want requested board and authenticated owner", db.deleteBoardArgs)
+				}
+				if !strings.Contains(db.deleteBoardQuery, "role = 'admin'") {
+					t.Fatalf("delete query = %q, want admin role check", db.deleteBoardQuery)
 				}
 			}
 		})
