@@ -222,7 +222,7 @@ describe('Tasks', () => {
       render(<App />);
 
       fireEvent.click(await screen.findByText('Board transfer task'));
-      fireEvent.change(screen.getByLabelText('Board'), { target: { value: 'board-2' } });
+      fireEvent.change(within(screen.getByRole('dialog', { name: 'Task details' })).getByLabelText('Board'), { target: { value: 'board-2' } });
       fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
       await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Task details' })).toBeNull());
@@ -319,7 +319,7 @@ describe('Tasks', () => {
   
       fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Book a campsite' } });
       fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Check the lake sites' } });
-      fireEvent.change(screen.getByLabelText('Board'), { target: { value: 'board-2' } });
+      fireEvent.change(within(dialog).getByLabelText('Board'), { target: { value: 'board-2' } });
       fireEvent.change(screen.getByLabelText('Assigned to'), { target: { value: 'user-1' } });
       fireEvent.change(screen.getByLabelText('Current state'), { target: { value: 'ToDo' } });
       fireEvent.change(screen.getByLabelText('Priority'), { target: { value: 'High' } });
@@ -396,8 +396,32 @@ describe('Tasks', () => {
     render(<App />);
 
     expect(await screen.findByText('Second board task')).toBeTruthy();
+    const boardFilter = screen.getByLabelText('Filter by board') as HTMLSelectElement;
+    const initiativeFilter = screen.getByLabelText('Filter by initiative') as HTMLSelectElement;
+    expect(await screen.findByRole('option', { name: 'Launch Initiative' })).toBeTruthy();
+
+    fireEvent.change(boardFilter, { target: { value: 'board-2' } });
+    fireEvent.change(initiativeFilter, { target: { value: 'initiative-1' } });
+    expect(screen.queryByText('Second board task')).toBeNull();
+    expect(screen.queryByText('Linked task')).toBeNull();
+    fireEvent.change(boardFilter, { target: { value: 'board-1' } });
+    expect(await screen.findByText('Linked task')).toBeTruthy();
+    expect(screen.queryByText('Second board task')).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'assignee' } });
+    expect(boardFilter.value).toBe('board-1');
+    expect(initiativeFilter.value).toBe('initiative-1');
+    expect(screen.getByLabelText('Filter by board')).toBeTruthy();
+    expect(screen.getByLabelText('Filter by initiative')).toBeTruthy();
+    expect(screen.getByText('Linked task')).toBeTruthy();
+    expect(screen.queryByText('Second board task')).toBeNull();
+    fireEvent.change(boardFilter, { target: { value: '' } });
+    fireEvent.change(initiativeFilter, { target: { value: '' } });
+
     fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'initiative' } });
     const initiativeGroups = await screen.findAllByRole('region', { name: /^(Launch Initiative|No Initiative) tasks$/ });
+    expect(screen.getByLabelText('Filter by board')).toBeTruthy();
+    expect(screen.getByLabelText('Filter by initiative')).toBeTruthy();
     expect(initiativeGroups.map((group) => group.getAttribute('aria-label'))).toEqual([
       'Launch Initiative tasks',
       'No Initiative tasks',
@@ -406,6 +430,8 @@ describe('Tasks', () => {
 
     fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'assignee' } });
     const assigneeGroups = await screen.findAllByRole('region', { name: /^(Board Owner|No Assignee) tasks$/ });
+    expect(screen.getByLabelText('Filter by board')).toBeTruthy();
+    expect(screen.getByLabelText('Filter by initiative')).toBeTruthy();
     expect(assigneeGroups.map((group) => group.getAttribute('aria-label'))).toEqual([
       'Board Owner tasks',
       'No Assignee tasks',
@@ -413,6 +439,8 @@ describe('Tasks', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
     const backlogGroups = await screen.findAllByRole('region', { name: /^(Board Owner|No Assignee) tasks$/ });
+    expect(screen.getByLabelText('Filter by board')).toBeTruthy();
+    expect(screen.getByLabelText('Filter by initiative')).toBeTruthy();
     expect(backlogGroups.map((group) => group.getAttribute('aria-label'))).toEqual([
       'Board Owner tasks',
       'No Assignee tasks',
@@ -497,7 +525,7 @@ describe('Tasks', () => {
     fireEvent.click(await screen.findByRole('option', { name: 'Prepare launch report — Project Board' }));
     await screen.findByRole('dialog', { name: 'Task details' });
     expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Prepare launch report');
-    expect((screen.getByLabelText('Board') as HTMLSelectElement).value).toBe('board-2');
+    expect((within(screen.getByRole('dialog', { name: 'Task details' })).getByLabelText('Board') as HTMLSelectElement).value).toBe('board-2');
     fireEvent.click(screen.getByRole('button', { name: 'Close task details' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'User menu for boardowner' }));

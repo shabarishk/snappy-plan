@@ -39,15 +39,18 @@ export function AuthenticatedBoard({
   onLoggedOut?: () => void;
 }) {
   const [currentPage, setCurrentPage] = useState<AppPage>(() => pageFromPath(window.location.pathname));
+  const isTaskPage = currentPage === 'board' || currentPage === 'backlog';
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [selectedTask, setSelectedTask] = useState<SelectedTask | null>(null);
   const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
   const [boards, setBoards] = useState<Board[]>([]);
   const [selectedBoardId, setSelectedBoardId] = useState('');
   const [groupBy, setGroupBy] = useState<TaskGroupBy>('board');
+  const [boardFilterId, setBoardFilterId] = useState('');
+  const [initiativeFilterId, setInitiativeFilterId] = useState('');
   const [initiatives, setInitiatives] = useState<Initiative[]>([]);
   const [taskInitiatives, setTaskInitiatives] = useState<Record<string, Initiative[]>>({});
-  const [isInitiativeGroupingLoading, setIsInitiativeGroupingLoading] = useState(false);
+  const [isInitiativeGroupingLoading, setIsInitiativeGroupingLoading] = useState(isTaskPage);
   const [initiativeGroupingError, setInitiativeGroupingError] = useState('');
   const [initiativeGroupingRefreshToken, setInitiativeGroupingRefreshToken] = useState(0);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -74,7 +77,7 @@ export function AuthenticatedBoard({
     setIsCreateTaskOpen(false);
     setIsCreateBoardOpen(false);
     setIsCreateInitiativeOpen(false);
-    if ((page === 'board' || page === 'backlog') && groupBy === 'initiative') {
+    if ((page === 'board' || page === 'backlog') && !isTaskPage) {
       setIsInitiativeGroupingLoading(true);
       setInitiativeGroupingError('');
     }
@@ -98,14 +101,14 @@ export function AuthenticatedBoard({
       setIsCreateInitiativeOpen(false);
       setIsCreateMenuOpen(false);
       setSelectedTask(null);
-      if ((page === 'board' || page === 'backlog') && groupBy === 'initiative') {
+      if ((page === 'board' || page === 'backlog') && !isTaskPage) {
         setIsInitiativeGroupingLoading(true);
         setInitiativeGroupingError('');
       }
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [groupBy]);
+  }, [isTaskPage]);
 
   useEffect(() => {
     if (!isProfileMenuOpen) return;
@@ -180,7 +183,7 @@ export function AuthenticatedBoard({
   }, [boards, selectedBoardId, setTasks]);
 
   useEffect(() => {
-    if ((currentPage !== 'board' && currentPage !== 'backlog') || groupBy !== 'initiative') return;
+    if (!isTaskPage) return;
     let cancelled = false;
     Promise.all([
       getInitiatives(),
@@ -210,7 +213,7 @@ export function AuthenticatedBoard({
         if (!cancelled) setIsInitiativeGroupingLoading(false);
       });
     return () => { cancelled = true; };
-  }, [currentPage, groupBy, initiativeGroupingRefreshToken, initiativeRefreshToken]);
+  }, [initiativeGroupingRefreshToken, initiativeRefreshToken, isTaskPage]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -267,12 +270,19 @@ export function AuthenticatedBoard({
     void persistTaskMove(task, 'todo');
   };
 
+  const filteredTasks = useMemo(() => tasks.filter((task) => {
+    const belongsToBoard = !boardFilterId || (task.boardId ?? selectedBoardId) === boardFilterId;
+    const belongsToInitiative = !initiativeFilterId
+      || (taskInitiatives[task.id] ?? []).some((initiative) => initiative.id === initiativeFilterId);
+    return belongsToBoard && belongsToInitiative;
+  }), [boardFilterId, initiativeFilterId, selectedBoardId, taskInitiatives, tasks]);
+
   const taskGroups = useMemo<TaskGroup[]>(() => {
     if (groupBy === 'board') {
-      return boards.map((board) => ({
+      return boards.filter((board) => !boardFilterId || board.id === boardFilterId).map((board) => ({
         id: `board-${board.id}`,
         title: board.title,
-        tasks: tasks.filter((task) => (task.boardId ?? selectedBoardId) === board.id),
+        tasks: filteredTasks.filter((task) => (task.boardId ?? selectedBoardId) === board.id),
       }));
     }
 
@@ -282,7 +292,7 @@ export function AuthenticatedBoard({
         { id: `initiative-${initiative.id}`, title: initiative.title, tasks: [] as Task[] },
       ]));
       const withoutInitiative: Task[] = [];
-      for (const task of tasks) {
+      for (const task of filteredTasks) {
         const associatedInitiatives = taskInitiatives[task.id] ?? [];
         if (associatedInitiatives.length === 0) {
           withoutInitiative.push(task);
@@ -305,7 +315,7 @@ export function AuthenticatedBoard({
     ]));
     const unknownAssigneeGroups = new Map<string, TaskGroup>();
     const withoutAssignee: Task[] = [];
-    for (const task of tasks) {
+    for (const task of filteredTasks) {
       if (!task.assignedToId) {
         withoutAssignee.push(task);
         continue;
@@ -326,7 +336,7 @@ export function AuthenticatedBoard({
       grouped.push({ id: 'assignee-none', title: 'No Assignee', tasks: withoutAssignee });
     }
     return grouped;
-  }, [assignees, boards, groupBy, initiatives, selectedBoardId, taskInitiatives, tasks]);
+  }, [assignees, boardFilterId, boards, filteredTasks, groupBy, initiatives, selectedBoardId, taskInitiatives]);
   const visibleColumns = currentPage === 'backlog'
     ? COLUMNS.filter((column) => column.id === 'backlog')
     : BOARD_COLUMNS;
@@ -653,20 +663,42 @@ export function AuthenticatedBoard({
         ) : (
           <>
         {(loadError || moveError) && <p role="alert" className="mb-3 rounded bg-red-100 p-3 text-sm text-red-700">{loadError || moveError}</p>}
-        <div className="mb-4 flex justify-end">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <span>Board</span>
+              <select
+                aria-label="Filter by board"
+                value={boardFilterId}
+                onChange={(event) => setBoardFilterId(event.target.value)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2"
+              >
+                <option value="">All boards</option>
+                {boards.map((board) => <option key={board.id} value={board.id}>{board.title}</option>)}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <span>Initiative</span>
+              <select
+                aria-label="Filter by initiative"
+                value={initiativeFilterId}
+                onChange={(event) => setInitiativeFilterId(event.target.value)}
+                disabled={isInitiativeGroupingLoading}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2 disabled:opacity-60"
+              >
+                <option value="">All initiatives</option>
+                {initiatives.map((initiative) => (
+                  <option key={initiative.id} value={initiative.id}>{initiative.title}</option>
+                ))}
+              </select>
+            </label>
+          </div>
           <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
             <span>Group by:</span>
             <select
               aria-label="Group tasks by"
               value={groupBy}
-              onChange={(event) => {
-                const nextGroupBy = event.target.value as TaskGroupBy;
-                setGroupBy(nextGroupBy);
-                if (nextGroupBy === 'initiative') {
-                  setIsInitiativeGroupingLoading(true);
-                  setInitiativeGroupingError('');
-                }
-              }}
+              onChange={(event) => setGroupBy(event.target.value as TaskGroupBy)}
               className="rounded-lg border border-gray-300 bg-white px-3 py-2"
             >
               <option value="board">Board</option>
@@ -675,11 +707,27 @@ export function AuthenticatedBoard({
             </select>
           </label>
         </div>
+        {initiativeGroupingError && groupBy !== 'initiative' && !initiativeFilterId && (
+          <div className="mb-3 flex items-center gap-3 rounded bg-red-100 p-3 text-sm text-red-700">
+            <p role="alert">{initiativeGroupingError}</p>
+            <button
+              type="button"
+              onClick={() => {
+                setInitiativeGroupingError('');
+                setIsInitiativeGroupingLoading(true);
+                setInitiativeGroupingRefreshToken((version) => version + 1);
+              }}
+              className="font-medium underline"
+            >
+              Retry
+            </button>
+          </div>
+        )}
         {isLoading ? (
           <p role="status" className="py-8 text-center text-sm text-gray-500">Loading tasks…</p>
-        ) : isInitiativeGroupingLoading && groupBy === 'initiative' ? (
+        ) : isInitiativeGroupingLoading && (groupBy === 'initiative' || Boolean(initiativeFilterId)) ? (
           <p role="status" className="py-8 text-center text-sm text-gray-500">Loading initiative groups…</p>
-        ) : initiativeGroupingError && groupBy === 'initiative' ? (
+        ) : initiativeGroupingError && (groupBy === 'initiative' || Boolean(initiativeFilterId)) ? (
           <div className="rounded bg-red-100 p-3 text-sm text-red-700">
             <p role="alert">{initiativeGroupingError}</p>
             <button
