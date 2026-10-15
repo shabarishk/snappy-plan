@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { DndContext, DragOverlay, closestCorners, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core';
 import { deleteBoard as persistDeleteBoard, getBoards, getProfile, getTaskAssignees, getTasks, logout, moveTask as persistMoveTask } from './api';
@@ -43,13 +43,20 @@ export function AuthenticatedBoard({
   const [moveError, setMoveError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
-  const navigateToPage = (page: AppPage, initiativeId?: string) => {
-    const path = pathForPage(page, initiativeId);
+  const navigateToPage = (page: AppPage, initiativeId?: string, initiativeTitle?: string) => {
+    const path = pathForPage(page, initiativeId, initiativeTitle);
     if (window.location.pathname !== path) {
       window.history.pushState({}, '', path);
     }
     setCurrentPage(page);
   };
+
+  const handleInitiativeTitleChanged = useCallback((title: string) => {
+    const initiativeId = initiativeIdFromPath(window.location.pathname);
+    if (initiativeId) {
+      window.history.replaceState({}, '', pathForPage('initiative', initiativeId, title));
+    }
+  }, []);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -214,24 +221,6 @@ export function AuthenticatedBoard({
         </button>
         <button
           type="button"
-          aria-label="Boards"
-          title="Boards"
-          aria-current={currentPage === 'boards' ? 'page' : undefined}
-          onClick={() => {
-            setIsProfileMenuOpen(false);
-            setIsCreateTaskOpen(false);
-            setSelectedTaskId(null);
-            navigateToPage('boards');
-          }}
-          className={`mt-2 flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'boards' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
-        >
-          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
-            <rect x="3" y="4" width="18" height="16" rx="2" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 4v16m6-16v16" />
-          </svg>
-        </button>
-        <button
-          type="button"
           aria-label="Initiatives"
           title="Initiatives"
           aria-current={currentPage === 'initiatives' || currentPage === 'initiative' ? 'page' : undefined}
@@ -248,6 +237,24 @@ export function AuthenticatedBoard({
             <circle cx="3" cy="5" r="1" fill="currentColor" stroke="none" />
             <circle cx="3" cy="12" r="1" fill="currentColor" stroke="none" />
             <circle cx="3" cy="19" r="1" fill="currentColor" stroke="none" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          aria-label="Boards"
+          title="Boards"
+          aria-current={currentPage === 'boards' ? 'page' : undefined}
+          onClick={() => {
+            setIsProfileMenuOpen(false);
+            setIsCreateTaskOpen(false);
+            setSelectedTaskId(null);
+            navigateToPage('boards');
+          }}
+          className={`mt-2 flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'boards' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 4v16m6-16v16" />
           </svg>
         </button>
         <div ref={profileMenuRef} className="mt-auto flex flex-col items-center gap-2">
@@ -471,7 +478,7 @@ export function AuthenticatedBoard({
         ) : currentPage === 'initiatives' ? (
           <InitiativesPage
             users={assignees}
-            onOpenInitiative={(initiative) => navigateToPage('initiative', initiative.id)}
+            onOpenInitiative={(initiative) => navigateToPage('initiative', initiative.id, initiative.title)}
           />
         ) : currentPage === 'initiative' ? (
           <InitiativeDetailPage
@@ -479,6 +486,7 @@ export function AuthenticatedBoard({
             initiativeId={initiativeIdFromPath(window.location.pathname) ?? ''}
             users={assignees}
             onBack={() => navigateToPage('initiatives')}
+            onTitleChanged={handleInitiativeTitleChanged}
           />
         ) : (
           <>

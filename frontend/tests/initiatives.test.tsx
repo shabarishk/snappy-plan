@@ -75,6 +75,9 @@ describe('Initiatives', () => {
     render(<App />);
 
     await screen.findByRole('button', { name: 'Current board: Board Owner' });
+    const sidebar = within(screen.getByRole('complementary', { name: 'Sidebar' }));
+    expect(sidebar.getAllByRole('button').slice(0, 3).map((button) => button.getAttribute('aria-label')))
+      .toEqual(['Home', 'Initiatives', 'Boards']);
     fireEvent.click(screen.getByRole('button', { name: 'Initiatives' }));
     fireEvent.click(screen.getByRole('button', { name: '+ New initiative' }));
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Launch planning' } });
@@ -96,14 +99,18 @@ describe('Initiatives', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Launch planning/ }));
     expect(await screen.findByRole('heading', { name: 'Tasks' })).toBeTruthy();
-    fireEvent.change(screen.getByRole('combobox', { name: 'Task to add' }), { target: { value: 'task-1' } });
+    const taskSearch = screen.getByRole('searchbox', { name: 'Search tasks to add' });
+    fireEvent.change(taskSearch, { target: { value: 'missing' } });
+    expect(screen.getByText('No matching tasks found.')).toBeTruthy();
+    fireEvent.change(taskSearch, { target: { value: 'release' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare release notes' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add task' }));
     expect(await screen.findByText('Prepare release notes')).toBeTruthy();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/initiatives/initiative-1/tasks', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ task_id: 'task-1' }),
     })));
-    expect(window.location.pathname).toBe('/initiatives/initiative-1');
+    expect(window.location.pathname).toBe('/initiatives/launch-planning--initiative-1');
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit initiative' }));
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Release launch' } });
@@ -119,6 +126,7 @@ describe('Initiatives', () => {
         assigned_to_id: 'boardowner',
       }),
     }));
+    expect(window.location.pathname).toBe('/initiatives/release-launch--initiative-1');
 
     fireEvent.click(screen.getByRole('button', { name: '← All initiatives' }));
     expect(await screen.findByText('100%')).toBeTruthy();

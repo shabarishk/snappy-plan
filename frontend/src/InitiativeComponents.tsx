@@ -182,14 +182,17 @@ export function InitiativeDetailPage({
   initiativeId,
   users,
   onBack,
+  onTitleChanged,
 }: {
   initiativeId: string;
   users: TaskAssignee[];
   onBack: () => void;
+  onTitleChanged: (title: string) => void;
 }) {
   const [initiative, setInitiative] = useState<Initiative | null>(null);
   const [tasks, setTasks] = useState<ApiTask[]>([]);
   const [availableTasks, setAvailableTasks] = useState<ApiTask[]>([]);
+  const [taskSearch, setTaskSearch] = useState('');
   const [taskToAdd, setTaskToAdd] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -204,17 +207,19 @@ export function InitiativeDetailPage({
         setInitiative(detail.initiative);
         setTasks(detail.tasks);
         setAvailableTasks(allTasks.filter((task) => !detail.tasks.some((linked) => linked.id === task.id)));
+        onTitleChanged(detail.initiative.title);
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load initiative');
       })
       .finally(() => { if (!cancelled) setIsLoading(false); });
     return () => { cancelled = true; };
-  }, [initiativeId]);
+  }, [initiativeId, onTitleChanged]);
 
   const submitUpdate = async (request: InitiativeRequest) => {
     const updated = await updateInitiative(initiativeId, request);
     setInitiative(updated);
+    onTitleChanged(updated.title);
     setIsEditing(false);
   };
 
@@ -228,6 +233,7 @@ export function InitiativeDetailPage({
       if (added) setTasks((current) => [...current, added]);
       setAvailableTasks((current) => current.filter((task) => task.id !== taskToAdd));
       setTaskToAdd('');
+      setTaskSearch('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add task');
     } finally {
@@ -249,6 +255,11 @@ export function InitiativeDetailPage({
   if (isLoading) return <p className="p-4 text-sm text-gray-600">Loading initiative…</p>;
   if (error && !initiative) return <p role="alert" className="p-4 text-sm text-red-700">{error}</p>;
   if (!initiative) return <p role="alert" className="p-4 text-sm text-red-700">Initiative could not be found.</p>;
+
+  const matchingTasks = taskSearch.trim()
+    ? availableTasks.filter((task) =>
+      task.title.toLocaleLowerCase().includes(taskSearch.trim().toLocaleLowerCase()))
+    : [];
 
   return (
     <section aria-labelledby="initiative-detail-title" className="mx-auto h-full max-w-4xl overflow-y-auto">
@@ -286,11 +297,40 @@ export function InitiativeDetailPage({
             <h3 id="initiative-tasks-title" className="font-semibold text-gray-900">Tasks</h3>
             <p className="text-sm text-gray-500">{tasks.filter((task) => task.state === 'Complete').length} of {tasks.length} complete</p>
           </div>
-          <div className="flex gap-2">
-            <select aria-label="Task to add" value={taskToAdd} onChange={(event) => setTaskToAdd(event.target.value)} className="max-w-64 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm">
-              <option value="">Choose a task…</option>
-              {availableTasks.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}
-            </select>
+          <div className="flex w-full max-w-xl items-start gap-2 sm:w-auto">
+            <div className="relative min-w-0 flex-1">
+              <label htmlFor="initiative-task-search" className="sr-only">Search tasks to add</label>
+              <input
+                id="initiative-task-search"
+                type="search"
+                autoComplete="off"
+                placeholder="Search existing tasks…"
+                value={taskSearch}
+                onChange={(event) => {
+                  setTaskSearch(event.target.value);
+                  setTaskToAdd('');
+                }}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+              />
+              {taskSearch.trim() && (
+                <ul aria-label="Matching tasks" className="absolute left-0 right-0 top-full z-10 mt-1 max-h-60 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                  {matchingTasks.length === 0 ? (
+                    <li className="px-3 py-2 text-sm text-gray-500">No matching tasks found.</li>
+                  ) : matchingTasks.map((task) => (
+                    <li key={task.id}>
+                      <button
+                        type="button"
+                        aria-pressed={taskToAdd === task.id}
+                        onClick={() => setTaskToAdd(task.id)}
+                        className={`block w-full px-3 py-2 text-left text-sm hover:bg-blue-50 ${taskToAdd === task.id ? 'bg-blue-50 text-blue-700' : 'text-gray-700'}`}
+                      >
+                        {task.title}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
             <button type="button" disabled={!taskToAdd || isAdding} onClick={() => void addTask()} className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
               {isAdding ? 'Adding…' : 'Add task'}
             </button>
