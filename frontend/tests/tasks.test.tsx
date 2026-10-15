@@ -3,11 +3,29 @@ import { describe, expect, it, vi } from 'vitest';
 import App, { AuthenticatedBoard } from '../src/App';
 import type { Task } from '../src/App';
 import type { Initiative } from '../src/api';
+import { Column } from '../src/TaskBoard';
 import { sortTasksByPriority } from '../src/taskPriority';
 
 import { taskResponse, boardList, mockBoardReads } from './appTestUtils';
 
 describe('Tasks', () => {
+  it('renders a column without grouped drag identifiers', () => {
+    const task: Task = {
+      id: 'standalone-task',
+      columnId: 'todo',
+      state: 'ToDo',
+      priority: 'Medium',
+      title: 'Standalone task',
+    };
+    const onSelectTask = vi.fn();
+
+    render(<Column column={{ id: 'todo', title: 'To Do' }} tasks={[task]} onSelectTask={onSelectTask} />);
+    fireEvent.click(screen.getByText('Standalone task'));
+
+    expect(screen.getByRole('heading', { name: 'To Do' })).toBeTruthy();
+    expect(onSelectTask).toHaveBeenCalledWith(task);
+  });
+
   it('orders tasks from highest to lowest priority', () => {
       const tasks = [
         { id: 'low', columnId: 'todo' as const, state: 'ToDo' as const, priority: 'Low' as const, title: 'Low priority' },

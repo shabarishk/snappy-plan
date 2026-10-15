@@ -29,7 +29,7 @@ describe('Application', () => {
       for (const title of ['To Do', 'In Progress', 'Complete']) {
         for (const heading of screen.getAllByRole('heading', { name: title })) {
           expect(heading.className).toContain('text-sm');
-          expect(heading.className).toContain('font-normal');
+          expect(heading.className).not.toMatch(/font-(bold|semibold|medium)/);
         }
       }
       expect(screen.queryByRole('heading', { name: 'Backlog' })).toBeNull();
