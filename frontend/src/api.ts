@@ -244,6 +244,14 @@ export const createUser = async (user: {
   return res.json();
 };
 
+export const deleteAdminUser = async (username: string): Promise<void> => {
+  const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(await res.text());
+};
+
 export const promoteUserToAdmin = async (username: string): Promise<AdminUser> => {
   const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}/role`, {
     method: 'PATCH',

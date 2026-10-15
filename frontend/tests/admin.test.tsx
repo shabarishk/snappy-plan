@@ -9,6 +9,7 @@ describe('Admin', () => {
       const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
         if (url.endsWith('/members')) return { ok: true, json: async () => ({ user_ids: [] }) };
         if (url.startsWith('/api/boards/') && options?.method === 'DELETE') return { ok: true };
+        if (url === '/api/admin/users/removee' && options?.method === 'DELETE') return { ok: true };
         if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
         if (url === '/api/boards') return { ok: true, json: async () => boardList };
         if (url === '/api/admin/boards') return {
@@ -58,6 +59,11 @@ describe('Admin', () => {
             full_name: 'Member User',
             email: 'member@example.com',
             role: 'user',
+          }, {
+            username: 'removee',
+            full_name: 'Removable User',
+            email: 'removee@example.com',
+            role: 'user',
           }],
         };
         return { ok: true, json: async () => ({ authenticated: true }) };
@@ -94,6 +100,20 @@ describe('Admin', () => {
       });
       expect(screen.queryByRole('heading', { name: 'Create user' })).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: 'User management' }));
+      const removableRow = screen.getByText('removee').closest('tr');
+      expect(removableRow).toBeTruthy();
+      fireEvent.click(within(removableRow as HTMLElement).getByRole('button', { name: 'Delete user removee' }));
+      expect(await screen.findByRole('alertdialog', { name: 'Delete user removee?' })).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+      expect(fetchMock).not.toHaveBeenCalledWith('/api/admin/users/removee', expect.objectContaining({ method: 'DELETE' }));
+      fireEvent.click(within(removableRow as HTMLElement).getByRole('button', { name: 'Delete user removee' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm delete' }));
+      await waitFor(() => expect(screen.queryByText('removee')).toBeNull());
+      expect(fetchMock).toHaveBeenCalledWith('/api/admin/users/removee', {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
       fireEvent.click(screen.getByRole('button', { name: '+ New user' }));
       expect(await screen.findByRole('dialog', { name: 'Create user' })).toBeTruthy();
   

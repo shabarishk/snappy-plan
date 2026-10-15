@@ -477,6 +477,137 @@ func TestAdminUserEndpoints(t *testing.T) {
 	})
 }
 
+func TestDeleteUserEndpoint(t *testing.T) {
+	const adminID = "admin1"
+	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
+	admin := dbgen.User{ID: adminID, Role: "admin"}
+
+	t.Run("requires an administrator", func(t *testing.T) {
+		response := send(newHandler(&fakeDB{}, nil, false), http.MethodDelete, "/api/admin/users/member1", "", nil)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("unauthenticated status = %d, want %d", response.Code, http.StatusUnauthorized)
+		}
+
+		response = send(newHandler(&fakeDB{
+			session: dbgen.Session{Token: "token", UserID: "member1"},
+			user:    dbgen.User{ID: "member1", Role: "user"},
+		}, nil, false), http.MethodDelete, "/api/admin/users/member2", "", cookie)
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("regular user status = %d, want %d", response.Code, http.StatusForbidden)
+		}
+	})
+
+	t.Run("validates the target and forbids deleting admins", func(t *testing.T) {
+		for _, test := range []struct {
+			name       string
+			userID     string
+			targetRole string
+			wantStatus int
+		}{
+			{name: "invalid username", userID: "bad-name", wantStatus: http.StatusBadRequest},
+			{name: "self", userID: adminID, targetRole: "admin", wantStatus: http.StatusBadRequest},
+			{name: "administrator", userID: "admin2", targetRole: "admin", wantStatus: http.StatusConflict},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				db := &fakeDB{
+					session:          dbgen.Session{Token: "token", UserID: adminID},
+					user:             admin,
+					deleteTargetUser: dbgen.User{ID: test.userID, Role: test.targetRole},
+				}
+				tx := &fakeTx{fakeDB: db}
+				response := send(newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+					return tx, nil
+				}, false), http.MethodDelete, "/api/admin/users/"+test.userID, "", cookie)
+				if response.Code != test.wantStatus || tx.committed || len(db.transferUserBoardsArgs) != 0 {
+					t.Fatalf("status=%d committed=%t transfer=%#v, want status %d and no transfer",
+						response.Code, tx.committed, db.transferUserBoardsArgs, test.wantStatus)
+				}
+			})
+		}
+	})
+
+	t.Run("transfers non-personal boards and deletes the user transactionally", func(t *testing.T) {
+		db := &fakeDB{
+			session:          dbgen.Session{Token: "token", UserID: adminID},
+			user:             admin,
+			deleteTargetUser: dbgen.User{ID: "member1", Role: "user"},
+			deleteUserRows:   1,
+		}
+		tx := &fakeTx{fakeDB: db}
+		response := send(newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false), http.MethodDelete, "/api/admin/users/Member1", "", cookie)
+		if response.Code != http.StatusNoContent || !tx.committed {
+			t.Fatalf("status=%d committed=%t body=%q", response.Code, tx.committed, response.Body.String())
+		}
+		if len(db.transferUserBoardsArgs) != 2 || db.transferUserBoardsArgs[0] != "member1" ||
+			db.transferUserBoardsArgs[1] != adminID {
+			t.Fatalf("board transfer args = %#v", db.transferUserBoardsArgs)
+		}
+		if len(db.deleteUserArgs) != 1 || db.deleteUserArgs[0] != "member1" {
+			t.Fatalf("delete user args = %#v", db.deleteUserArgs)
+		}
+		if !strings.Contains(db.transferUserBoardsQuery, "is_personal = FALSE") {
+			t.Fatal("board transfer query did not preserve the personal board for user-delete cascade")
+		}
+	})
+
+	t.Run("rolls back on deletion failures", func(t *testing.T) {
+		for _, test := range []struct {
+			name        string
+			beginNil    bool
+			beginErr    error
+			userErr     error
+			transferErr error
+			deleteErr   error
+			deleteRows  int64
+			commitErr   error
+			wantStatus  int
+		}{
+			{name: "missing transaction provider", beginNil: true, wantStatus: http.StatusInternalServerError},
+			{name: "begin transaction", beginErr: errors.New("begin failed"), wantStatus: http.StatusInternalServerError},
+			{name: "missing user", userErr: pgx.ErrNoRows, wantStatus: http.StatusNotFound},
+			{name: "user lookup error", userErr: errors.New("lookup failed"), wantStatus: http.StatusInternalServerError},
+			{name: "board transfer error", transferErr: errors.New("transfer failed"), wantStatus: http.StatusInternalServerError},
+			{name: "delete error", deleteErr: errors.New("delete failed"), wantStatus: http.StatusInternalServerError},
+			{name: "target changed role", deleteRows: 0, wantStatus: http.StatusConflict},
+			{name: "commit error", deleteRows: 1, commitErr: errors.New("commit failed"), wantStatus: http.StatusInternalServerError},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				db := &fakeDB{
+					session:               dbgen.Session{Token: "token", UserID: adminID},
+					user:                  admin,
+					deleteTargetUser:      dbgen.User{ID: "member1", Role: "user"},
+					deleteTargetUserErr:   test.userErr,
+					transferUserBoardsErr: test.transferErr,
+					deleteUserErr:         test.deleteErr,
+					deleteUserRows:        test.deleteRows,
+				}
+				tx := &fakeTx{fakeDB: db, commitErr: test.commitErr}
+				var begin func(context.Context) (backend.SetupTransaction, error)
+				if !test.beginNil {
+					begin = func(context.Context) (backend.SetupTransaction, error) {
+						if test.beginErr != nil {
+							return nil, test.beginErr
+						}
+						return tx, nil
+					}
+				}
+				response := send(newHandler(db, begin, false), http.MethodDelete, "/api/admin/users/member1", "", cookie)
+				if response.Code != test.wantStatus {
+					t.Fatalf("status = %d, want %d: %s", response.Code, test.wantStatus, response.Body.String())
+				}
+				if !test.beginNil && test.beginErr == nil && test.commitErr == nil && (tx.committed || !tx.rolledBack) {
+					t.Fatalf("committed=%t rolledBack=%t, expected rollback", tx.committed, tx.rolledBack)
+				}
+				if test.commitErr != nil && !tx.committed {
+					t.Fatalf("committed=%t, want commit attempt", tx.committed)
+				}
+			})
+		}
+	})
+}
+
 func TestUpdatePasswordEndpoint(t *testing.T) {
 	const ownerID = "owner1"
 	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
