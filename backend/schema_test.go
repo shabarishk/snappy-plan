@@ -335,25 +335,56 @@ func TestEnsurePersonalBoards(t *testing.T) {
 		}
 	})
 
-	t.Run("reports insert errors", func(t *testing.T) {
-		insertErr := errors.New("insert failed")
-		tx := &schemaTestTx{execErr: insertErr, failExecContains: "INSERT INTO boards"}
+	t.Run("reports startup and commit failures", func(t *testing.T) {
+		beginErr := errors.New("begin failed")
+		if err := EnsurePersonalBoards(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return nil, beginErr
+		}); !errors.Is(err, beginErr) {
+			t.Fatalf("begin error = %v, want %v", err, beginErr)
+		}
+
+		lockErr := errors.New("lock failed")
+		lockTx := &schemaTestTx{execErr: lockErr, failExecContains: "pg_advisory_xact_lock"}
 		err := EnsurePersonalBoards(context.Background(), func(context.Context) (SetupTransaction, error) {
-			return tx, nil
+			return lockTx, nil
 		})
-		if !errors.Is(err, insertErr) || tx.committed || !tx.rolledBack {
-			t.Fatalf("error=%v committed=%t rolledBack=%t", err, tx.committed, tx.rolledBack)
+		if !errors.Is(err, lockErr) || lockTx.committed || !lockTx.rolledBack {
+			t.Fatalf("lock error=%v committed=%t rolledBack=%t", err, lockTx.committed, lockTx.rolledBack)
+		}
+
+		commitErr := errors.New("commit failed")
+		commitTx := &schemaTestTx{commitErr: commitErr}
+		err = EnsurePersonalBoards(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return commitTx, nil
+		})
+		if !errors.Is(err, commitErr) || !commitTx.committed || commitTx.rolledBack {
+			t.Fatalf("commit error=%v committed=%t rolledBack=%t", err, commitTx.committed, commitTx.rolledBack)
 		}
 	})
 
-	t.Run("reports membership migration errors", func(t *testing.T) {
-		migrationErr := errors.New("membership migration failed")
-		tx := &schemaTestTx{execErr: migrationErr, failExecContains: "CREATE TABLE IF NOT EXISTS board_members"}
-		err := EnsurePersonalBoards(context.Background(), func(context.Context) (SetupTransaction, error) {
-			return tx, nil
+	for _, test := range []struct {
+		name      string
+		statement string
+	}{
+		{name: "add personal board marker", statement: "ADD COLUMN IF NOT EXISTS is_personal"},
+		{name: "expand title limit", statement: "VARCHAR(120)"},
+		{name: "mark existing boards", statement: "ROW_NUMBER() OVER"},
+		{name: "index personal boards", statement: "idx_boards_one_personal_per_owner"},
+		{name: "rename existing boards", statement: "UPDATE boards AS board"},
+		{name: "create missing boards", statement: "INSERT INTO boards"},
+		{name: "create membership table", statement: "CREATE TABLE IF NOT EXISTS board_members"},
+		{name: "index membership table", statement: "idx_board_members_user"},
+		{name: "grant owner access", statement: "INSERT INTO board_members"},
+	} {
+		t.Run("reports "+test.name+" errors", func(t *testing.T) {
+			migrationErr := errors.New("migration failed")
+			tx := &schemaTestTx{execErr: migrationErr, failExecContains: test.statement}
+			err := EnsurePersonalBoards(context.Background(), func(context.Context) (SetupTransaction, error) {
+				return tx, nil
+			})
+			if !errors.Is(err, migrationErr) || tx.committed || !tx.rolledBack {
+				t.Fatalf("error=%v committed=%t rolledBack=%t", err, tx.committed, tx.rolledBack)
+			}
 		})
-		if !errors.Is(err, migrationErr) || tx.committed || !tx.rolledBack {
-			t.Fatalf("error=%v committed=%t rolledBack=%t", err, tx.committed, tx.rolledBack)
-		}
-	})
+	}
 }
