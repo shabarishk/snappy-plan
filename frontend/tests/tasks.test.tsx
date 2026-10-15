@@ -416,7 +416,9 @@ describe('Tasks', () => {
     expect(await screen.findByText('Second board task')).toBeTruthy();
     const boardFilter = screen.getByLabelText('Filter by board') as HTMLSelectElement;
     const initiativeFilter = screen.getByLabelText('Filter by initiative') as HTMLSelectElement;
+    const assigneeFilter = screen.getByLabelText('Filter by assignee') as HTMLSelectElement;
     expect(await screen.findByRole('option', { name: 'Launch Initiative' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'Unassigned' })).toBeTruthy();
 
     fireEvent.change(boardFilter, { target: { value: 'board-2' } });
     fireEvent.change(initiativeFilter, { target: { value: 'initiative-1' } });
@@ -425,12 +427,26 @@ describe('Tasks', () => {
     fireEvent.change(boardFilter, { target: { value: 'board-1' } });
     expect(await screen.findByText('Linked task')).toBeTruthy();
     expect(screen.queryByText('Second board task')).toBeNull();
+    fireEvent.change(assigneeFilter, { target: { value: 'assignee:user-1' } });
+    expect(screen.getByText('Linked task')).toBeTruthy();
+    expect(screen.queryByText('Second board task')).toBeNull();
+    fireEvent.change(assigneeFilter, { target: { value: 'unassigned' } });
+    expect(screen.queryByText('Linked task')).toBeNull();
+    fireEvent.change(initiativeFilter, { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
+    expect(await screen.findByText('Unlinked backlog task')).toBeTruthy();
+    expect(screen.queryByText('Linked task')).toBeNull();
+    fireEvent.change(assigneeFilter, { target: { value: 'all' } });
+    fireEvent.change(initiativeFilter, { target: { value: 'initiative-1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Active' }));
 
     fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'assignee' } });
     expect(boardFilter.value).toBe('board-1');
     expect(initiativeFilter.value).toBe('initiative-1');
+    expect(assigneeFilter.value).toBe('all');
     expect(screen.getByLabelText('Filter by board')).toBeTruthy();
     expect(screen.getByLabelText('Filter by initiative')).toBeTruthy();
+    expect(screen.getByLabelText('Filter by assignee')).toBeTruthy();
     expect(screen.getByText('Linked task')).toBeTruthy();
     expect(screen.queryByText('Second board task')).toBeNull();
     fireEvent.change(boardFilter, { target: { value: '' } });
@@ -440,6 +456,7 @@ describe('Tasks', () => {
     const initiativeGroups = await screen.findAllByRole('region', { name: /^(Launch Initiative|No Initiative) tasks$/ });
     expect(screen.getByLabelText('Filter by board')).toBeTruthy();
     expect(screen.getByLabelText('Filter by initiative')).toBeTruthy();
+    expect(screen.getByLabelText('Filter by assignee')).toBeTruthy();
     expect(initiativeGroups.map((group) => group.getAttribute('aria-label'))).toEqual([
       'Launch Initiative tasks',
       'No Initiative tasks',
@@ -450,6 +467,7 @@ describe('Tasks', () => {
     const assigneeGroups = await screen.findAllByRole('region', { name: /^(Board Owner|No Assignee) tasks$/ });
     expect(screen.getByLabelText('Filter by board')).toBeTruthy();
     expect(screen.getByLabelText('Filter by initiative')).toBeTruthy();
+    expect(screen.getByLabelText('Filter by assignee')).toBeTruthy();
     expect(assigneeGroups.map((group) => group.getAttribute('aria-label'))).toEqual([
       'Board Owner tasks',
       'No Assignee tasks',
@@ -459,6 +477,7 @@ describe('Tasks', () => {
     const backlogGroups = await screen.findAllByRole('region', { name: /^(Board Owner|No Assignee) tasks$/ });
     expect(screen.getByLabelText('Filter by board')).toBeTruthy();
     expect(screen.getByLabelText('Filter by initiative')).toBeTruthy();
+    expect(screen.getByLabelText('Filter by assignee')).toBeTruthy();
     expect(backlogGroups.map((group) => group.getAttribute('aria-label'))).toEqual([
       'Board Owner tasks',
       'No Assignee tasks',

@@ -48,6 +48,7 @@ export function AuthenticatedBoard({
   const [groupBy, setGroupBy] = useState<TaskGroupBy>('board');
   const [boardFilterId, setBoardFilterId] = useState('');
   const [initiativeFilterId, setInitiativeFilterId] = useState('');
+  const [assigneeFilterId, setAssigneeFilterId] = useState('all');
   const [initiatives, setInitiatives] = useState<Initiative[]>([]);
   const [taskInitiatives, setTaskInitiatives] = useState<Record<string, Initiative[]>>({});
   const [isInitiativeGroupingLoading, setIsInitiativeGroupingLoading] = useState(isTaskPage);
@@ -274,8 +275,12 @@ export function AuthenticatedBoard({
     const belongsToBoard = !boardFilterId || (task.boardId ?? selectedBoardId) === boardFilterId;
     const belongsToInitiative = !initiativeFilterId
       || (taskInitiatives[task.id] ?? []).some((initiative) => initiative.id === initiativeFilterId);
-    return belongsToBoard && belongsToInitiative;
-  }), [boardFilterId, initiativeFilterId, selectedBoardId, taskInitiatives, tasks]);
+    const belongsToAssignee = assigneeFilterId === 'all'
+      || (assigneeFilterId === 'unassigned'
+        ? !task.assignedToId
+        : task.assignedToId === assigneeFilterId.slice('assignee:'.length));
+    return belongsToBoard && belongsToInitiative && belongsToAssignee;
+  }), [assigneeFilterId, boardFilterId, initiativeFilterId, selectedBoardId, taskInitiatives, tasks]);
 
   const taskGroups = useMemo<TaskGroup[]>(() => {
     if (groupBy === 'board') {
@@ -716,6 +721,21 @@ export function AuthenticatedBoard({
                 <option value="">All initiatives</option>
                 {initiatives.map((initiative) => (
                   <option key={initiative.id} value={initiative.id}>{initiative.title}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <span>Assignee</span>
+              <select
+                aria-label="Filter by assignee"
+                value={assigneeFilterId}
+                onChange={(event) => setAssigneeFilterId(event.target.value)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2"
+              >
+                <option value="all">All assignees</option>
+                <option value="unassigned">Unassigned</option>
+                {assignees.map((assignee) => (
+                  <option key={assignee.id} value={`assignee:${assignee.id}`}>{assignee.full_name}</option>
                 ))}
               </select>
             </label>
