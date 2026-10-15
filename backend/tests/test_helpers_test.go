@@ -460,7 +460,7 @@ func newUser(password string) dbgen.User {
 	}
 }
 
-func newHandler(db *fakeDB, beginTx func(context.Context) (backend.SetupTransaction, error), secureCookie bool) http.Handler {
+func newHandler(db dbgen.DBTX, beginTx func(context.Context) (backend.SetupTransaction, error), secureCookie bool) http.Handler {
 	return backend.NewHandler(db, beginTx, secureCookie, fstest.MapFS{
 		"index.html":    &fstest.MapFile{Data: []byte("<main>Snappy Plan</main>")},
 		"assets/app.js": &fstest.MapFile{Data: []byte("console.log('app')")},

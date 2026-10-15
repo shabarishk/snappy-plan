@@ -54,6 +54,11 @@ func main() { // Read from Docker env, fallback to localhost for manual testing
 	}); err != nil {
 		log.Fatalf("Unable to update task schema: %v\n", err)
 	}
+	if err := backend.EnsureInitiativeSchema(context.Background(), func(ctx context.Context) (backend.SetupTransaction, error) {
+		return pool.Begin(ctx)
+	}); err != nil {
+		log.Fatalf("Unable to update initiative schema: %v\n", err)
+	}
 
 	frontendFiles, err := backend.FrontendFiles()
 	if err != nil {

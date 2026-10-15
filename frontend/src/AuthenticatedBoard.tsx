@@ -5,13 +5,14 @@ import { deleteBoard as persistDeleteBoard, getBoards, getProfile, getTaskAssign
 import type { Board, TaskAssignee, UserProfile } from './api';
 import type { ColumnId, Task } from './taskModel';
 import type { AppPage } from './navigation';
-import { pageFromPath, pathForPage } from './navigation';
+import { initiativeIdFromPath, pageFromPath, pathForPage } from './navigation';
 import { BOARD_COLUMNS, COLUMNS, COLUMN_STATES, moveTaskToColumn, toBoardTask } from './taskModel';
 import { CreateTaskOverlay, TaskDetailsOverlay } from './TaskOverlays';
 import { BoardsPage, CreateBoardOverlay } from './BoardComponents';
 import { AdminPage } from './AdminPage';
 import { SettingsPage } from './SettingsPage';
 import { ProfilePage } from './ProfilePage';
+import { InitiativeDetailPage, InitiativesPage } from './InitiativeComponents';
 import { Column } from './TaskBoard';
 
 export function AuthenticatedBoard({
@@ -42,8 +43,8 @@ export function AuthenticatedBoard({
   const [moveError, setMoveError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
-  const navigateToPage = (page: AppPage) => {
-    const path = pathForPage(page);
+  const navigateToPage = (page: AppPage, initiativeId?: string) => {
+    const path = pathForPage(page, initiativeId);
     if (window.location.pathname !== path) {
       window.history.pushState({}, '', path);
     }
@@ -229,6 +230,26 @@ export function AuthenticatedBoard({
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 4v16m6-16v16" />
           </svg>
         </button>
+        <button
+          type="button"
+          aria-label="Initiatives"
+          title="Initiatives"
+          aria-current={currentPage === 'initiatives' || currentPage === 'initiative' ? 'page' : undefined}
+          onClick={() => {
+            setIsProfileMenuOpen(false);
+            setIsCreateTaskOpen(false);
+            setSelectedTaskId(null);
+            navigateToPage('initiatives');
+          }}
+          className={`mt-2 flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'initiatives' || currentPage === 'initiative' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 5h14M5 12h14M5 19h14" />
+            <circle cx="3" cy="5" r="1" fill="currentColor" stroke="none" />
+            <circle cx="3" cy="12" r="1" fill="currentColor" stroke="none" />
+            <circle cx="3" cy="19" r="1" fill="currentColor" stroke="none" />
+          </svg>
+        </button>
         <div ref={profileMenuRef} className="mt-auto flex flex-col items-center gap-2">
           {profile?.role === 'admin' && (
             <button
@@ -325,7 +346,7 @@ export function AuthenticatedBoard({
             </div>
           ) : (
             <h1 className="text-xl font-extrabold tracking-tight text-blue-600">
-              {currentPage === 'admin' ? 'Admin' : currentPage === 'settings' ? 'Settings' : currentPage === 'boards' ? 'Boards' : 'Profile'}
+              {currentPage === 'admin' ? 'Admin' : currentPage === 'settings' ? 'Settings' : currentPage === 'boards' ? 'Boards' : currentPage === 'initiatives' || currentPage === 'initiative' ? 'Initiatives' : 'Profile'}
             </h1>
           )}
           {(currentPage === 'board' || currentPage === 'backlog') && (
@@ -446,6 +467,18 @@ export function AuthenticatedBoard({
               }}
             />
             : <p role={loadError ? 'alert' : undefined} className="p-4 text-sm text-gray-600">{loadError || 'Loading boards…'}</p>
+        ) : currentPage === 'initiatives' ? (
+          <InitiativesPage
+            users={assignees}
+            onOpenInitiative={(initiative) => navigateToPage('initiative', initiative.id)}
+          />
+        ) : currentPage === 'initiative' ? (
+          <InitiativeDetailPage
+            key={initiativeIdFromPath(window.location.pathname) ?? ''}
+            initiativeId={initiativeIdFromPath(window.location.pathname) ?? ''}
+            users={assignees}
+            onBack={() => navigateToPage('initiatives')}
+          />
         ) : (
           <>
         {(loadError || moveError) && <p role="alert" className="mb-3 rounded bg-red-100 p-3 text-sm text-red-700">{loadError || moveError}</p>}

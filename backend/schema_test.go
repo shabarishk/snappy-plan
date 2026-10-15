@@ -21,7 +21,8 @@ type schemaTestTx struct {
 func (tx *schemaTestTx) Exec(_ context.Context, query string, _ ...any) (pgconn.CommandTag, error) {
 	tx.execCalls = append(tx.execCalls, query)
 	if (strings.Contains(query, "DO $$") || strings.Contains(query, "INSERT INTO boards") ||
-		strings.Contains(query, "board_members")) && tx.execErr != nil {
+		strings.Contains(query, "board_members") || strings.Contains(query, "CREATE TABLE IF NOT EXISTS initiatives")) &&
+		tx.execErr != nil {
 		return pgconn.CommandTag{}, tx.execErr
 	}
 	return pgconn.CommandTag{}, nil
@@ -91,6 +92,48 @@ func TestEnsureTaskSchema(t *testing.T) {
 		}
 		if tx.committed || !tx.rolledBack {
 			t.Fatalf("transaction committed=%t rolledBack=%t", tx.committed, tx.rolledBack)
+		}
+	})
+}
+
+func TestEnsureInitiativeSchema(t *testing.T) {
+	t.Run("creates initiative tables and indexes in a transaction", func(t *testing.T) {
+		tx := &schemaTestTx{}
+		err := EnsureInitiativeSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if err != nil {
+			t.Fatalf("EnsureInitiativeSchema returned error: %v", err)
+		}
+		if len(tx.execCalls) != 6 || !strings.Contains(tx.execCalls[0], "pg_advisory_xact_lock") ||
+			!strings.Contains(tx.execCalls[1], "CREATE TABLE IF NOT EXISTS initiatives") ||
+			!strings.Contains(tx.execCalls[2], "CREATE TABLE IF NOT EXISTS initiative_tasks") ||
+			!strings.Contains(tx.execCalls[3], "idx_initiatives_assigned_to") ||
+			!strings.Contains(tx.execCalls[5], "idx_initiative_tasks_task") ||
+			!tx.committed || tx.rolledBack {
+			t.Fatalf("initiative schema calls=%#v committed=%t rolledBack=%t",
+				tx.execCalls, tx.committed, tx.rolledBack)
+		}
+	})
+
+	t.Run("returns begin errors", func(t *testing.T) {
+		beginErr := errors.New("begin failed")
+		err := EnsureInitiativeSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return nil, beginErr
+		})
+		if !errors.Is(err, beginErr) {
+			t.Fatalf("EnsureInitiativeSchema error = %v, want %v", err, beginErr)
+		}
+	})
+
+	t.Run("rolls back on schema errors", func(t *testing.T) {
+		schemaErr := errors.New("schema failed")
+		tx := &schemaTestTx{execErr: schemaErr}
+		err := EnsureInitiativeSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if !errors.Is(err, schemaErr) || tx.committed || !tx.rolledBack {
+			t.Fatalf("error=%v committed=%t rolledBack=%t", err, tx.committed, tx.rolledBack)
 		}
 	})
 }
