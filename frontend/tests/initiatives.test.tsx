@@ -76,8 +76,8 @@ describe('Initiatives', () => {
 
     await screen.findByRole('heading', { name: 'Board Owner' });
     const sidebar = within(screen.getByRole('complementary', { name: 'Sidebar' }));
-    expect(sidebar.getAllByRole('button').slice(0, 3).map((button) => button.getAttribute('aria-label')))
-      .toEqual(['Home', 'Initiatives', 'Boards']);
+    expect(sidebar.getAllByRole('button').slice(0, 4).map((button) => button.getAttribute('aria-label')))
+      .toEqual(['Home', 'Tasks', 'Initiatives', 'Boards']);
     fireEvent.click(screen.getByRole('button', { name: 'Initiatives' }));
     fireEvent.click(screen.getByRole('button', { name: '+ New initiative' }));
     const createInitiativeDialog = screen.getByRole('dialog', { name: 'Create initiative' });

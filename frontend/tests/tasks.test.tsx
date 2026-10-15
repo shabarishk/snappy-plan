@@ -4,7 +4,7 @@ import App, { AuthenticatedBoard } from '../src/App';
 import type { Task } from '../src/App';
 import type { Initiative } from '../src/api';
 import { Column } from '../src/TaskBoard';
-import { sortTasksByPriority } from '../src/taskPriority';
+import { sortTasksByCompleteByAndPriority, sortTasksByPriority } from '../src/taskPriority';
 
 import { taskResponse, boardList, mockBoardReads } from './appTestUtils';
 
@@ -26,6 +26,26 @@ describe('Tasks', () => {
     expect(onSelectTask).toHaveBeenCalledWith(task);
   });
 
+  it('renders backlog tasks by due date and priority when requested', () => {
+    const tasks: Task[] = [
+      { id: 'later', columnId: 'backlog', state: 'Backlog', priority: 'High', title: 'Later due', completeBy: '2026-11-02T00:00:00Z' },
+      { id: 'earlier', columnId: 'backlog', state: 'Backlog', priority: 'Low', title: 'Earlier due', completeBy: '2026-10-20T00:00:00Z' },
+    ];
+
+    const { container } = render(
+      <Column
+        column={{ id: 'backlog', title: 'Backlog' }}
+        tasks={tasks}
+        onSelectTask={vi.fn()}
+        sortByCompleteBy
+      />
+    );
+
+    const renderedTaskTitles = Array.from(container.querySelector('.board-column-tasks')!.children)
+      .map((card) => card.querySelector('p')?.textContent);
+    expect(renderedTaskTitles).toEqual(['Earlier due', 'Later due']);
+  });
+
   it('orders tasks from highest to lowest priority', () => {
       const tasks = [
         { id: 'low', columnId: 'todo' as const, state: 'ToDo' as const, priority: 'Low' as const, title: 'Low priority' },
@@ -35,6 +55,24 @@ describe('Tasks', () => {
   
       expect(sortTasksByPriority(tasks).map((task) => task.id)).toEqual(['high', 'medium', 'low']);
     });
+
+  it('orders backlog tasks by due date and uses priority to break ties', () => {
+    const tasks = [
+      { id: 'undated-low', priority: 'Low' as const },
+      { id: 'later-high', completeBy: '2026-11-02T00:00:00Z', priority: 'High' as const },
+      { id: 'earlier-low', completeBy: '2026-10-20T00:00:00Z', priority: 'Low' as const },
+      { id: 'earlier-high', completeBy: '2026-10-20T00:00:00Z', priority: 'High' as const },
+      { id: 'undated-high', completeBy: 'invalid', priority: 'High' as const },
+    ];
+
+    expect(sortTasksByCompleteByAndPriority(tasks).map((task) => task.id)).toEqual([
+      'earlier-high',
+      'earlier-low',
+      'later-high',
+      'undated-high',
+      'undated-low',
+    ]);
+  });
   
   it('moves backlog tasks between lanes and displays their priority and completion time', async () => {
       vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
@@ -416,7 +454,9 @@ describe('Tasks', () => {
     expect(await screen.findByText('Second board task')).toBeTruthy();
     const boardFilter = screen.getByLabelText('Filter by board') as HTMLSelectElement;
     const initiativeFilter = screen.getByLabelText('Filter by initiative') as HTMLSelectElement;
+    const assigneeFilter = screen.getByLabelText('Filter by assignee') as HTMLSelectElement;
     expect(await screen.findByRole('option', { name: 'Launch Initiative' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'Unassigned' })).toBeTruthy();
 
     fireEvent.change(boardFilter, { target: { value: 'board-2' } });
     fireEvent.change(initiativeFilter, { target: { value: 'initiative-1' } });
@@ -425,12 +465,26 @@ describe('Tasks', () => {
     fireEvent.change(boardFilter, { target: { value: 'board-1' } });
     expect(await screen.findByText('Linked task')).toBeTruthy();
     expect(screen.queryByText('Second board task')).toBeNull();
+    fireEvent.change(assigneeFilter, { target: { value: 'assignee:user-1' } });
+    expect(screen.getByText('Linked task')).toBeTruthy();
+    expect(screen.queryByText('Second board task')).toBeNull();
+    fireEvent.change(assigneeFilter, { target: { value: 'unassigned' } });
+    expect(screen.queryByText('Linked task')).toBeNull();
+    fireEvent.change(initiativeFilter, { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
+    expect(await screen.findByText('Unlinked backlog task')).toBeTruthy();
+    expect(screen.queryByText('Linked task')).toBeNull();
+    fireEvent.change(assigneeFilter, { target: { value: 'all' } });
+    fireEvent.change(initiativeFilter, { target: { value: 'initiative-1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Active' }));
 
     fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'assignee' } });
     expect(boardFilter.value).toBe('board-1');
     expect(initiativeFilter.value).toBe('initiative-1');
+    expect(assigneeFilter.value).toBe('all');
     expect(screen.getByLabelText('Filter by board')).toBeTruthy();
     expect(screen.getByLabelText('Filter by initiative')).toBeTruthy();
+    expect(screen.getByLabelText('Filter by assignee')).toBeTruthy();
     expect(screen.getByText('Linked task')).toBeTruthy();
     expect(screen.queryByText('Second board task')).toBeNull();
     fireEvent.change(boardFilter, { target: { value: '' } });
@@ -440,6 +494,7 @@ describe('Tasks', () => {
     const initiativeGroups = await screen.findAllByRole('region', { name: /^(Launch Initiative|No Initiative) tasks$/ });
     expect(screen.getByLabelText('Filter by board')).toBeTruthy();
     expect(screen.getByLabelText('Filter by initiative')).toBeTruthy();
+    expect(screen.getByLabelText('Filter by assignee')).toBeTruthy();
     expect(initiativeGroups.map((group) => group.getAttribute('aria-label'))).toEqual([
       'Launch Initiative tasks',
       'No Initiative tasks',
@@ -450,6 +505,7 @@ describe('Tasks', () => {
     const assigneeGroups = await screen.findAllByRole('region', { name: /^(Board Owner|No Assignee) tasks$/ });
     expect(screen.getByLabelText('Filter by board')).toBeTruthy();
     expect(screen.getByLabelText('Filter by initiative')).toBeTruthy();
+    expect(screen.getByLabelText('Filter by assignee')).toBeTruthy();
     expect(assigneeGroups.map((group) => group.getAttribute('aria-label'))).toEqual([
       'Board Owner tasks',
       'No Assignee tasks',
@@ -459,12 +515,131 @@ describe('Tasks', () => {
     const backlogGroups = await screen.findAllByRole('region', { name: /^(Board Owner|No Assignee) tasks$/ });
     expect(screen.getByLabelText('Filter by board')).toBeTruthy();
     expect(screen.getByLabelText('Filter by initiative')).toBeTruthy();
+    expect(screen.getByLabelText('Filter by assignee')).toBeTruthy();
     expect(backlogGroups.map((group) => group.getAttribute('aria-label'))).toEqual([
       'Board Owner tasks',
       'No Assignee tasks',
     ]);
     expect(within(backlogGroups[0]).getByText('Second board backlog task')).toBeTruthy();
     expect(within(backlogGroups[1]).getByText('Unlinked backlog task')).toBeTruthy();
+  });
+
+  it('lists all board tasks in state order with filters and selectable page sizes', async () => {
+    const states = ['Complete', 'Backlog', 'ToDo', 'InProgress'] as const;
+    const allTasks = Array.from({ length: 32 }, (_, index) => taskResponse({
+      id: `task-${String(index).padStart(2, '0')}`,
+      title: `Task ${String(index).padStart(2, '0')}`,
+      state: states[index % states.length],
+      assigned_to_id: index % 2 === 0 ? 'user-1' : null,
+    }));
+    const initiative: Initiative = {
+      id: 'initiative-1',
+      title: 'Launch Initiative',
+      description: null,
+      complete_by: null,
+      assigned_to_id: null,
+      created_by_id: 'boardowner',
+      created_at: '',
+      updated_at: '',
+    };
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
+      if (url === '/api/tasks?board_id=board-1') return { ok: true, json: async () => allTasks.slice(0, 16) };
+      if (url === '/api/tasks?board_id=board-2') return { ok: true, json: async () => allTasks.slice(16) };
+      if (url === '/api/users') return { ok: true, json: async () => [{ id: 'user-1', full_name: 'Board Owner' }] };
+      if (url === '/api/initiatives') return { ok: true, json: async () => [initiative] };
+      if (url === '/api/initiatives/initiative-1') {
+        return { ok: true, json: async () => ({ initiative, tasks: [allTasks[3]] }) };
+      }
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    }));
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Board Owner' });
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
+    expect(window.location.pathname).toBe('/tasks');
+    await screen.findByText('Task 03');
+    expect(await screen.findByRole('option', { name: 'Launch Initiative' })).toBeTruthy();
+
+    const taskRows = () => screen.getAllByRole('row').slice(1);
+    expect(taskRows()).toHaveLength(25);
+    const orderedStates = taskRows().map((row) => within(row).getAllByRole('cell')[1].textContent);
+    expect(orderedStates.slice(0, 8)).toEqual(Array(8).fill('In Progress'));
+    expect(orderedStates.slice(8, 16)).toEqual(Array(8).fill('To Do'));
+    expect(orderedStates.slice(16, 24)).toEqual(Array(8).fill('Backlog'));
+    expect(orderedStates[24]).toBe('Complete');
+    expect(screen.getByText('Showing 1–25 of 32 tasks')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+    expect(taskRows()).toHaveLength(7);
+    expect(screen.getByText('Showing 26–32 of 32 tasks')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Tasks per page'), { target: { value: '50' } });
+    expect(taskRows()).toHaveLength(32);
+
+    fireEvent.change(screen.getByLabelText('Filter by state'), { target: { value: 'InProgress' } });
+    expect(taskRows()).toHaveLength(8);
+    expect(taskRows().every((row) => within(row).getAllByRole('cell')[1].textContent === 'In Progress')).toBe(true);
+
+    fireEvent.change(screen.getByLabelText('Filter by board'), { target: { value: 'board-2' } });
+    expect(taskRows()).toHaveLength(4);
+    fireEvent.change(screen.getByLabelText('Filter by state'), { target: { value: '' } });
+    expect(taskRows()).toHaveLength(16);
+
+    fireEvent.change(screen.getByLabelText('Filter by board'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Filter by initiative'), { target: { value: 'initiative-1' } });
+    expect(taskRows()).toHaveLength(1);
+    expect(within(taskRows()[0]).getByText('Task 03')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Filter by initiative'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Filter by assignee'), { target: { value: 'assignee:user-1' } });
+    expect(taskRows()).toHaveLength(16);
+    fireEvent.change(screen.getByLabelText('Filter by assignee'), { target: { value: 'unassigned' } });
+    expect(taskRows()).toHaveLength(16);
+  });
+
+  it('hides completed tasks from the home board after 24 hours', async () => {
+    const completedTasks = [
+      taskResponse({
+        id: 'recent-complete',
+        title: 'Recently completed',
+        state: 'Complete',
+        completed_at: new Date(Date.now() - 23 * 60 * 60 * 1000).toISOString(),
+      }),
+      taskResponse({
+        id: 'expired-complete',
+        title: 'Expired completion',
+        state: 'Complete',
+        completed_at: new Date(Date.now() - 24 * 60 * 60 * 1000 - 1000).toISOString(),
+      }),
+      taskResponse({
+        id: 'missing-completion-date',
+        title: 'Completion date unavailable',
+        state: 'Complete',
+        completed_at: null,
+      }),
+    ];
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
+      if (url === '/api/tasks?board_id=board-1') return { ok: true, json: async () => completedTasks };
+      if (url === '/api/tasks?board_id=board-2') return { ok: true, json: async () => [] };
+      if (url === '/api/users') return { ok: true, json: async () => [{ id: 'user-1', full_name: 'Board Owner' }] };
+      if (url === '/api/initiatives') return { ok: true, json: async () => [] };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    }));
+    render(<App />);
+
+    const completeColumn = await screen.findByText('Recently completed');
+    expect(completeColumn).toBeTruthy();
+    expect(screen.getByText('Completion date unavailable')).toBeTruthy();
+    expect(screen.queryByText('Expired completion')).toBeNull();
   });
 
   it('creates a default task in Backlog with Medium priority', async () => {
