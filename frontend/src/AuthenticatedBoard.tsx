@@ -15,6 +15,7 @@ import { ProfilePage } from './ProfilePage';
 import { CreateInitiativeOverlay, InitiativeDetailPage, InitiativesPage } from './InitiativeComponents';
 import { TaskSearch } from './TaskSearch';
 import { Column } from './TaskBoard';
+import { TasksPage } from './TasksPage';
 
 type SelectedTask = {
   task: Task;
@@ -29,6 +30,8 @@ type TaskGroup = {
   tasks: Task[];
 };
 
+const COMPLETED_TASK_RETENTION_MS = 24 * 60 * 60 * 1000;
+
 export function AuthenticatedBoard({
   tasks,
   setTasks,
@@ -40,6 +43,7 @@ export function AuthenticatedBoard({
 }) {
   const [currentPage, setCurrentPage] = useState<AppPage>(() => pageFromPath(window.location.pathname));
   const isTaskPage = currentPage === 'board' || currentPage === 'backlog';
+  const needsInitiativeGrouping = isTaskPage || currentPage === 'tasks';
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [selectedTask, setSelectedTask] = useState<SelectedTask | null>(null);
   const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
@@ -51,7 +55,7 @@ export function AuthenticatedBoard({
   const [assigneeFilterId, setAssigneeFilterId] = useState('all');
   const [initiatives, setInitiatives] = useState<Initiative[]>([]);
   const [taskInitiatives, setTaskInitiatives] = useState<Record<string, Initiative[]>>({});
-  const [isInitiativeGroupingLoading, setIsInitiativeGroupingLoading] = useState(isTaskPage);
+  const [isInitiativeGroupingLoading, setIsInitiativeGroupingLoading] = useState(needsInitiativeGrouping);
   const [initiativeGroupingError, setInitiativeGroupingError] = useState('');
   const [initiativeGroupingRefreshToken, setInitiativeGroupingRefreshToken] = useState(0);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -68,6 +72,7 @@ export function AuthenticatedBoard({
   const [loadError, setLoadError] = useState('');
   const [moveError, setMoveError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
 
   const navigateToPage = (page: AppPage, initiativeId?: string, initiativeTitle?: string) => {
     const path = pathForPage(page, initiativeId, initiativeTitle);
@@ -78,10 +83,11 @@ export function AuthenticatedBoard({
     setIsCreateTaskOpen(false);
     setIsCreateBoardOpen(false);
     setIsCreateInitiativeOpen(false);
-    if ((page === 'board' || page === 'backlog') && !isTaskPage) {
+    if ((page === 'board' || page === 'backlog' || page === 'tasks') && !needsInitiativeGrouping) {
       setIsInitiativeGroupingLoading(true);
       setInitiativeGroupingError('');
     }
+    if (page === 'board' || page === 'backlog') setCurrentTime(Date.now());
     setCurrentPage(page);
   };
 
@@ -102,14 +108,34 @@ export function AuthenticatedBoard({
       setIsCreateInitiativeOpen(false);
       setIsCreateMenuOpen(false);
       setSelectedTask(null);
-      if ((page === 'board' || page === 'backlog') && !isTaskPage) {
+      if (page === 'board' || page === 'backlog') setCurrentTime(Date.now());
+      if ((page === 'board' || page === 'backlog' || page === 'tasks') && !needsInitiativeGrouping) {
         setIsInitiativeGroupingLoading(true);
         setInitiativeGroupingError('');
       }
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [isTaskPage]);
+  }, [needsInitiativeGrouping]);
+
+  useEffect(() => {
+    if (currentPage !== 'board') return;
+
+    const nextExpiration = tasks.reduce((earliestExpiration, task) => {
+      if (task.state !== 'Complete' || !task.completedAt) return earliestExpiration;
+      const completedAt = Date.parse(task.completedAt);
+      if (!Number.isFinite(completedAt)) return earliestExpiration;
+      const expiration = completedAt + COMPLETED_TASK_RETENTION_MS;
+      return expiration > currentTime && expiration < earliestExpiration ? expiration : earliestExpiration;
+    }, Number.POSITIVE_INFINITY);
+
+    if (!Number.isFinite(nextExpiration)) return;
+    const timeout = window.setTimeout(
+      () => setCurrentTime(Date.now()),
+      Math.max(0, nextExpiration - currentTime)
+    );
+    return () => window.clearTimeout(timeout);
+  }, [currentPage, currentTime, tasks]);
 
   useEffect(() => {
     if (!isProfileMenuOpen) return;
@@ -184,7 +210,7 @@ export function AuthenticatedBoard({
   }, [boards, selectedBoardId, setTasks]);
 
   useEffect(() => {
-    if (!isTaskPage) return;
+    if (!needsInitiativeGrouping) return;
     let cancelled = false;
     Promise.all([
       getInitiatives(),
@@ -214,7 +240,7 @@ export function AuthenticatedBoard({
         if (!cancelled) setIsInitiativeGroupingLoading(false);
       });
     return () => { cancelled = true; };
-  }, [initiativeGroupingRefreshToken, initiativeRefreshToken, isTaskPage]);
+  }, [initiativeGroupingRefreshToken, initiativeRefreshToken, needsInitiativeGrouping]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -272,6 +298,10 @@ export function AuthenticatedBoard({
   };
 
   const filteredTasks = useMemo(() => tasks.filter((task) => {
+    if (currentPage === 'board' && task.state === 'Complete' && task.completedAt) {
+      const completedAt = Date.parse(task.completedAt);
+      if (Number.isFinite(completedAt) && completedAt + COMPLETED_TASK_RETENTION_MS <= currentTime) return false;
+    }
     const belongsToBoard = !boardFilterId || (task.boardId ?? selectedBoardId) === boardFilterId;
     const belongsToInitiative = !initiativeFilterId
       || (taskInitiatives[task.id] ?? []).some((initiative) => initiative.id === initiativeFilterId);
@@ -280,7 +310,7 @@ export function AuthenticatedBoard({
         ? !task.assignedToId
         : task.assignedToId === assigneeFilterId.slice('assignee:'.length));
     return belongsToBoard && belongsToInitiative && belongsToAssignee;
-  }), [assigneeFilterId, boardFilterId, initiativeFilterId, selectedBoardId, taskInitiatives, tasks]);
+  }), [assigneeFilterId, boardFilterId, currentPage, currentTime, initiativeFilterId, selectedBoardId, taskInitiatives, tasks]);
 
   const taskGroups = useMemo<TaskGroup[]>(() => {
     if (groupBy === 'board') {
@@ -381,6 +411,24 @@ export function AuthenticatedBoard({
         </button>
         <button
           type="button"
+          aria-label="Tasks"
+          title="Tasks"
+          aria-current={currentPage === 'tasks' ? 'page' : undefined}
+          onClick={() => {
+            setIsProfileMenuOpen(false);
+            setIsCreateTaskOpen(false);
+            setSelectedTask(null);
+            navigateToPage('tasks');
+          }}
+          className={`mt-2 flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'tasks' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+            <rect x="3" y="3" width="18" height="18" rx="3" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="m8 12 3 3 5-6" />
+          </svg>
+        </button>
+        <button
+          type="button"
           aria-label="Initiatives"
           title="Initiatives"
           aria-current={currentPage === 'initiatives' || currentPage === 'initiative' ? 'page' : undefined}
@@ -474,7 +522,7 @@ export function AuthenticatedBoard({
       <header className="bg-white p-4 shadow-sm z-10 grid grid-cols-1 gap-2 shrink-0 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] sm:items-center">
         {currentPage !== 'board' && currentPage !== 'backlog' && (
           <h1 className="text-xl font-extrabold tracking-tight text-blue-600 sm:col-start-1 sm:row-start-1">
-            {currentPage === 'admin' ? 'Admin' : currentPage === 'settings' ? 'Settings' : currentPage === 'boards' ? 'Boards' : currentPage === 'initiatives' || currentPage === 'initiative' ? 'Initiatives' : 'Profile'}
+            {currentPage === 'tasks' ? 'Tasks' : currentPage === 'admin' ? 'Admin' : currentPage === 'settings' ? 'Settings' : currentPage === 'boards' ? 'Boards' : currentPage === 'initiatives' || currentPage === 'initiative' ? 'Initiatives' : 'Profile'}
           </h1>
         )}
         {currentPage !== 'profile' && currentPage !== 'settings' && (
@@ -608,6 +656,24 @@ export function AuthenticatedBoard({
               ));
             }} />
             : <p role={loadError ? 'alert' : undefined} className="p-4 text-sm text-gray-600">{loadError || 'Loading profile…'}</p>
+        ) : currentPage === 'tasks' ? (
+          <TasksPage
+            tasks={tasks}
+            boards={boards}
+            initiatives={initiatives}
+            assignees={assignees}
+            taskInitiatives={taskInitiatives}
+            isLoading={isLoading}
+            loadError={loadError}
+            isInitiativeLoading={isInitiativeGroupingLoading}
+            initiativeError={initiativeGroupingError}
+            onRetryInitiatives={() => {
+              setInitiativeGroupingError('');
+              setIsInitiativeGroupingLoading(true);
+              setInitiativeGroupingRefreshToken((version) => version + 1);
+            }}
+            onSelectTask={(task) => setSelectedTask({ task, boardId: task.boardId ?? selectedBoardId })}
+          />
         ) : currentPage === 'boards' ? (
           profile
             ? <BoardsPage

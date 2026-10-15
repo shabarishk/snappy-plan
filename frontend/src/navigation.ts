@@ -1,7 +1,8 @@
-export type AppPage = 'board' | 'backlog' | 'boards' | 'initiatives' | 'initiative' | 'profile' | 'settings' | 'admin';
+export type AppPage = 'board' | 'backlog' | 'tasks' | 'boards' | 'initiatives' | 'initiative' | 'profile' | 'settings' | 'admin';
 
 export function pageFromPath(pathname: string): AppPage {
   if (pathname === '/admin') return 'admin';
+  if (pathname === '/tasks') return 'tasks';
   if (pathname === '/boards') return 'boards';
   if (pathname === '/initiatives') return 'initiatives';
   if (/^\/initiatives\/[^/]+$/.test(pathname)) return 'initiative';
@@ -12,6 +13,7 @@ export function pageFromPath(pathname: string): AppPage {
 
 export function pathForPage(page: AppPage, initiativeId?: string, initiativeTitle?: string): string {
   if (page === 'admin') return '/admin';
+  if (page === 'tasks') return '/tasks';
   if (page === 'boards') return '/boards';
   if (page === 'initiatives') return '/initiatives';
   if (page === 'initiative' && initiativeId) {
