@@ -93,6 +93,10 @@ body {
     overflow: hidden;
   }
 
+  .board-main.board-main-grouped {
+    overflow-y: auto;
+  }
+
   .board-columns {
     height: 100%;
     grid-template-columns: repeat(3, minmax(0, 1fr));

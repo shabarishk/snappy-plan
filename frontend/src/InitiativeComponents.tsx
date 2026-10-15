@@ -22,12 +22,14 @@ function InitiativeForm({
   initial,
   users,
   submitLabel,
+  className = 'space-y-4 rounded-xl border border-gray-200 bg-white p-5',
   onSubmit,
   onCancel,
 }: {
   initial?: Initiative;
   users: TaskAssignee[];
   submitLabel: string;
+  className?: string;
   onSubmit: (request: InitiativeRequest) => Promise<void>;
   onCancel?: () => void;
 }) {
@@ -57,7 +59,7 @@ function InitiativeForm({
   };
 
   return (
-    <form onSubmit={submit} className="space-y-4 rounded-xl border border-gray-200 bg-white p-5">
+    <form onSubmit={submit} className={className}>
       <div>
         <label htmlFor="initiative-title" className="mb-1 block text-sm font-medium text-gray-700">Title</label>
         <input id="initiative-title" required maxLength={255} value={title} onChange={(event) => setTitle(event.target.value)} className="w-full rounded-lg border border-gray-300 p-2" />
@@ -90,15 +92,44 @@ function InitiativeForm({
   );
 }
 
-export function InitiativesPage({
+export function CreateInitiativeOverlay({
   users,
-  onOpenInitiative,
+  onClose,
+  onCreated,
 }: {
   users: TaskAssignee[];
+  onClose: () => void;
+  onCreated: (initiative: Initiative) => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4">
+      <section role="dialog" aria-modal="true" aria-labelledby="create-initiative-title" className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+        <div className="mb-5 flex items-center justify-between">
+          <h2 id="create-initiative-title" className="text-xl font-bold text-gray-800">Create initiative</h2>
+          <button type="button" aria-label="Close create initiative form" onClick={onClose} className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100">×</button>
+        </div>
+        <InitiativeForm
+          users={users}
+          submitLabel="Create initiative"
+          className="space-y-4"
+          onCancel={onClose}
+          onSubmit={async (request) => onCreated(await createInitiative(request))}
+        />
+      </section>
+    </div>
+  );
+}
+
+export function InitiativesPage({
+  onOpenInitiative,
+  onCreateInitiative,
+  refreshToken,
+}: {
   onOpenInitiative: (initiative: Initiative) => void;
+  onCreateInitiative: () => void;
+  refreshToken: number;
 }) {
   const [initiatives, setInitiatives] = useState<Initiative[]>([]);
-  const [isCreating, setIsCreating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -111,7 +142,7 @@ export function InitiativesPage({
       })
       .finally(() => { if (!cancelled) setIsLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [refreshToken]);
 
   return (
     <section aria-labelledby="initiatives-title" className="mx-auto flex h-full max-w-3xl flex-col">
@@ -120,27 +151,10 @@ export function InitiativesPage({
           <h2 id="initiatives-title" className="text-2xl font-bold text-gray-900">Your initiatives</h2>
           <p className="mt-1 text-sm text-gray-600">Group related tasks and track their progress.</p>
         </div>
-        <button type="button" onClick={() => setIsCreating((current) => !current)} className="shrink-0 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
-          {isCreating ? 'Cancel' : '+ New initiative'}
+        <button type="button" onClick={onCreateInitiative} className="shrink-0 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+          + New initiative
         </button>
       </header>
-      {isCreating && (
-        <div className="mb-5">
-          <InitiativeForm
-            users={users}
-            submitLabel="Create initiative"
-            onCancel={() => setIsCreating(false)}
-            onSubmit={async (request) => {
-              const initiative = await createInitiative(request);
-            setInitiatives((current) => [
-              { ...initiative, task_count: 0, completed_task_count: 0 },
-              ...current.filter((item) => item.id !== initiative.id),
-            ]);
-              setIsCreating(false);
-            }}
-          />
-        </div>
-      )}
       {error && <p role="alert" className="mb-3 rounded bg-red-100 p-3 text-sm text-red-700">{error}</p>}
       <ul aria-label="Initiatives" className="min-h-0 flex-1 overflow-y-auto divide-y divide-gray-200 rounded-xl border border-gray-200 bg-white">
         {isLoading ? (

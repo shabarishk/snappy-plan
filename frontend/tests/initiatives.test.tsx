@@ -74,12 +74,14 @@ describe('Initiatives', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<App />);
 
-    await screen.findByRole('button', { name: 'Current board: Board Owner' });
+    await screen.findByRole('heading', { name: 'Board Owner' });
     const sidebar = within(screen.getByRole('complementary', { name: 'Sidebar' }));
     expect(sidebar.getAllByRole('button').slice(0, 3).map((button) => button.getAttribute('aria-label')))
       .toEqual(['Home', 'Initiatives', 'Boards']);
     fireEvent.click(screen.getByRole('button', { name: 'Initiatives' }));
     fireEvent.click(screen.getByRole('button', { name: '+ New initiative' }));
+    const createInitiativeDialog = screen.getByRole('dialog', { name: 'Create initiative' });
+    expect(createInitiativeDialog.getAttribute('aria-modal')).toBe('true');
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Launch planning' } });
     fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Coordinate launch work' } });
     fireEvent.change(screen.getByLabelText('Complete by'), { target: { value: '2026-12-01' } });

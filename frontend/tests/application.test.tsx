@@ -21,27 +21,37 @@ describe('Application', () => {
       vi.stubGlobal('fetch', mockBoardReads());
       render(<App />);
   
-      await waitFor(() => expect(screen.getByRole('button', { name: 'Current board: Board Owner' })).toBeTruthy());
-      expect(screen.getByRole('heading', { name: 'To Do' })).toBeTruthy();
-      expect(screen.getByRole('heading', { name: 'In Progress' })).toBeTruthy();
-      expect(screen.getByRole('heading', { name: 'Complete' })).toBeTruthy();
+      await screen.findByRole('heading', { name: 'Board Owner' });
+      expect(screen.queryByRole('button', { name: 'Current board: Board Owner' })).toBeNull();
+      expect(screen.getAllByRole('heading', { name: 'To Do' })).toHaveLength(2);
+      expect(screen.getAllByRole('heading', { name: 'In Progress' })).toHaveLength(2);
+      expect(screen.getAllByRole('heading', { name: 'Complete' })).toHaveLength(2);
+      for (const title of ['To Do', 'In Progress', 'Complete']) {
+        for (const heading of screen.getAllByRole('heading', { name: title })) {
+          expect(heading.className).toContain('text-sm');
+          expect(heading.className).not.toMatch(/font-(bold|semibold|medium)/);
+        }
+      }
       expect(screen.queryByRole('heading', { name: 'Backlog' })).toBeNull();
-      expect(screen.getAllByText('0 tasks')).toHaveLength(3);
+      expect((screen.getByLabelText('Group tasks by') as HTMLSelectElement).value).toBe('board');
+      expect(screen.getAllByText('0 tasks')).toHaveLength(8);
       expect(screen.queryByText('Setup Unraid Docker')).toBeNull();
       expect(screen.queryByText('Configure iOS PWA settings')).toBeNull();
       expect(screen.queryByText('Build React UI')).toBeNull();
-      expect(screen.getByRole('region', { name: 'Kanban board columns' }).getAttribute('style'))
-        .toContain('repeat(3, minmax(0, 1fr))');
+      const activeTab = screen.getByRole('button', { name: 'Active' });
+      expect(activeTab.querySelector('span[aria-hidden="true"]')).toBeTruthy();
   
-      fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
-      expect(screen.getByRole('heading', { name: 'Backlog' })).toBeTruthy();
-      expect(screen.getByRole('region', { name: 'Backlog tasks' }).getAttribute('style'))
-        .toContain('minmax(0, 1fr)');
-      expect(screen.getByText('0 tasks')).toBeTruthy();
+      const backlogTab = screen.getByRole('button', { name: 'Backlog' });
+      fireEvent.click(backlogTab);
+      expect(backlogTab.querySelector('span[aria-hidden="true"]')).toBeTruthy();
+      expect(activeTab.querySelector('span[aria-hidden="true"]')).toBeNull();
+      expect(screen.queryByRole('heading', { name: 'Backlog' })).toBeNull();
+      expect(screen.getAllByText('0 tasks')).toHaveLength(4);
   
-      fireEvent.click(screen.getByRole('button', { name: 'Kanban board' }));
-      expect(screen.getByRole('heading', { name: 'To Do' })).toBeTruthy();
-      expect(screen.getAllByText('0 tasks')).toHaveLength(3);
+      fireEvent.click(activeTab);
+      expect(activeTab.querySelector('span[aria-hidden="true"]')).toBeTruthy();
+      expect(screen.getAllByRole('heading', { name: 'To Do' })).toHaveLength(2);
+      expect(screen.getAllByText('0 tasks')).toHaveLength(8);
     });
   
   it('opens the page selected by the current URL and follows browser history', async () => {
@@ -54,7 +64,7 @@ describe('Application', () => {
   
       fireEvent.click(screen.getByRole('button', { name: 'Home' }));
       expect(window.location.pathname).toBe('/');
-      expect(screen.getByRole('heading', { name: 'To Do' })).toBeTruthy();
+      expect(await screen.findAllByRole('heading', { name: 'To Do' })).toHaveLength(2);
   
       window.history.back();
       await waitFor(() => expect(window.location.pathname).toBe('/settings'));

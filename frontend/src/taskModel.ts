@@ -8,6 +8,7 @@ export type ColumnId = 'backlog' | 'todo' | 'in-progress' | 'complete';
 
 export type Task = {
   id: string;
+  boardId?: string;
   columnId: ColumnId;
   state: TaskState;
   priority: TaskPriority;
@@ -36,7 +37,7 @@ export const COLUMN_STATES: Record<ColumnId, TaskState> = {
   complete: 'Complete',
 };
 
-export function toBoardTask(task: ApiTask): Task {
+export function toBoardTask(task: ApiTask, boardId?: string): Task {
   const stateColumns: Record<TaskState, ColumnId> = {
     Backlog: 'backlog',
     ToDo: 'todo',
@@ -45,6 +46,7 @@ export function toBoardTask(task: ApiTask): Task {
   };
   return {
     id: task.id,
+    boardId,
     columnId: stateColumns[task.state],
     state: task.state,
     priority: task.priority,

@@ -12,6 +12,9 @@ export function AdminPage({ currentUsername }: { currentUsername: string }) {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
+  const [createUserError, setCreateUserError] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [boardsError, setBoardsError] = useState('');
@@ -49,8 +52,23 @@ export function AdminPage({ currentUsername }: { currentUsername: string }) {
     return () => { cancelled = true; };
   }, []);
 
+  const closeCreateUser = () => {
+    setIsCreateUserOpen(false);
+    setUsername('');
+    setFullName('');
+    setEmail('');
+    setPassword('');
+    setConfirmPassword('');
+    setCreateUserError('');
+  };
+
   const handleCreateUser = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setCreateUserError('');
+    if (password !== confirmPassword) {
+      setCreateUserError('Passwords do not match.');
+      return;
+    }
     setError('');
     setSuccess('');
     setIsSaving(true);
@@ -63,12 +81,14 @@ export function AdminPage({ currentUsername }: { currentUsername: string }) {
       setFullName('');
       setEmail('');
       setPassword('');
+      setConfirmPassword('');
       setSuccess(`User ${newUser.username} created.`);
+      setIsCreateUserOpen(false);
       getAdminBoards()
         .then(setBoards)
         .catch((err: unknown) => setBoardsError(err instanceof Error ? err.message : 'Failed to load boards'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create user');
+      setCreateUserError(err instanceof Error ? err.message : 'Failed to create user');
     } finally {
       setIsSaving(false);
     }
@@ -115,33 +135,12 @@ export function AdminPage({ currentUsername }: { currentUsername: string }) {
         <div className="min-w-0 rounded-xl bg-white p-6 shadow-sm">
       {selectedSection === 'users' ? (
       <section aria-labelledby="user-management-title" className="space-y-4">
-        <h2 id="user-management-title" className="text-xl font-bold text-gray-800">User management</h2>
-        <section aria-labelledby="create-user-title" className="rounded-xl bg-white p-6 shadow-sm">
-          <h3 id="create-user-title" className="mb-4 text-lg font-bold text-gray-800">Create user</h3>
-          <form onSubmit={handleCreateUser} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label htmlFor="admin-username" className="mb-1 block text-sm font-medium text-gray-700">Username</label>
-              <input id="admin-username" required minLength={1} maxLength={32} pattern="[A-Za-z0-9]+" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
-            </div>
-            <div>
-              <label htmlFor="admin-full-name" className="mb-1 block text-sm font-medium text-gray-700">Full name</label>
-              <input id="admin-full-name" required maxLength={100} autoComplete="name" value={fullName} onChange={(event) => setFullName(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
-            </div>
-            <div>
-              <label htmlFor="admin-email" className="mb-1 block text-sm font-medium text-gray-700">Email address</label>
-              <input id="admin-email" type="email" required maxLength={255} autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
-            </div>
-            <div>
-              <label htmlFor="admin-password" className="mb-1 block text-sm font-medium text-gray-700">Password</label>
-              <input id="admin-password" type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
-            </div>
-            <div className="flex items-end">
-              <button type="submit" disabled={isSaving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
-                {isSaving ? 'Saving…' : 'Create user'}
-              </button>
-            </div>
-          </form>
-        </section>
+        <div className="flex items-center justify-between gap-4">
+          <h2 id="user-management-title" className="text-xl font-bold text-gray-800">User management</h2>
+          <button type="button" onClick={() => setIsCreateUserOpen(true)} className="shrink-0 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+            + New user
+          </button>
+        </div>
 
         <section aria-labelledby="manage-users-title" className="rounded-xl bg-white p-6 shadow-sm">
         <h2 id="manage-users-title" className="mb-4 text-lg font-bold text-gray-800">Manage users</h2>
@@ -184,6 +183,45 @@ export function AdminPage({ currentUsername }: { currentUsername: string }) {
           </div>
         )}
         </section>
+        {isCreateUserOpen && (
+          <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4">
+            <section role="dialog" aria-modal="true" aria-labelledby="create-user-title" className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+              <div className="mb-5 flex items-center justify-between">
+                <h2 id="create-user-title" className="text-xl font-bold text-gray-800">Create user</h2>
+                <button type="button" aria-label="Close create user form" onClick={closeCreateUser} disabled={isSaving} className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100 disabled:opacity-50">×</button>
+              </div>
+              <form onSubmit={handleCreateUser} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="admin-username" className="mb-1 block text-sm font-medium text-gray-700">Username</label>
+                  <input id="admin-username" required minLength={1} maxLength={32} pattern="[A-Za-z0-9]+" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
+                </div>
+                <div>
+                  <label htmlFor="admin-full-name" className="mb-1 block text-sm font-medium text-gray-700">Full name</label>
+                  <input id="admin-full-name" required maxLength={100} autoComplete="name" value={fullName} onChange={(event) => setFullName(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
+                </div>
+                <div>
+                  <label htmlFor="admin-email" className="mb-1 block text-sm font-medium text-gray-700">Email address</label>
+                  <input id="admin-email" type="email" required maxLength={255} autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
+                </div>
+                <div>
+                  <label htmlFor="admin-password" className="mb-1 block text-sm font-medium text-gray-700">Password</label>
+                  <input id="admin-password" type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
+                </div>
+                <div>
+                  <label htmlFor="admin-confirm-password" className="mb-1 block text-sm font-medium text-gray-700">Confirm password</label>
+                  <input id="admin-confirm-password" type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
+                </div>
+                {createUserError && <p role="alert" className="text-sm text-red-700 sm:col-span-2">{createUserError}</p>}
+                <div className="flex justify-end gap-3 border-t border-gray-100 pt-4 sm:col-span-2">
+                  <button type="button" onClick={closeCreateUser} disabled={isSaving} className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50">Cancel</button>
+                  <button type="submit" disabled={isSaving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+                    {isSaving ? 'Saving…' : 'Create user'}
+                  </button>
+                </div>
+              </form>
+            </section>
+          </div>
+        )}
       </section>
       ) : (
       <section aria-labelledby="manage-boards-title" className="space-y-4">
