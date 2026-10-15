@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { describe, expect, it, vi } from 'vitest';
 import App, { AuthenticatedBoard } from '../src/App';
 import type { Task } from '../src/App';
+import type { Initiative } from '../src/api';
 import { sortTasksByPriority } from '../src/taskPriority';
 
 import { taskResponse, boardList, mockBoardReads } from './appTestUtils';
@@ -17,8 +18,27 @@ describe('Tasks', () => {
       expect(sortTasksByPriority(tasks).map((task) => task.id)).toEqual(['high', 'medium', 'low']);
     });
   
-  it('moves backlog tasks between lanes and displays their priority and completion time', () => {
-      vi.stubGlobal('fetch', mockBoardReads());
+  it('moves backlog tasks between lanes and displays their priority and completion time', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
+        if (url === '/api/boards') return { ok: true, json: async () => boardList };
+        if (url === '/api/tasks?board_id=board-1') return {
+          ok: true,
+          json: async () => [taskResponse({
+            id: 'task-1',
+            state: 'Backlog',
+            priority: 'High',
+            title: 'Test task',
+            description: 'Task details',
+          })],
+        };
+        if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
+        if (url === '/api/users') return { ok: true, json: async () => [] };
+        if (url === '/api/profile') return {
+          ok: true,
+          json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+        };
+        return { ok: true, json: async () => ({ authenticated: true }) };
+      }));
       const task: Task = {
         id: 'task-1',
         columnId: 'backlog',
@@ -34,6 +54,7 @@ describe('Tasks', () => {
   
       const { rerender } = render(<AuthenticatedBoard tasks={tasks} setTasks={setTasks} />);
       fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
+      await screen.findByText('Test task');
       expect(screen.getByText('Priority: High')).toBeTruthy();
       expect(screen.getByText('Task details')).toBeTruthy();
   
@@ -65,7 +86,7 @@ describe('Tasks', () => {
             state: 'InProgress',
           }) };
         }
-        if (url.startsWith('/api/tasks?board_id=')) return {
+        if (url === '/api/tasks?board_id=board-1') return {
           ok: true,
           json: async () => [taskResponse({
             id: 'task-1',
@@ -73,6 +94,7 @@ describe('Tasks', () => {
             title: 'Move into progress',
           })],
         };
+        if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
         if (url === '/api/users') return { ok: true, json: async () => [] };
         if (url === '/api/profile') return {
           ok: true,
@@ -114,7 +136,7 @@ describe('Tasks', () => {
             }),
           };
         }
-        if (url.startsWith('/api/tasks?board_id=')) {
+        if (url === '/api/tasks?board_id=board-1') {
           return {
             ok: true,
             json: async () => [taskResponse({
@@ -127,6 +149,7 @@ describe('Tasks', () => {
             })],
           };
         }
+        if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
         if (url === '/api/users') return {
           ok: true,
           json: async () => [
@@ -179,7 +202,7 @@ describe('Tasks', () => {
             state: 'ToDo',
           }) };
         }
-        if (url.startsWith('/api/tasks?board_id=')) return {
+        if (url === '/api/tasks?board_id=board-1') return {
           ok: true,
           json: async () => [taskResponse({
             id: 'task-1',
@@ -187,6 +210,7 @@ describe('Tasks', () => {
             state: 'ToDo',
           })],
         };
+        if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
         if (url === '/api/users') return { ok: true, json: async () => [] };
         if (url === '/api/profile') return {
           ok: true,
@@ -202,15 +226,32 @@ describe('Tasks', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
       await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Task details' })).toBeNull());
-      expect(screen.queryByText('Board transfer task')).toBeNull();
+      expect(within(screen.getByRole('region', { name: 'Project Board tasks' })).getByText('Board transfer task')).toBeTruthy();
       expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-1', expect.objectContaining({
         method: 'PUT',
         body: expect.stringContaining('"board_id":"board-2"'),
       }));
     });
   
-  it('closes task details using the close button or by clicking outside', () => {
-      vi.stubGlobal('fetch', mockBoardReads());
+  it('closes task details using the close button or by clicking outside', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
+        if (url === '/api/boards') return { ok: true, json: async () => boardList };
+        if (url === '/api/tasks?board_id=board-1') return {
+          ok: true,
+          json: async () => [taskResponse({
+            id: 'task-1',
+            title: 'Closeable task',
+            state: 'ToDo',
+          })],
+        };
+        if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
+        if (url === '/api/users') return { ok: true, json: async () => [] };
+        if (url === '/api/profile') return {
+          ok: true,
+          json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+        };
+        return { ok: true, json: async () => ({ authenticated: true }) };
+      }));
       const task: Task = {
         id: 'task-1',
         columnId: 'todo',
@@ -220,11 +261,11 @@ describe('Tasks', () => {
       };
       render(<AuthenticatedBoard tasks={[task]} setTasks={vi.fn()} />);
   
-      fireEvent.click(screen.getByText('Closeable task'));
+      fireEvent.click(await screen.findByText('Closeable task'));
       fireEvent.click(screen.getByRole('button', { name: 'Close task details' }));
       expect(screen.queryByRole('dialog', { name: 'Task details' })).toBeNull();
   
-      fireEvent.click(screen.getByText('Closeable task'));
+      fireEvent.click(await screen.findByText('Closeable task'));
       const reopenedDialog = screen.getByRole('dialog', { name: 'Task details' });
       fireEvent.click(reopenedDialog.parentElement!);
       expect(screen.queryByRole('dialog', { name: 'Task details' })).toBeNull();
@@ -268,7 +309,7 @@ describe('Tasks', () => {
       vi.stubGlobal('fetch', fetchMock);
       render(<App />);
   
-      await screen.findByRole('button', { name: 'Current board: Board Owner' });
+      await screen.findByRole('heading', { name: 'Board Owner' });
       fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
       fireEvent.click(screen.getByRole('menuitem', { name: 'Task' }));
       const dialog = screen.getByRole('dialog', { name: 'Create task' });
@@ -299,9 +340,87 @@ describe('Tasks', () => {
           complete_by: new Date('2026-10-20T02:30').toISOString(),
         }),
       }));
-      expect(screen.getByText('Priority: High')).toBeTruthy();
+      expect(await screen.findByText('Priority: High')).toBeTruthy();
     });
-  
+
+  it('groups cross-board tasks by initiative and assignee with ungrouped tasks last in backlog', async () => {
+    const initiative: Initiative = {
+      id: 'initiative-1',
+      title: 'Launch Initiative',
+      description: null,
+      complete_by: null,
+      assigned_to_id: null,
+      created_by_id: 'boardowner',
+      created_at: '',
+      updated_at: '',
+    };
+    const linkedTask = taskResponse({
+      id: 'linked-task',
+      title: 'Linked task',
+      state: 'ToDo',
+      assigned_to_id: 'user-1',
+    });
+    const unlinkedTask = taskResponse({
+      id: 'unlinked-task',
+      title: 'Unlinked backlog task',
+      state: 'Backlog',
+      assigned_to_id: null,
+    });
+    const secondBoardTask = taskResponse({
+      id: 'second-board-task',
+      title: 'Second board task',
+      state: 'ToDo',
+      assigned_to_id: 'user-1',
+    });
+    const secondBoardBacklogTask = taskResponse({
+      id: 'second-board-backlog-task',
+      title: 'Second board backlog task',
+      state: 'Backlog',
+      assigned_to_id: 'user-1',
+    });
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
+      if (url === '/api/tasks?board_id=board-1') return { ok: true, json: async () => [linkedTask, unlinkedTask] };
+      if (url === '/api/tasks?board_id=board-2') return { ok: true, json: async () => [secondBoardTask, secondBoardBacklogTask] };
+      if (url === '/api/users') return { ok: true, json: async () => [{ id: 'user-1', full_name: 'Board Owner' }] };
+      if (url === '/api/initiatives') return { ok: true, json: async () => [initiative] };
+      if (url === '/api/initiatives/initiative-1') {
+        return { ok: true, json: async () => ({ initiative, tasks: [linkedTask] }) };
+      }
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    }));
+    render(<App />);
+
+    expect(await screen.findByText('Second board task')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'initiative' } });
+    const initiativeGroups = await screen.findAllByRole('region', { name: /^(Launch Initiative|No Initiative) tasks$/ });
+    expect(initiativeGroups.map((group) => group.getAttribute('aria-label'))).toEqual([
+      'Launch Initiative tasks',
+      'No Initiative tasks',
+    ]);
+    expect(within(initiativeGroups[1]).getByText('Second board task')).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'assignee' } });
+    const assigneeGroups = await screen.findAllByRole('region', { name: /^(Board Owner|No Assignee) tasks$/ });
+    expect(assigneeGroups.map((group) => group.getAttribute('aria-label'))).toEqual([
+      'Board Owner tasks',
+      'No Assignee tasks',
+    ]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
+    const backlogGroups = await screen.findAllByRole('region', { name: /^(Board Owner|No Assignee) tasks$/ });
+    expect(backlogGroups.map((group) => group.getAttribute('aria-label'))).toEqual([
+      'Board Owner tasks',
+      'No Assignee tasks',
+    ]);
+    expect(within(backlogGroups[0]).getByText('Second board backlog task')).toBeTruthy();
+    expect(within(backlogGroups[1]).getByText('Unlinked backlog task')).toBeTruthy();
+  });
+
   it('creates a default task in Backlog with Medium priority', async () => {
       const fetchMock = mockBoardReads();
       fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
@@ -322,14 +441,14 @@ describe('Tasks', () => {
       vi.stubGlobal('fetch', fetchMock);
       render(<App />);
   
-      await screen.findByRole('button', { name: 'Current board: Board Owner' });
+      await screen.findByRole('heading', { name: 'Board Owner' });
       fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
       fireEvent.click(screen.getByRole('menuitem', { name: 'Task' }));
       fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Review the garden plan' } });
       fireEvent.click(screen.getByRole('button', { name: 'Confirm Task' }));
   
       expect(await screen.findByText('Review the garden plan')).toBeTruthy();
-      expect(screen.getByRole('heading', { name: 'Backlog' })).toBeTruthy();
+      expect(screen.getAllByRole('heading', { name: 'Backlog' })).toHaveLength(2);
       expect(screen.getByText('Priority: Medium')).toBeTruthy();
       expect(fetchMock).toHaveBeenCalledWith('/api/tasks', expect.objectContaining({
         method: 'POST',
@@ -369,7 +488,7 @@ describe('Tasks', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<App />);
 
-    await screen.findByRole('button', { name: 'Current board: Board Owner' });
+    await screen.findByRole('heading', { name: 'Board Owner' });
     const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
     fireEvent.click(within(sidebar).getByRole('button', { name: 'Initiatives' }));
     const search = screen.getByRole('searchbox', { name: 'Search tasks' });
@@ -393,7 +512,7 @@ describe('Tasks', () => {
     vi.stubGlobal('fetch', mockBoardReads());
     render(<App />);
 
-    await screen.findByRole('button', { name: 'Current board: Board Owner' });
+    await screen.findByRole('heading', { name: 'Board Owner' });
     fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
     expect(screen.getByRole('menuitem', { name: 'Task' })).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: 'Board' })).toBeTruthy();

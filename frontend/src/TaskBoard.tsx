@@ -8,13 +8,15 @@ function TaskCard({
   task,
   onMoveToTodo,
   onSelect,
+  draggableId,
 }: {
   task: Task;
   onMoveToTodo?: (taskId: string) => void;
   onSelect: (task: Task) => void;
+  draggableId?: string;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: task.id,
+    id: draggableId ?? task.id,
     data: { type: 'Task', task },
   });
 
@@ -61,15 +63,19 @@ export function Column({
   tasks,
   onMoveToTodo,
   onSelectTask,
+  droppableId,
+  taskIdPrefix,
 }: {
   column: ColumnType;
   tasks: Task[];
   onMoveToTodo?: (taskId: string) => void;
   onSelectTask: (task: Task) => void;
+  droppableId?: string;
+  taskIdPrefix?: string;
 }) {
   const { setNodeRef } = useDroppable({
-    id: column.id,
-    data: { type: 'Column', column },
+    id: droppableId ?? column.id,
+    data: { type: 'Column', columnId: column.id },
   });
 
   return (
@@ -83,7 +89,13 @@ export function Column({
       
       <div className="board-column-tasks flex-1 p-3 overflow-y-auto">
         {sortTasksByPriority(tasks).map((task) => (
-          <TaskCard key={task.id} task={task} onMoveToTodo={onMoveToTodo} onSelect={onSelectTask} />
+          <TaskCard
+            key={taskIdPrefix ? `${taskIdPrefix}:${task.id}` : task.id}
+            task={task}
+            onMoveToTodo={onMoveToTodo}
+            onSelect={onSelectTask}
+            draggableId={taskIdPrefix ? `${taskIdPrefix}:${task.id}` : undefined}
+          />
         ))}
       </div>
     </div>

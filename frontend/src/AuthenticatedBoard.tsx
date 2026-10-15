@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DndContext, DragOverlay, closestCorners, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core';
-import { deleteBoard as persistDeleteBoard, getBoards, getProfile, getTaskAssignees, getTasks, logout, moveTask as persistMoveTask } from './api';
-import type { Board, TaskAssignee, UserProfile } from './api';
+import { deleteBoard as persistDeleteBoard, getBoards, getInitiative, getInitiatives, getProfile, getTaskAssignees, getTasks, logout, moveTask as persistMoveTask } from './api';
+import type { Board, Initiative, TaskAssignee, UserProfile } from './api';
 import type { ColumnId, Task } from './taskModel';
 import type { AppPage } from './navigation';
 import { initiativeIdFromPath, pageFromPath, pathForPage } from './navigation';
@@ -21,6 +21,14 @@ type SelectedTask = {
   boardId: string;
 };
 
+type TaskGroupBy = 'board' | 'initiative' | 'assignee';
+
+type TaskGroup = {
+  id: string;
+  title: string;
+  tasks: Task[];
+};
+
 export function AuthenticatedBoard({
   tasks,
   setTasks,
@@ -36,10 +44,15 @@ export function AuthenticatedBoard({
   const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
   const [boards, setBoards] = useState<Board[]>([]);
   const [selectedBoardId, setSelectedBoardId] = useState('');
+  const [groupBy, setGroupBy] = useState<TaskGroupBy>('board');
+  const [initiatives, setInitiatives] = useState<Initiative[]>([]);
+  const [taskInitiatives, setTaskInitiatives] = useState<Record<string, Initiative[]>>({});
+  const [isInitiativeGroupingLoading, setIsInitiativeGroupingLoading] = useState(false);
+  const [initiativeGroupingError, setInitiativeGroupingError] = useState('');
+  const [initiativeGroupingRefreshToken, setInitiativeGroupingRefreshToken] = useState(0);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
-  const boardMenuRef = useRef<HTMLDivElement>(null);
   const createMenuRef = useRef<HTMLDivElement>(null);
   const [logoutError, setLogoutError] = useState('');
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -47,7 +60,6 @@ export function AuthenticatedBoard({
   const [isCreateBoardOpen, setIsCreateBoardOpen] = useState(false);
   const [isCreateInitiativeOpen, setIsCreateInitiativeOpen] = useState(false);
   const [initiativeRefreshToken, setInitiativeRefreshToken] = useState(0);
-  const [isBoardMenuOpen, setIsBoardMenuOpen] = useState(false);
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [moveError, setMoveError] = useState('');
@@ -62,6 +74,10 @@ export function AuthenticatedBoard({
     setIsCreateTaskOpen(false);
     setIsCreateBoardOpen(false);
     setIsCreateInitiativeOpen(false);
+    if ((page === 'board' || page === 'backlog') && groupBy === 'initiative') {
+      setIsInitiativeGroupingLoading(true);
+      setInitiativeGroupingError('');
+    }
     setCurrentPage(page);
   };
 
@@ -74,17 +90,22 @@ export function AuthenticatedBoard({
 
   useEffect(() => {
     const handlePopState = () => {
-      setCurrentPage(pageFromPath(window.location.pathname));
+      const page = pageFromPath(window.location.pathname);
+      setCurrentPage(page);
       setIsProfileMenuOpen(false);
       setIsCreateTaskOpen(false);
       setIsCreateBoardOpen(false);
       setIsCreateInitiativeOpen(false);
       setIsCreateMenuOpen(false);
       setSelectedTask(null);
+      if ((page === 'board' || page === 'backlog') && groupBy === 'initiative') {
+        setIsInitiativeGroupingLoading(true);
+        setInitiativeGroupingError('');
+      }
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+  }, [groupBy]);
 
   useEffect(() => {
     if (!isProfileMenuOpen) return;
@@ -97,18 +118,6 @@ export function AuthenticatedBoard({
     document.addEventListener('pointerdown', handlePointerDown);
     return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, [isProfileMenuOpen]);
-
-  useEffect(() => {
-    if (!isBoardMenuOpen) return;
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (event.target instanceof Node && !boardMenuRef.current?.contains(event.target)) {
-        setIsBoardMenuOpen(false);
-      }
-    };
-    document.addEventListener('pointerdown', handlePointerDown);
-    return () => document.removeEventListener('pointerdown', handlePointerDown);
-  }, [isBoardMenuOpen]);
 
   useEffect(() => {
     if (!isCreateMenuOpen) return;
@@ -139,20 +148,27 @@ export function AuthenticatedBoard({
         }
       })
       .catch((err: unknown) => {
-        if (!cancelled) setLoadError(err instanceof Error ? err.message : 'Failed to load board data');
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled) {
+          setLoadError(err instanceof Error ? err.message : 'Failed to load board data');
+          setIsLoading(false);
+        }
       });
     return () => { cancelled = true; };
   }, [setTasks]);
 
   useEffect(() => {
-    if (!selectedBoardId) return;
+    if (!selectedBoardId || boards.length === 0) return;
     let cancelled = false;
-    getTasks(selectedBoardId)
-      .then((savedTasks) => {
-        if (!cancelled) setTasks(savedTasks.map(toBoardTask));
+    Promise.all(boards.map(async (board) => ({
+      boardId: board.id,
+      tasks: await getTasks(board.id),
+    })))
+      .then((boardTasks) => {
+        if (!cancelled) {
+          setTasks(boardTasks.flatMap(({ boardId, tasks: savedTasks }) =>
+            savedTasks.map((task) => toBoardTask(task, boardId))
+          ));
+        }
       })
       .catch((err: unknown) => {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : 'Failed to load board tasks');
@@ -161,7 +177,40 @@ export function AuthenticatedBoard({
         if (!cancelled) setIsLoading(false);
       });
     return () => { cancelled = true; };
-  }, [selectedBoardId, setTasks]);
+  }, [boards, selectedBoardId, setTasks]);
+
+  useEffect(() => {
+    if ((currentPage !== 'board' && currentPage !== 'backlog') || groupBy !== 'initiative') return;
+    let cancelled = false;
+    Promise.all([
+      getInitiatives(),
+    ])
+      .then(async ([availableInitiatives]) => Promise.all(
+        availableInitiatives.map(async (initiative) => ({
+          initiative,
+          tasks: (await getInitiative(initiative.id)).tasks,
+        }))
+      ))
+      .then((initiativeTasks) => {
+        if (cancelled) return;
+        const taskToInitiatives: Record<string, Initiative[]> = {};
+        for (const { initiative, tasks: initiativeTaskList } of initiativeTasks) {
+          for (const task of initiativeTaskList) {
+            taskToInitiatives[task.id] = [...(taskToInitiatives[task.id] ?? []), initiative];
+          }
+        }
+        setInitiatives(initiativeTasks.map(({ initiative }) => initiative));
+        setTaskInitiatives(taskToInitiatives);
+        setInitiativeGroupingError('');
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setInitiativeGroupingError(err instanceof Error ? err.message : 'Failed to load initiative task groups');
+      })
+      .finally(() => {
+        if (!cancelled) setIsInitiativeGroupingLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [currentPage, groupBy, initiativeGroupingRefreshToken, initiativeRefreshToken]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -190,9 +239,13 @@ export function AuthenticatedBoard({
   };
 
   const onDragEnd = (event: DragEndEvent) => {
-    const task = tasks.find((current) => current.id === event.active.id);
-    const destinationColumn = event.over?.data.current?.type === 'Column'
-      ? COLUMNS.find((column) => column.id === event.over?.id.toString())
+    const taskId = event.active.data.current?.type === 'Task'
+      ? event.active.data.current.task.id
+      : undefined;
+    const task = tasks.find((current) => current.id === taskId);
+    const overData = event.over?.data.current;
+    const destinationColumn = overData?.type === 'Column'
+      ? COLUMNS.find((column) => column.id === overData.columnId)
       : undefined;
 
     if (task && destinationColumn && task.columnId !== destinationColumn.id) {
@@ -214,7 +267,70 @@ export function AuthenticatedBoard({
     void persistTaskMove(task, 'todo');
   };
 
-  const selectedBoard = boards.find((board) => board.id === selectedBoardId);
+  const taskGroups = useMemo<TaskGroup[]>(() => {
+    if (groupBy === 'board') {
+      return boards.map((board) => ({
+        id: `board-${board.id}`,
+        title: board.title,
+        tasks: tasks.filter((task) => (task.boardId ?? selectedBoardId) === board.id),
+      }));
+    }
+
+    if (groupBy === 'initiative') {
+      const groups = new Map(initiatives.map((initiative) => [
+        initiative.id,
+        { id: `initiative-${initiative.id}`, title: initiative.title, tasks: [] as Task[] },
+      ]));
+      const withoutInitiative: Task[] = [];
+      for (const task of tasks) {
+        const associatedInitiatives = taskInitiatives[task.id] ?? [];
+        if (associatedInitiatives.length === 0) {
+          withoutInitiative.push(task);
+          continue;
+        }
+        for (const initiative of associatedInitiatives) {
+          groups.get(initiative.id)?.tasks.push(task);
+        }
+      }
+      const grouped = [...groups.values()].filter((group) => group.tasks.length > 0);
+      if (withoutInitiative.length > 0) {
+        grouped.push({ id: 'initiative-none', title: 'No Initiative', tasks: withoutInitiative });
+      }
+      return grouped;
+    }
+
+    const groups = new Map(assignees.map((assignee) => [
+      assignee.id,
+      { id: `assignee-${assignee.id}`, title: assignee.full_name, tasks: [] as Task[] },
+    ]));
+    const unknownAssigneeGroups = new Map<string, TaskGroup>();
+    const withoutAssignee: Task[] = [];
+    for (const task of tasks) {
+      if (!task.assignedToId) {
+        withoutAssignee.push(task);
+        continue;
+      }
+      const group = groups.get(task.assignedToId);
+      if (group) {
+        group.tasks.push(task);
+      } else {
+        const unknownGroup = unknownAssigneeGroups.get(task.assignedToId)
+          ?? { id: `assignee-${task.assignedToId}`, title: task.assignedToId, tasks: [] };
+        unknownGroup.tasks.push(task);
+        unknownAssigneeGroups.set(task.assignedToId, unknownGroup);
+      }
+    }
+    const grouped = [...groups.values()].filter((group) => group.tasks.length > 0);
+    grouped.push(...[...unknownAssigneeGroups.values()].sort((left, right) => left.title.localeCompare(right.title)));
+    if (withoutAssignee.length > 0) {
+      grouped.push({ id: 'assignee-none', title: 'No Assignee', tasks: withoutAssignee });
+    }
+    return grouped;
+  }, [assignees, boards, groupBy, initiatives, selectedBoardId, taskInitiatives, tasks]);
+  const visibleColumns = currentPage === 'backlog'
+    ? COLUMNS.filter((column) => column.id === 'backlog')
+    : BOARD_COLUMNS;
+
   const profileInitial = profile?.full_name.trim().charAt(0).toUpperCase()
     || profile?.username.charAt(0).toUpperCase()
     || '?';
@@ -337,53 +453,14 @@ export function AuthenticatedBoard({
         </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-      <header className="bg-white p-4 shadow-sm z-10 flex justify-between items-center shrink-0">
-        <div className="flex items-center gap-3">
-          {(currentPage === 'board' || currentPage === 'backlog') ? (
-            <div ref={boardMenuRef} className="relative">
-              <button
-                type="button"
-                aria-label={`Current board: ${selectedBoard?.title ?? 'No boards'}`}
-                aria-haspopup="menu"
-                aria-expanded={isBoardMenuOpen}
-                disabled={isLoading && !selectedBoard}
-                onClick={() => setIsBoardMenuOpen((open) => !open)}
-                className="flex items-center gap-2 rounded-lg px-2 py-1 text-xl font-extrabold tracking-tight text-blue-600 hover:bg-blue-50 disabled:opacity-50"
-              >
-                {selectedBoard?.title ?? (isLoading ? 'Loading boards…' : 'No boards')}
-                <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4"><path fillRule="evenodd" d="M5.22 7.22a.75.75 0 0 1 1.06 0L10 10.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 8.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" /></svg>
-              </button>
-              {isBoardMenuOpen && (
-                <div role="menu" aria-label="Switch board" className="absolute left-0 top-full z-30 mt-2 min-w-56 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
-                  {boards.map((board) => (
-                    <button key={board.id} type="button" role="menuitem" onClick={() => {
-                      setSelectedBoardId(board.id);
-                      window.localStorage.setItem('snappy-plan-selected-board', board.id);
-                      setTasks([]);
-                      setIsLoading(true);
-                      setIsBoardMenuOpen(false);
-                    }} className={`block w-full rounded-md px-3 py-2 text-left text-sm ${board.id === selectedBoardId ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-100'}`}>
-                      {board.title}
-                    </button>
-                  ))}
-                  <div className="my-1 border-t border-gray-100" />
-                  <button type="button" role="menuitem" onClick={() => {
-                    setIsBoardMenuOpen(false);
-                    setIsCreateBoardOpen(true);
-                  }} className="block w-full rounded-md px-3 py-2 text-left text-sm font-medium text-blue-700 hover:bg-blue-50">
-                    + Create new board
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : (
-            <h1 className="text-xl font-extrabold tracking-tight text-blue-600">
-              {currentPage === 'admin' ? 'Admin' : currentPage === 'settings' ? 'Settings' : currentPage === 'boards' ? 'Boards' : currentPage === 'initiatives' || currentPage === 'initiative' ? 'Initiatives' : 'Profile'}
-            </h1>
-          )}
-        </div>
+      <header className="bg-white p-4 shadow-sm z-10 grid grid-cols-1 gap-2 shrink-0 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] sm:items-center">
+        {currentPage !== 'board' && currentPage !== 'backlog' && (
+          <h1 className="text-xl font-extrabold tracking-tight text-blue-600 sm:col-start-1 sm:row-start-1">
+            {currentPage === 'admin' ? 'Admin' : currentPage === 'settings' ? 'Settings' : currentPage === 'boards' ? 'Boards' : currentPage === 'initiatives' || currentPage === 'initiative' ? 'Initiatives' : 'Profile'}
+          </h1>
+        )}
         {currentPage !== 'profile' && currentPage !== 'settings' && (
-          <div className="mx-4 flex min-w-0 max-w-2xl flex-1 items-center gap-2">
+          <div className="flex w-full min-w-0 max-w-2xl items-center gap-2 justify-self-center sm:col-start-2 sm:row-start-1">
             <TaskSearch
               boards={boards}
               onSelectTask={(task, boardId) => setSelectedTask({ task, boardId })}
@@ -434,7 +511,7 @@ export function AuthenticatedBoard({
             </div>
           </div>
         )}
-        {(currentPage === 'board' || currentPage === 'backlog') && <nav aria-label="Main navigation" className="flex items-center gap-2">
+        {(currentPage === 'board' || currentPage === 'backlog') && <nav aria-label="Main navigation" className="flex items-center justify-self-center gap-2 sm:col-start-3 sm:row-start-1 sm:justify-self-end">
           <button
             type="button"
             aria-current={currentPage === 'board' ? 'page' : undefined}
@@ -463,7 +540,7 @@ export function AuthenticatedBoard({
             if (boardId !== selectedBoardId) setIsLoading(true);
             setSelectedBoardId(boardId);
             window.localStorage.setItem('snappy-plan-selected-board', boardId);
-            setTasks((previous) => [...previous, task]);
+            setTasks((previous) => [...previous, { ...task, boardId }]);
             navigateToPage(task.columnId === 'backlog' ? 'backlog' : 'board');
             setIsCreateTaskOpen(false);
           }}
@@ -502,23 +579,17 @@ export function AuthenticatedBoard({
           selectedBoardId={selectedTask.boardId}
           onClose={() => setSelectedTask(null)}
           onSaved={(updatedTask, assignedBoardId) => {
-            setTasks((previous) => {
-              const wasOnSelectedBoard = selectedTask.boardId === selectedBoardId;
-              const isOnSelectedBoard = assignedBoardId === selectedBoardId;
-              if (wasOnSelectedBoard && isOnSelectedBoard) {
-                return previous.map((task) => task.id === updatedTask.id ? updatedTask : task);
-              }
-              if (wasOnSelectedBoard) return previous.filter((task) => task.id !== updatedTask.id);
-              if (isOnSelectedBoard) return [...previous, updatedTask];
-              return previous;
-            });
+            setTasks((previous) => [
+              ...previous.filter((task) => task.id !== updatedTask.id),
+              { ...updatedTask, boardId: assignedBoardId },
+            ]);
             setSelectedTask(null);
           }}
         />
       )}
 
       {/* Main content area takes up remaining height */}
-      <main className="board-main flex-1 p-4">
+      <main className={`board-main flex-1 p-4 ${(currentPage === 'board' || currentPage === 'backlog') ? 'board-main-grouped' : ''}`}>
         {currentPage === 'admin' ? (
           profile?.role === 'admin'
             ? <AdminPage currentUsername={profile.username} />
@@ -536,11 +607,11 @@ export function AuthenticatedBoard({
               users={assignees}
               username={profile.username}
               onOpenBoard={(board) => {
-                setSelectedBoardId(board.id);
+                if (selectedBoardId !== board.id) {
+                  setSelectedBoardId(board.id);
+                  setIsLoading(true);
+                }
                 window.localStorage.setItem('snappy-plan-selected-board', board.id);
-                setTasks([]);
-                setIsLoading(true);
-                setIsBoardMenuOpen(false);
                 navigateToPage('board');
               }}
               onCreateBoard={() => setIsCreateBoardOpen(true)}
@@ -548,6 +619,7 @@ export function AuthenticatedBoard({
                 await persistDeleteBoard(board.id);
                 const remainingBoards = boards.filter((current) => current.id !== board.id);
                 setBoards(remainingBoards);
+                setIsLoading(true);
                 if (selectedBoardId === board.id) {
                   const nextBoard = remainingBoards[0];
                   if (nextBoard) {
@@ -581,42 +653,93 @@ export function AuthenticatedBoard({
         ) : (
           <>
         {(loadError || moveError) && <p role="alert" className="mb-3 rounded bg-red-100 p-3 text-sm text-red-700">{loadError || moveError}</p>}
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCorners}
-          onDragStart={onDragStart}
-          onDragEnd={onDragEnd}
-        >
-          {/* Backlog is managed separately; the main board keeps its active workflow lanes. */}
-          <div
-            role="region"
-            aria-label={currentPage === 'backlog' ? 'Backlog tasks' : 'Kanban board columns'}
-            className="board-columns gap-4 pb-4"
-            style={{
-              gridTemplateColumns: currentPage === 'backlog'
-                ? 'minmax(0, 1fr)'
-                : 'repeat(3, minmax(0, 1fr))',
-            }}
-          >
-            {(currentPage === 'backlog' ? COLUMNS.filter((column) => column.id === 'backlog') : BOARD_COLUMNS).map((col) => (
-              <Column
-                key={col.id}
-                column={col}
-                tasks={tasks.filter((task) => task.columnId === col.id)}
-                onMoveToTodo={currentPage === 'backlog' ? moveBacklogTaskToTodo : undefined}
-                onSelectTask={(task) => setSelectedTask({ task, boardId: selectedBoardId })}
-              />
-            ))}
+        <div className="mb-4 flex justify-end">
+          <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+            <span>Group by:</span>
+            <select
+              aria-label="Group tasks by"
+              value={groupBy}
+              onChange={(event) => {
+                const nextGroupBy = event.target.value as TaskGroupBy;
+                setGroupBy(nextGroupBy);
+                if (nextGroupBy === 'initiative') {
+                  setIsInitiativeGroupingLoading(true);
+                  setInitiativeGroupingError('');
+                }
+              }}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2"
+            >
+              <option value="board">Board</option>
+              <option value="initiative">Initiative</option>
+              <option value="assignee">Assignee</option>
+            </select>
+          </label>
+        </div>
+        {isLoading ? (
+          <p role="status" className="py-8 text-center text-sm text-gray-500">Loading tasks…</p>
+        ) : isInitiativeGroupingLoading && groupBy === 'initiative' ? (
+          <p role="status" className="py-8 text-center text-sm text-gray-500">Loading initiative groups…</p>
+        ) : initiativeGroupingError && groupBy === 'initiative' ? (
+          <div className="rounded bg-red-100 p-3 text-sm text-red-700">
+            <p role="alert">{initiativeGroupingError}</p>
+            <button
+              type="button"
+              onClick={() => {
+                setInitiativeGroupingError('');
+                setIsInitiativeGroupingLoading(true);
+                setInitiativeGroupingRefreshToken((version) => version + 1);
+              }}
+              className="mt-2 font-medium underline"
+            >
+              Retry
+            </button>
           </div>
-
-          <DragOverlay>
-            {activeTask ? (
-              <div className="bg-white p-4 rounded-lg shadow-2xl border-2 border-blue-400 rotate-2 opacity-90 cursor-grabbing">
-                <p className="text-gray-800 text-sm font-medium">{activeTask.title}</p>
-              </div>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
+        ) : (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCorners}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+          >
+            <div role="region" aria-label={currentPage === 'backlog' ? 'Backlog tasks' : 'Kanban board columns'} className="space-y-6 pb-4">
+              {taskGroups.length === 0 ? (
+                <p className="py-8 text-center text-sm text-gray-500">No tasks to display.</p>
+              ) : taskGroups.map((group) => {
+                const groupTasks = currentPage === 'backlog'
+                  ? group.tasks.filter((task) => task.columnId === 'backlog')
+                  : group.tasks;
+                return (
+                  <section key={group.id} aria-label={`${group.title} tasks`} className="space-y-2">
+                    <header className="flex items-center justify-between gap-3">
+                      <h2 className="text-lg font-semibold text-gray-800">{group.title}</h2>
+                      <span className="text-xs text-gray-500">{groupTasks.length} tasks</span>
+                    </header>
+                    <div className={`grid items-start gap-4 ${currentPage === 'backlog' ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-3'}`}>
+                      {visibleColumns.map((column) => (
+                        <Column
+                          key={`${group.id}-${column.id}`}
+                          column={column}
+                          tasks={groupTasks.filter((task) => task.columnId === column.id)}
+                          onMoveToTodo={currentPage === 'backlog' ? moveBacklogTaskToTodo : undefined}
+                          onSelectTask={(task) => setSelectedTask({ task, boardId: task.boardId ?? selectedBoardId })}
+                          droppableId={`${group.id}:${column.id}`}
+                          taskIdPrefix={group.id}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+            <DragOverlay>
+              {activeTask ? (
+                <div className="bg-white p-4 rounded-lg shadow-2xl border-2 border-blue-400 rotate-2 opacity-90 cursor-grabbing">
+                  <p className="text-gray-800 text-sm font-medium">{activeTask.title}</p>
+                </div>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
+        )}
           </>
         )}
       </main>

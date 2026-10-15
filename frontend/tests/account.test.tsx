@@ -49,13 +49,13 @@ describe('Account', () => {
       vi.stubGlobal('fetch', fetchMock);
       render(<App />);
   
-      await screen.findByRole('button', { name: 'Current board: Board Owner' });
+      await screen.findByRole('heading', { name: 'Board Owner' });
       const userMenuButton = await screen.findByRole('button', { name: 'User menu for boardowner' });
       expect(userMenuButton.textContent).toBe('B');
       fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
-      expect(screen.getByRole('heading', { name: 'Backlog' })).toBeTruthy();
+      expect(screen.getAllByRole('heading', { name: 'Backlog' })).toHaveLength(2);
       fireEvent.click(screen.getByRole('button', { name: 'Home' }));
-      expect(screen.getByRole('heading', { name: 'To Do' })).toBeTruthy();
+      expect(screen.getAllByRole('heading', { name: 'To Do' })).toHaveLength(2);
   
       fireEvent.click(userMenuButton);
       expect(screen.getByRole('menuitem', { name: 'Settings' })).toBeTruthy();
@@ -112,7 +112,7 @@ describe('Account', () => {
       }));
       expect(screen.getByRole('button', { name: 'User menu for boardowner' }).textContent).toBe('U');
       fireEvent.click(screen.getByRole('button', { name: 'Home' }));
-      expect(screen.getByRole('heading', { name: 'To Do' })).toBeTruthy();
+      expect(screen.getAllByRole('heading', { name: 'To Do' })).toHaveLength(2);
       expect(window.location.pathname).toBe('/');
     });
   

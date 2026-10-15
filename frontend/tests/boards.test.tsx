@@ -5,7 +5,7 @@ import App from '../src/App';
 import { boardList } from './appTestUtils';
 
 describe('Boards', () => {
-  it('switches boards and creates a shared board', async () => {
+  it('shows tasks from all boards and creates a shared board', async () => {
       const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
         if (url === '/api/boards' && options?.method === 'POST') {
           return { ok: true, json: async () => ({ id: 'board-3', title: 'New Shared Board', owner_id: 'boardowner' }) };
@@ -25,25 +25,19 @@ describe('Boards', () => {
       vi.stubGlobal('fetch', fetchMock);
       render(<App />);
   
-      const boardMenuButton = await screen.findByRole('button', { name: 'Current board: Board Owner' });
-      fireEvent.click(boardMenuButton);
-      expect(screen.getByRole('menu', { name: 'Switch board' })).toBeTruthy();
-      fireEvent.pointerDown(document.body);
-      expect(screen.queryByRole('menu', { name: 'Switch board' })).toBeNull();
-
-      fireEvent.click(boardMenuButton);
-      fireEvent.click(screen.getByRole('menuitem', { name: 'Project Board' }));
-      expect(await screen.findByRole('button', { name: 'Current board: Project Board' })).toBeTruthy();
+      expect(await screen.findByRole('heading', { name: 'Board Owner' })).toBeTruthy();
+      expect(screen.getByRole('heading', { name: 'Project Board' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Current board: Board Owner' })).toBeNull();
       expect(fetchMock).toHaveBeenCalledWith('/api/tasks?board_id=board-2', { credentials: 'same-origin' });
   
-      fireEvent.click(screen.getByRole('button', { name: 'Current board: Project Board' }));
-      fireEvent.click(screen.getByRole('menuitem', { name: '+ Create new board' }));
+      fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Board' }));
       const dialog = screen.getByRole('dialog', { name: 'Create a new board' });
       fireEvent.change(screen.getByLabelText('Board name'), { target: { value: 'New Shared Board' } });
       fireEvent.click(screen.getByLabelText('Teammate (user-2)'));
       fireEvent.submit(dialog.querySelector('form')!);
   
-      expect(await screen.findByRole('button', { name: 'Current board: New Shared Board' })).toBeTruthy();
+      expect(await screen.findByRole('heading', { name: 'New Shared Board' })).toBeTruthy();
       expect(fetchMock).toHaveBeenCalledWith('/api/boards', expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ title: 'New Shared Board', user_ids: ['user-2'] }),
@@ -75,7 +69,7 @@ describe('Boards', () => {
       vi.stubGlobal('fetch', fetchMock);
       render(<App />);
   
-      await screen.findByRole('button', { name: 'Current board: Board Owner' });
+      await screen.findByRole('heading', { name: 'Board Owner' });
       fireEvent.click(screen.getByRole('button', { name: 'Boards' }));
   
       expect(await screen.findByRole('heading', { name: 'Your boards' })).toBeTruthy();
@@ -117,7 +111,7 @@ describe('Boards', () => {
       expect(fetchMock).toHaveBeenCalledWith('/api/tasks?board_id=board-2', { credentials: 'same-origin' });
   
       fireEvent.click(screen.getByRole('button', { name: 'Open board' }));
-      expect(await screen.findByRole('button', { name: 'Current board: Project Board' })).toBeTruthy();
+      expect(await screen.findByRole('heading', { name: 'Project Board' })).toBeTruthy();
       expect(window.location.pathname).toBe('/');
       fireEvent.click(screen.getByRole('button', { name: 'Boards' }));
       await screen.findByRole('heading', { name: 'Your boards' });
@@ -151,7 +145,7 @@ describe('Boards', () => {
       vi.stubGlobal('fetch', fetchMock);
       render(<App />);
   
-      await screen.findByRole('button', { name: 'Current board: Board Owner' });
+      await screen.findByRole('heading', { name: 'Board Owner' });
       fireEvent.click(screen.getByRole('button', { name: 'Boards' }));
       fireEvent.click(await screen.findByRole('button', { name: 'Manage Board Owner' }));
       fireEvent.click(await screen.findByRole('button', { name: 'Delete board' }));
@@ -183,7 +177,7 @@ describe('Boards', () => {
       vi.stubGlobal('fetch', fetchMock);
       render(<App />);
   
-      await screen.findByRole('button', { name: 'Current board: Board Owner' });
+      await screen.findByRole('heading', { name: 'Board Owner' });
       fireEvent.click(screen.getByRole('button', { name: 'Boards' }));
       fireEvent.click(await screen.findByRole('button', { name: 'Manage Board Owner' }));
       expect((await screen.findByRole('alert')).textContent).toContain('Cannot load board access');

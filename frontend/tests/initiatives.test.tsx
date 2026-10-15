@@ -74,7 +74,7 @@ describe('Initiatives', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<App />);
 
-    await screen.findByRole('button', { name: 'Current board: Board Owner' });
+    await screen.findByRole('heading', { name: 'Board Owner' });
     const sidebar = within(screen.getByRole('complementary', { name: 'Sidebar' }));
     expect(sidebar.getAllByRole('button').slice(0, 3).map((button) => button.getAttribute('aria-label')))
       .toEqual(['Home', 'Initiatives', 'Boards']);

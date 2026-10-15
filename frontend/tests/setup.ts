@@ -21,7 +21,7 @@ vi.mock('@dnd-kit/core', async () => {
       onDragStart: (event: never) => void;
       onDragEnd: (event: never) => void;
     }) => {
-      const [over, setOver] = React.useState<{ id: string; data: { current: { type: string } } } | null>(null);
+      const [over, setOver] = React.useState<{ id: string; data: { current: { type: string; columnId?: string } } } | null>(null);
       const active = { id: task.id, data: { current: { type: 'Task', task } } };
 
       return React.createElement(React.Fragment, null,
@@ -33,13 +33,13 @@ vi.mock('@dnd-kit/core', async () => {
         }, 'Mock drag start'),
         React.createElement('button', {
           onClick: () => {
-            const destination = { id: 'complete', data: { current: { type: 'Column' } } };
+            const destination = { id: 'complete', data: { current: { type: 'Column', columnId: 'complete' } } };
             setOver(destination);
           },
         }, 'Mock drag over Complete'),
         React.createElement('button', {
           onClick: () => {
-            const destination = { id: 'in-progress', data: { current: { type: 'Column' } } };
+            const destination = { id: 'in-progress', data: { current: { type: 'Column', columnId: 'in-progress' } } };
             setOver(destination);
           },
         }, 'Mock drag over In Progress'),
