@@ -261,10 +261,7 @@ export function AuthenticatedBoard({
           className={`mt-2 flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'initiatives' || currentPage === 'initiative' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
         >
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 5h14M5 12h14M5 19h14" />
-            <circle cx="3" cy="5" r="1" fill="currentColor" stroke="none" />
-            <circle cx="3" cy="12" r="1" fill="currentColor" stroke="none" />
-            <circle cx="3" cy="19" r="1" fill="currentColor" stroke="none" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13 2 4 14h7l-1 8 10-12h-7l1-8Z" />
           </svg>
         </button>
         <button
@@ -406,20 +403,31 @@ export function AuthenticatedBoard({
                   <button type="button" role="menuitem" onClick={() => {
                     setIsCreateMenuOpen(false);
                     setIsCreateTaskOpen(true);
-                  }} className="block w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
-                    Create task
+                  }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
+                      <rect x="3" y="3" width="18" height="18" rx="3" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m8 12 3 3 5-6" />
+                    </svg>
+                    Task
                   </button>
                   <button type="button" role="menuitem" onClick={() => {
                     setIsCreateMenuOpen(false);
                     setIsCreateBoardOpen(true);
-                  }} className="block w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
-                    Create board
+                  }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
+                      <rect x="3" y="4" width="18" height="16" rx="2" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 4v16m6-16v16" />
+                    </svg>
+                    Board
                   </button>
                   <button type="button" role="menuitem" onClick={() => {
                     setIsCreateMenuOpen(false);
                     setIsCreateInitiativeOpen(true);
-                  }} className="block w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
-                    Create initiative
+                  }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 2 4 14h7l-1 8 10-12h-7l1-8Z" />
+                    </svg>
+                    Initiative
                   </button>
                 </div>
               )}

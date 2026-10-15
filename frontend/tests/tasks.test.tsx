@@ -270,7 +270,7 @@ describe('Tasks', () => {
   
       await screen.findByRole('button', { name: 'Current board: Board Owner' });
       fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
-      fireEvent.click(screen.getByRole('menuitem', { name: 'Create task' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Task' }));
       const dialog = screen.getByRole('dialog', { name: 'Create task' });
       expect((screen.getByLabelText('Current state') as HTMLSelectElement).value).toBe('Backlog');
       expect((screen.getByLabelText('Priority') as HTMLSelectElement).value).toBe('Medium');
@@ -324,7 +324,7 @@ describe('Tasks', () => {
   
       await screen.findByRole('button', { name: 'Current board: Board Owner' });
       fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
-      fireEvent.click(screen.getByRole('menuitem', { name: 'Create task' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Task' }));
       fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Review the garden plan' } });
       fireEvent.click(screen.getByRole('button', { name: 'Confirm Task' }));
   
@@ -395,21 +395,21 @@ describe('Tasks', () => {
 
     await screen.findByRole('button', { name: 'Current board: Board Owner' });
     fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
-    expect(screen.getByRole('menuitem', { name: 'Create task' })).toBeTruthy();
-    expect(screen.getByRole('menuitem', { name: 'Create board' })).toBeTruthy();
-    expect(screen.getByRole('menuitem', { name: 'Create initiative' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Task' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Board' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Initiative' })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Create task' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Task' }));
     expect(screen.getByRole('dialog', { name: 'Create task' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Close create task form' }));
 
     fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Create board' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Board' }));
     expect(screen.getByRole('dialog', { name: 'Create a new board' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Close create board form' }));
 
     fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Create initiative' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Initiative' }));
     expect(screen.getByRole('dialog', { name: 'Create initiative' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Close create initiative form' }));
   });
