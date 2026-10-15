@@ -205,7 +205,8 @@ func TestCreateTaskEndpoint(t *testing.T) {
 		if !tx.committed {
 			t.Fatal("task transaction was not committed")
 		}
-		if len(db.boardArgs) != 2 || db.boardArgs[0] != "Board Owner" || db.boardArgs[1] != ownerID {
+		if len(db.boardArgs) != 2 || db.boardArgs[0] != "Board Owner's personal board" || db.boardArgs[1] != ownerID ||
+			!db.board.IsPersonal {
 			t.Fatalf("personal board args = %#v", db.boardArgs)
 		}
 		if len(db.taskArgs) != 7 || db.taskArgs[0] != db.column.ID || db.taskArgs[1] != "ToDo" ||

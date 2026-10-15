@@ -22,6 +22,7 @@ services:
       - ./migrations/000008_create_initiatives.up.sql:/docker-entrypoint-initdb.d/008_create_initiatives.sql:ro
       - ./migrations/000009_add_profile_picture.up.sql:/docker-entrypoint-initdb.d/009_add_profile_picture.sql:ro
       - ./migrations/000010_add_preferred_name.up.sql:/docker-entrypoint-initdb.d/010_add_preferred_name.sql:ro
+      - ./migrations/000011_personal_boards.up.sql:/docker-entrypoint-initdb.d/011_personal_boards.sql:ro
 
   app:
     build: 

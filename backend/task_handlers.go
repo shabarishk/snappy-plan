@@ -187,8 +187,8 @@ func (api *ApiConfig) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "Failed to load task board owner", http.StatusInternalServerError)
 				return
 			}
-			board, err = txQueries.CreateBoard(r.Context(), dbgen.CreateBoardParams{
-				Title:   user.FullName,
+			board, err = txQueries.CreatePersonalBoard(r.Context(), dbgen.CreatePersonalBoardParams{
+				Title:   personalBoardTitle(user.PreferredName, user.FullName),
 				OwnerID: session.UserID,
 			})
 		}

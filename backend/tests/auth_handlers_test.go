@@ -78,7 +78,8 @@ func TestSetupEndpoint(t *testing.T) {
 			txDB.createUserArgs[5] != "admin" {
 			t.Fatalf("status = %d; committed = %t; args = %#v", response.Code, tx.committed, txDB.createUserArgs)
 		}
-		if len(txDB.boardArgs) != 2 || txDB.boardArgs[0] != "Admin User" || txDB.boardArgs[1] != "adminuser" {
+		if len(txDB.boardArgs) != 2 || txDB.boardArgs[0] != "Admin User's personal board" || txDB.boardArgs[1] != "adminuser" ||
+			!txDB.board.IsPersonal {
 			t.Fatalf("personal board args = %#v", txDB.boardArgs)
 		}
 		if err := bcrypt.CompareHashAndPassword([]byte(txDB.createUserArgs[2].(string)), []byte("password123")); err != nil {

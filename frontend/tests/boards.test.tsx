@@ -5,6 +5,67 @@ import App from '../src/App';
 import { boardList } from './appTestUtils';
 
 describe('Boards', () => {
+  it('renames the protected personal board when the preferred name changes', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url.endsWith('/members')) return { ok: true, json: async () => ({ user_ids: [] }) };
+      if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
+      if (url === '/api/boards') return {
+        ok: true,
+        json: async () => [{
+          id: 'personal-1',
+          title: "Sam's personal board",
+          owner_id: 'boardowner',
+          is_personal: true,
+        }],
+      };
+      if (url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/profile' && options?.method === 'PUT') return {
+        ok: true,
+        json: async () => ({
+          username: 'boardowner',
+          full_name: 'Board Owner',
+          preferred_name: 'Casey',
+          email: 'owner@example.com',
+          role: 'user',
+        }),
+      };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({
+          username: 'boardowner',
+          full_name: 'Board Owner',
+          preferred_name: 'Sam',
+          email: 'owner@example.com',
+          role: 'user',
+        }),
+      };
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'User menu for boardowner' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Profile' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit profile' }));
+    fireEvent.change(screen.getByLabelText('Preferred name'), { target: { value: 'Casey' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/profile', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({
+        full_name: 'Board Owner',
+        preferred_name: 'Casey',
+        email: 'owner@example.com',
+      }),
+    })));
+    fireEvent.click(screen.getByRole('button', { name: 'Boards' }));
+    expect(await screen.findByText("Casey's personal board")).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: "Manage Casey's personal board" }));
+    expect(await screen.findByRole('dialog', { name: "Manage Casey's personal board" })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Delete board' })).toBeNull();
+    expect(screen.getByText('Personal boards cannot be deleted.')).toBeTruthy();
+  });
+
   it('shows tasks from all boards and creates a shared board', async () => {
       const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
         if (url === '/api/boards' && options?.method === 'POST') {

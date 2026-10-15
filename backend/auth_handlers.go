@@ -101,8 +101,8 @@ func (api *ApiConfig) handleInitialSetup(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Failed to create admin user", http.StatusInternalServerError)
 		return
 	}
-	if _, err := txQueries.CreateBoard(r.Context(), dbgen.CreateBoardParams{
-		Title:   user.FullName,
+	if _, err := txQueries.CreatePersonalBoard(r.Context(), dbgen.CreatePersonalBoardParams{
+		Title:   personalBoardTitle("", user.FullName),
 		OwnerID: user.ID,
 	}); err != nil {
 		http.Error(w, "Failed to create personal board", http.StatusInternalServerError)

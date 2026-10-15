@@ -24,7 +24,8 @@ func (tx *schemaTestTx) Exec(_ context.Context, query string, _ ...any) (pgconn.
 	isUpgradeStatement := strings.Contains(query, "DO $$") || strings.Contains(query, "INSERT INTO boards") ||
 		strings.Contains(query, "board_members") || strings.Contains(query, "CREATE TABLE IF NOT EXISTS initiatives") ||
 		strings.Contains(query, "ADD COLUMN IF NOT EXISTS profile_picture") ||
-		strings.Contains(query, "ADD COLUMN IF NOT EXISTS preferred_name")
+		strings.Contains(query, "ADD COLUMN IF NOT EXISTS preferred_name") ||
+		strings.Contains(query, "is_personal")
 	if tx.execErr != nil && ((tx.failExecContains != "" && strings.Contains(query, tx.failExecContains)) ||
 		(tx.failExecContains == "" && isUpgradeStatement)) {
 		return pgconn.CommandTag{}, tx.execErr
@@ -319,11 +320,15 @@ func TestEnsurePersonalBoards(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EnsurePersonalBoards returned error: %v", err)
 		}
-		if len(tx.execCalls) != 5 || !strings.Contains(tx.execCalls[0], "pg_advisory_xact_lock") ||
-			!strings.Contains(tx.execCalls[1], "INSERT INTO boards") ||
-			!strings.Contains(tx.execCalls[1], "WHERE NOT EXISTS") ||
-			!strings.Contains(tx.execCalls[2], "CREATE TABLE IF NOT EXISTS board_members") ||
-			!strings.Contains(tx.execCalls[4], "INSERT INTO board_members") ||
+		if len(tx.execCalls) != 10 || !strings.Contains(tx.execCalls[0], "pg_advisory_xact_lock") ||
+			!strings.Contains(tx.execCalls[1], "ADD COLUMN IF NOT EXISTS is_personal") ||
+			!strings.Contains(tx.execCalls[2], "VARCHAR(120)") ||
+			!strings.Contains(tx.execCalls[3], "ROW_NUMBER() OVER") ||
+			!strings.Contains(tx.execCalls[4], "idx_boards_one_personal_per_owner") ||
+			!strings.Contains(tx.execCalls[5], "UPDATE boards AS board") ||
+			!strings.Contains(tx.execCalls[6], "INSERT INTO boards") ||
+			!strings.Contains(tx.execCalls[7], "CREATE TABLE IF NOT EXISTS board_members") ||
+			!strings.Contains(tx.execCalls[9], "INSERT INTO board_members") ||
 			!tx.committed || tx.rolledBack {
 			t.Fatalf("personal board upgrade calls=%#v committed=%t rolledBack=%t",
 				tx.execCalls, tx.committed, tx.rolledBack)
@@ -332,7 +337,7 @@ func TestEnsurePersonalBoards(t *testing.T) {
 
 	t.Run("reports insert errors", func(t *testing.T) {
 		insertErr := errors.New("insert failed")
-		tx := &schemaTestTx{execErr: insertErr}
+		tx := &schemaTestTx{execErr: insertErr, failExecContains: "INSERT INTO boards"}
 		err := EnsurePersonalBoards(context.Background(), func(context.Context) (SetupTransaction, error) {
 			return tx, nil
 		})
@@ -343,7 +348,7 @@ func TestEnsurePersonalBoards(t *testing.T) {
 
 	t.Run("reports membership migration errors", func(t *testing.T) {
 		migrationErr := errors.New("membership migration failed")
-		tx := &schemaTestTx{execErr: migrationErr}
+		tx := &schemaTestTx{execErr: migrationErr, failExecContains: "CREATE TABLE IF NOT EXISTS board_members"}
 		err := EnsurePersonalBoards(context.Background(), func(context.Context) (SetupTransaction, error) {
 			return tx, nil
 		})

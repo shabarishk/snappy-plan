@@ -55,6 +55,7 @@ type fakeDB struct {
 	moveTaskArgs             []any
 	updateTaskArgs           []any
 	updateProfileArgs        []any
+	profileUpdateQuery       string
 	updateProfilePictureArgs []any
 	updateUserRoleErr        error
 	updateUserRoleArgs       []any
@@ -112,7 +113,7 @@ func (db *fakeDB) Exec(_ context.Context, query string, args ...any) (pgconn.Com
 		}
 		canDelete := db.board.OwnerID == args[1].(string) ||
 			(strings.Contains(query, "role = 'admin'") && db.user.Role == "admin")
-		if canDelete && db.deleteBoardRows > 0 {
+		if canDelete && !(strings.Contains(query, "NOT board.is_personal") && db.board.IsPersonal) && db.deleteBoardRows > 0 {
 			return pgconn.NewCommandTag("DELETE 1"), nil
 		}
 		return pgconn.NewCommandTag("DELETE 0"), nil
@@ -154,7 +155,7 @@ func (db *fakeDB) Query(_ context.Context, query string, _ ...any) (pgx.Rows, er
 	case strings.Contains(query, "FROM boards") && strings.Contains(query, "WHERE owner_id"):
 		rows := make([][]any, len(db.boards))
 		for i, board := range db.boards {
-			rows[i] = []any{board.ID, board.Title, board.OwnerID, board.CreatedAt, board.UpdatedAt}
+			rows[i] = []any{board.ID, board.Title, board.OwnerID, board.CreatedAt, board.UpdatedAt, board.IsPersonal}
 		}
 		return &fakeRows{values: rows}, nil
 	case strings.Contains(query, "FROM boards AS board"):
@@ -163,7 +164,7 @@ func (db *fakeDB) Query(_ context.Context, query string, _ ...any) (pgx.Rows, er
 		}
 		rows := make([][]any, len(db.adminBoards))
 		for i, board := range db.adminBoards {
-			rows[i] = []any{board.ID, board.Title, board.OwnerID, board.FullName}
+			rows[i] = []any{board.ID, board.Title, board.OwnerID, board.IsPersonal, board.FullName}
 		}
 		return &fakeRows{values: rows}, nil
 	case strings.Contains(query, "FROM board_members"):
@@ -246,6 +247,7 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 		return fakeRow{values: userValues(db.user)}
 	case strings.Contains(query, "UPDATE users"):
 		db.updateProfileArgs = args
+		db.profileUpdateQuery = query
 		if db.updateProfileErr != nil {
 			return fakeRow{err: db.updateProfileErr}
 		}
@@ -262,7 +264,7 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 		return fakeRow{values: userValues(db.user), err: db.userErr}
 	case strings.Contains(query, "FROM tasks AS task") && strings.Contains(query, "WHERE task.id"):
 		return fakeRow{values: []any{
-			db.board.ID, db.board.Title, db.board.OwnerID, db.board.CreatedAt, db.board.UpdatedAt,
+			db.board.ID, db.board.Title, db.board.OwnerID, db.board.CreatedAt, db.board.UpdatedAt, db.board.IsPersonal,
 		}, err: db.boardErr}
 	case strings.Contains(query, "FROM boards") && strings.Contains(query, "WHERE id") &&
 		strings.Contains(query, "owner_id"):
@@ -275,11 +277,11 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 			}
 		}
 		return fakeRow{values: []any{
-			board.ID, board.Title, board.OwnerID, board.CreatedAt, board.UpdatedAt,
+			board.ID, board.Title, board.OwnerID, board.CreatedAt, board.UpdatedAt, board.IsPersonal,
 		}, err: err}
 	case strings.Contains(query, "FROM boards") && strings.Contains(query, "WHERE owner_id"):
 		return fakeRow{values: []any{
-			db.board.ID, db.board.Title, db.board.OwnerID, db.board.CreatedAt, db.board.UpdatedAt,
+			db.board.ID, db.board.Title, db.board.OwnerID, db.board.CreatedAt, db.board.UpdatedAt, db.board.IsPersonal,
 		}, err: db.boardErr}
 	case strings.Contains(query, "FROM columns") && strings.Contains(query, "WHERE board_id"):
 		return fakeRow{values: []any{
@@ -298,8 +300,11 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 		if db.createBoardErr != nil {
 			return fakeRow{err: db.createBoardErr}
 		}
+		db.board.Title = args[0].(string)
+		db.board.OwnerID = args[1].(string)
+		db.board.IsPersonal = strings.Contains(query, "is_personal")
 		return fakeRow{values: []any{
-			db.board.ID, db.board.Title, db.board.OwnerID, db.board.CreatedAt, db.board.UpdatedAt,
+			db.board.ID, db.board.Title, db.board.OwnerID, db.board.CreatedAt, db.board.UpdatedAt, db.board.IsPersonal,
 		}}
 	case strings.Contains(query, "INSERT INTO columns"):
 		db.columnArgs = args
@@ -370,6 +375,8 @@ func (row fakeRow) Scan(dest ...any) error {
 			*target = value.(pgtype.Text)
 		case *pgtype.Timestamptz:
 			*target = value.(pgtype.Timestamptz)
+		case *bool:
+			*target = value.(bool)
 		default:
 			return errors.New("unexpected scan destination")
 		}

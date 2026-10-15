@@ -44,6 +44,14 @@ func (api *ApiConfig) handleGetUsersForAssignment(w http.ResponseWriter, r *http
 	}
 }
 
+func personalBoardTitle(preferredName, fullName string) string {
+	name := preferredName
+	if name == "" {
+		name = fullName
+	}
+	return name + "'s personal board"
+}
+
 func (api *ApiConfig) handleGetProfile(w http.ResponseWriter, r *http.Request) {
 	session, ok, err := api.authenticatedSession(r)
 	if err != nil {

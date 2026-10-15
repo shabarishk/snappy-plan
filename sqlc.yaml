@@ -12,6 +12,7 @@ sql:
       - "migrations/000008_create_initiatives.up.sql"
       - "migrations/000009_add_profile_picture.up.sql"
       - "migrations/000010_add_preferred_name.up.sql"
+      - "migrations/000011_personal_boards.up.sql"
     queries: "queries/"
     gen:
       go:
