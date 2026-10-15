@@ -886,6 +886,7 @@ export function AuthenticatedBoard({
                           droppableId={`${group.id}:${column.id}`}
                           taskIdPrefix={group.id}
                           hideColumnTitle={currentPage === 'backlog'}
+                          sortByCompleteBy={currentPage === 'backlog'}
                         />
                       ))}
                     </div>

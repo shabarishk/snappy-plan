@@ -4,7 +4,7 @@ import App, { AuthenticatedBoard } from '../src/App';
 import type { Task } from '../src/App';
 import type { Initiative } from '../src/api';
 import { Column } from '../src/TaskBoard';
-import { sortTasksByPriority } from '../src/taskPriority';
+import { sortTasksByCompleteByAndPriority, sortTasksByPriority } from '../src/taskPriority';
 
 import { taskResponse, boardList, mockBoardReads } from './appTestUtils';
 
@@ -26,6 +26,26 @@ describe('Tasks', () => {
     expect(onSelectTask).toHaveBeenCalledWith(task);
   });
 
+  it('renders backlog tasks by due date and priority when requested', () => {
+    const tasks: Task[] = [
+      { id: 'later', columnId: 'backlog', state: 'Backlog', priority: 'High', title: 'Later due', completeBy: '2026-11-02T00:00:00Z' },
+      { id: 'earlier', columnId: 'backlog', state: 'Backlog', priority: 'Low', title: 'Earlier due', completeBy: '2026-10-20T00:00:00Z' },
+    ];
+
+    const { container } = render(
+      <Column
+        column={{ id: 'backlog', title: 'Backlog' }}
+        tasks={tasks}
+        onSelectTask={vi.fn()}
+        sortByCompleteBy
+      />
+    );
+
+    const renderedTaskTitles = Array.from(container.querySelector('.board-column-tasks')!.children)
+      .map((card) => card.querySelector('p')?.textContent);
+    expect(renderedTaskTitles).toEqual(['Earlier due', 'Later due']);
+  });
+
   it('orders tasks from highest to lowest priority', () => {
       const tasks = [
         { id: 'low', columnId: 'todo' as const, state: 'ToDo' as const, priority: 'Low' as const, title: 'Low priority' },
@@ -35,6 +55,24 @@ describe('Tasks', () => {
   
       expect(sortTasksByPriority(tasks).map((task) => task.id)).toEqual(['high', 'medium', 'low']);
     });
+
+  it('orders backlog tasks by due date and uses priority to break ties', () => {
+    const tasks = [
+      { id: 'undated-low', priority: 'Low' as const },
+      { id: 'later-high', completeBy: '2026-11-02T00:00:00Z', priority: 'High' as const },
+      { id: 'earlier-low', completeBy: '2026-10-20T00:00:00Z', priority: 'Low' as const },
+      { id: 'earlier-high', completeBy: '2026-10-20T00:00:00Z', priority: 'High' as const },
+      { id: 'undated-high', completeBy: 'invalid', priority: 'High' as const },
+    ];
+
+    expect(sortTasksByCompleteByAndPriority(tasks).map((task) => task.id)).toEqual([
+      'earlier-high',
+      'earlier-low',
+      'later-high',
+      'undated-high',
+      'undated-low',
+    ]);
+  });
   
   it('moves backlog tasks between lanes and displays their priority and completion time', async () => {
       vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {

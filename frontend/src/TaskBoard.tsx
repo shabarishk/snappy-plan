@@ -1,6 +1,6 @@
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import { sortTasksByPriority } from './taskPriority';
+import { sortTasksByCompleteByAndPriority, sortTasksByPriority } from './taskPriority';
 import type { ColumnType, Task } from './taskModel';
 
 // --- Sub-Components ---
@@ -66,6 +66,7 @@ export function Column({
   droppableId,
   taskIdPrefix,
   hideColumnTitle,
+  sortByCompleteBy,
 }: {
   column: ColumnType;
   tasks: Task[];
@@ -74,6 +75,7 @@ export function Column({
   droppableId?: string;
   taskIdPrefix?: string;
   hideColumnTitle?: boolean;
+  sortByCompleteBy?: boolean;
 }) {
   const { setNodeRef } = useDroppable({
     id: droppableId ?? column.id,
@@ -90,7 +92,7 @@ export function Column({
       </div>
       
       <div className="board-column-tasks flex-1 p-3 overflow-y-auto">
-        {sortTasksByPriority(tasks).map((task) => (
+        {(sortByCompleteBy ? sortTasksByCompleteByAndPriority(tasks) : sortTasksByPriority(tasks)).map((task) => (
           <TaskCard
             key={taskIdPrefix ? `${taskIdPrefix}:${task.id}` : task.id}
             task={task}
