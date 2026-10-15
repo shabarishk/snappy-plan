@@ -11,18 +11,22 @@ import (
 )
 
 type schemaTestTx struct {
-	execCalls  []string
-	execErr    error
-	committed  bool
-	rolledBack bool
-	commitErr  error
+	execCalls        []string
+	execErr          error
+	failExecContains string
+	committed        bool
+	rolledBack       bool
+	commitErr        error
 }
 
 func (tx *schemaTestTx) Exec(_ context.Context, query string, _ ...any) (pgconn.CommandTag, error) {
 	tx.execCalls = append(tx.execCalls, query)
-	if (strings.Contains(query, "DO $$") || strings.Contains(query, "INSERT INTO boards") ||
-		strings.Contains(query, "board_members") || strings.Contains(query, "CREATE TABLE IF NOT EXISTS initiatives")) &&
-		tx.execErr != nil {
+	isUpgradeStatement := strings.Contains(query, "DO $$") || strings.Contains(query, "INSERT INTO boards") ||
+		strings.Contains(query, "board_members") || strings.Contains(query, "CREATE TABLE IF NOT EXISTS initiatives") ||
+		strings.Contains(query, "ADD COLUMN IF NOT EXISTS profile_picture") ||
+		strings.Contains(query, "ADD COLUMN IF NOT EXISTS preferred_name")
+	if tx.execErr != nil && ((tx.failExecContains != "" && strings.Contains(query, tx.failExecContains)) ||
+		(tx.failExecContains == "" && isUpgradeStatement)) {
 		return pgconn.CommandTag{}, tx.execErr
 	}
 	return pgconn.CommandTag{}, nil
@@ -134,6 +138,128 @@ func TestEnsureInitiativeSchema(t *testing.T) {
 		})
 		if !errors.Is(err, schemaErr) || tx.committed || !tx.rolledBack {
 			t.Fatalf("error=%v committed=%t rolledBack=%t", err, tx.committed, tx.rolledBack)
+		}
+	})
+}
+
+func TestEnsureProfilePictureSchema(t *testing.T) {
+	t.Run("reports begin errors", func(t *testing.T) {
+		beginErr := errors.New("begin failed")
+		err := EnsureProfilePictureSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return nil, beginErr
+		})
+		if !errors.Is(err, beginErr) {
+			t.Fatalf("EnsureProfilePictureSchema error = %v", err)
+		}
+	})
+
+	t.Run("applies upgrade in a transaction", func(t *testing.T) {
+		tx := &schemaTestTx{}
+		err := EnsureProfilePictureSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if err != nil {
+			t.Fatalf("EnsureProfilePictureSchema returned error: %v", err)
+		}
+		if len(tx.execCalls) != 2 || !strings.Contains(tx.execCalls[0], "pg_advisory_xact_lock") ||
+			!strings.Contains(tx.execCalls[1], "ADD COLUMN IF NOT EXISTS profile_picture TEXT") ||
+			!tx.committed || tx.rolledBack {
+			t.Fatalf("profile picture schema calls=%#v committed=%t rolledBack=%t",
+				tx.execCalls, tx.committed, tx.rolledBack)
+		}
+	})
+
+	t.Run("reports schema errors without committing", func(t *testing.T) {
+		schemaErr := errors.New("schema failed")
+		tx := &schemaTestTx{execErr: schemaErr}
+		err := EnsureProfilePictureSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if !errors.Is(err, schemaErr) || tx.committed || !tx.rolledBack {
+			t.Fatalf("error=%v committed=%t rolledBack=%t", err, tx.committed, tx.rolledBack)
+		}
+	})
+
+	t.Run("reports lock errors without committing", func(t *testing.T) {
+		lockErr := errors.New("lock failed")
+		tx := &schemaTestTx{execErr: lockErr, failExecContains: "pg_advisory_xact_lock"}
+		err := EnsureProfilePictureSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if !errors.Is(err, lockErr) || tx.committed || !tx.rolledBack {
+			t.Fatalf("error=%v committed=%t rolledBack=%t", err, tx.committed, tx.rolledBack)
+		}
+	})
+
+	t.Run("reports commit errors", func(t *testing.T) {
+		commitErr := errors.New("commit failed")
+		tx := &schemaTestTx{commitErr: commitErr}
+		err := EnsureProfilePictureSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if !errors.Is(err, commitErr) {
+			t.Fatalf("EnsureProfilePictureSchema error = %v", err)
+		}
+	})
+}
+
+func TestEnsurePreferredNameSchema(t *testing.T) {
+	t.Run("reports begin errors", func(t *testing.T) {
+		beginErr := errors.New("begin failed")
+		err := EnsurePreferredNameSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return nil, beginErr
+		})
+		if !errors.Is(err, beginErr) {
+			t.Fatalf("EnsurePreferredNameSchema error = %v", err)
+		}
+	})
+
+	t.Run("adds the preferred name column in a transaction", func(t *testing.T) {
+		tx := &schemaTestTx{}
+		err := EnsurePreferredNameSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if err != nil {
+			t.Fatalf("EnsurePreferredNameSchema returned error: %v", err)
+		}
+		if len(tx.execCalls) != 2 || !strings.Contains(tx.execCalls[0], "pg_advisory_xact_lock") ||
+			!strings.Contains(tx.execCalls[1], "ADD COLUMN IF NOT EXISTS preferred_name VARCHAR(100)") ||
+			!tx.committed || tx.rolledBack {
+			t.Fatalf("preferred name schema calls=%#v committed=%t rolledBack=%t",
+				tx.execCalls, tx.committed, tx.rolledBack)
+		}
+	})
+
+	t.Run("rolls back on upgrade errors", func(t *testing.T) {
+		schemaErr := errors.New("preferred name schema failed")
+		tx := &schemaTestTx{execErr: schemaErr}
+		err := EnsurePreferredNameSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if !errors.Is(err, schemaErr) || tx.committed || !tx.rolledBack {
+			t.Fatalf("error=%v committed=%t rolledBack=%t", err, tx.committed, tx.rolledBack)
+		}
+	})
+
+	t.Run("reports lock errors without committing", func(t *testing.T) {
+		lockErr := errors.New("lock failed")
+		tx := &schemaTestTx{execErr: lockErr, failExecContains: "pg_advisory_xact_lock"}
+		err := EnsurePreferredNameSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if !errors.Is(err, lockErr) || tx.committed || !tx.rolledBack {
+			t.Fatalf("error=%v committed=%t rolledBack=%t", err, tx.committed, tx.rolledBack)
+		}
+	})
+
+	t.Run("reports commit errors", func(t *testing.T) {
+		commitErr := errors.New("commit failed")
+		tx := &schemaTestTx{commitErr: commitErr}
+		err := EnsurePreferredNameSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if !errors.Is(err, commitErr) {
+			t.Fatalf("EnsurePreferredNameSchema error = %v", err)
 		}
 	})
 }

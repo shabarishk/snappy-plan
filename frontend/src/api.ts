@@ -50,8 +50,10 @@ export interface TaskAssignee {
 export interface UserProfile {
   username: string;
   full_name: string;
+  preferred_name: string;
   email: string;
   role: 'admin' | 'user';
+  profile_picture?: string | null;
 }
 
 export interface AdminUser extends UserProfile {
@@ -227,6 +229,7 @@ export const getAdminBoards = async (): Promise<AdminBoard[]> => {
 export const createUser = async (user: {
   username: string;
   full_name: string;
+  preferred_name: string;
   email: string;
   password: string;
 }): Promise<AdminUser> => {
@@ -251,12 +254,23 @@ export const promoteUserToAdmin = async (username: string): Promise<AdminUser> =
   return res.json();
 };
 
-export const updateProfile = async (profile: Pick<UserProfile, 'full_name' | 'email'>): Promise<UserProfile> => {
+export const updateProfile = async (profile: Pick<UserProfile, 'full_name' | 'preferred_name' | 'email'>): Promise<UserProfile> => {
   const res = await fetch('/api/profile', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin',
     body: JSON.stringify(profile),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+};
+
+export const updateProfilePicture = async (profilePicture: string | null): Promise<UserProfile> => {
+  const res = await fetch('/api/profile/picture', {
+    method: profilePicture ? 'PUT' : 'DELETE',
+    headers: profilePicture ? { 'Content-Type': 'application/json' } : undefined,
+    credentials: 'same-origin',
+    body: profilePicture ? JSON.stringify({ profile_picture: profilePicture }) : undefined,
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();

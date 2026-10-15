@@ -2,8 +2,8 @@
 SELECT COUNT(*) FROM users;
 
 -- name: CreateUser :one
-INSERT INTO users (id, email, password_hash, full_name, role)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO users (id, email, password_hash, full_name, preferred_name, role)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: GetUserByEmail :one
@@ -74,10 +74,11 @@ WHERE board.id = $1 AND (
 );
 
 -- name: GetAllBoardsForAdmin :many
-SELECT board.id, board.title, board.owner_id, owner.full_name
+SELECT board.id, board.title, board.owner_id,
+       COALESCE(NULLIF(owner.preferred_name, ''), owner.full_name) AS full_name
 FROM boards AS board
 JOIN users AS owner ON owner.id = board.owner_id
-ORDER BY board.title ASC, owner.full_name ASC, board.id ASC;
+ORDER BY board.title ASC, full_name ASC, board.id ASC;
 
 -- name: GetBoardByIDAndOwner :one
 SELECT * FROM boards
@@ -396,12 +397,12 @@ WHERE task.id = sqlc.arg(task_id)
 RETURNING task.*;
 
 -- name: GetUsersForAssignment :many
-SELECT id, full_name
+SELECT id, COALESCE(NULLIF(preferred_name, ''), full_name) AS full_name
 FROM users
 ORDER BY full_name ASC, id ASC;
 
 -- name: GetUsersForAdmin :many
-SELECT id, full_name, email, role
+SELECT id, full_name, preferred_name, email, role
 FROM users
 ORDER BY full_name ASC, id ASC;
 
@@ -421,8 +422,16 @@ RETURNING *;
 UPDATE users
 SET email = $2,
     full_name = $3,
+    preferred_name = $4,
     updated_at = NOW()
 WHERE id = $1
+RETURNING *;
+
+-- name: UpdateUserProfilePicture :one
+UPDATE users
+SET profile_picture = sqlc.narg(profile_picture)::TEXT,
+    updated_at = NOW()
+WHERE id = sqlc.arg(id)
 RETURNING *;
 
 -- name: UpdateUserPassword :exec

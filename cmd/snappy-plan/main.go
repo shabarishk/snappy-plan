@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -59,6 +60,11 @@ func main() { // Read from Docker env, fallback to localhost for manual testing
 	}); err != nil {
 		log.Fatalf("Unable to update initiative schema: %v\n", err)
 	}
+	if err := upgradeProfileSchemas(context.Background(), func(ctx context.Context) (backend.SetupTransaction, error) {
+		return pool.Begin(ctx)
+	}); err != nil {
+		log.Fatalf("Unable to update profile schemas: %v\n", err)
+	}
 
 	frontendFiles, err := backend.FrontendFiles()
 	if err != nil {
@@ -74,4 +80,14 @@ func main() { // Read from Docker env, fallback to localhost for manual testing
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func upgradeProfileSchemas(ctx context.Context, beginTx func(context.Context) (backend.SetupTransaction, error)) error {
+	if err := backend.EnsureProfilePictureSchema(ctx, beginTx); err != nil {
+		return fmt.Errorf("update profile picture schema: %w", err)
+	}
+	if err := backend.EnsurePreferredNameSchema(ctx, beginTx); err != nil {
+		return fmt.Errorf("update preferred name schema: %w", err)
+	}
+	return nil
 }

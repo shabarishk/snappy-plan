@@ -341,7 +341,8 @@ export function AuthenticatedBoard({
     ? COLUMNS.filter((column) => column.id === 'backlog')
     : BOARD_COLUMNS;
 
-  const profileInitial = profile?.full_name.trim().charAt(0).toUpperCase()
+  const profileDisplayName = profile?.preferred_name?.trim() || profile?.full_name || '';
+  const profileInitial = profileDisplayName.charAt(0).toUpperCase()
     || profile?.username.charAt(0).toUpperCase()
     || '?';
 
@@ -434,11 +435,13 @@ export function AuthenticatedBoard({
             aria-label={`User menu for ${profile?.username ?? 'user'}`}
             aria-haspopup="menu"
             aria-expanded={isProfileMenuOpen}
-            title={profile?.full_name ?? 'User profile'}
+            title={profileDisplayName || 'User profile'}
             onClick={() => setIsProfileMenuOpen((isOpen) => !isOpen)}
-            className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-700 hover:bg-blue-200"
+            className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full bg-blue-100 font-bold text-blue-700 hover:bg-blue-200"
           >
-            {profileInitial}
+            {profile?.profile_picture
+              ? <img src={profile.profile_picture} alt="" className="h-full w-full object-cover" />
+              : profileInitial}
           </button>
           {isProfileMenuOpen && (
             <div role="menu" aria-label="User menu" className="absolute bottom-4 left-full ml-2 w-40 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">

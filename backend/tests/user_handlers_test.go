@@ -1,9 +1,14 @@
 package backend_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -30,12 +35,14 @@ func TestProfileEndpoints(t *testing.T) {
 			if response.Code != http.StatusUnauthorized {
 				t.Errorf("%s status = %d, want %d", method, response.Code, http.StatusUnauthorized)
 			}
+
 		}
 	})
 
 	t.Run("returns only profile fields", func(t *testing.T) {
 		user := newUser("password123")
 		user.ID = ownerID
+		user.PreferredName = "Sam"
 		db := &fakeDB{session: dbgen.Session{Token: "token", UserID: ownerID}, user: user}
 		response := send(newHandler(db, nil, false), http.MethodGet, "/api/profile", "", cookie)
 		if response.Code != http.StatusOK {
@@ -45,7 +52,8 @@ func TestProfileEndpoints(t *testing.T) {
 		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 			t.Fatalf("decode profile: %v", err)
 		}
-		if body["username"] != ownerID || body["full_name"] != user.FullName || body["email"] != user.Email {
+		if body["username"] != ownerID || body["full_name"] != user.FullName ||
+			body["preferred_name"] != "Sam" || body["email"] != user.Email {
 			t.Fatalf("profile = %#v", body)
 		}
 		if strings.Contains(response.Body.String(), user.PasswordHash) {
@@ -84,12 +92,13 @@ func TestProfileEndpoints(t *testing.T) {
 			user:    dbgen.User{Role: "user"},
 		}
 		response := send(newHandler(db, nil, false), http.MethodPut, "/api/profile",
-			`{"full_name":"Updated User","email":"updated@example.com"}`, cookie)
+			`{"full_name":"Updated User","preferred_name":"Sam","email":"updated@example.com"}`, cookie)
 		if response.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
 		}
-		if len(db.updateProfileArgs) != 3 || db.updateProfileArgs[0] != ownerID ||
-			db.updateProfileArgs[1] != "updated@example.com" || db.updateProfileArgs[2] != "Updated User" {
+		if len(db.updateProfileArgs) != 4 || db.updateProfileArgs[0] != ownerID ||
+			db.updateProfileArgs[1] != "updated@example.com" || db.updateProfileArgs[2] != "Updated User" ||
+			db.updateProfileArgs[3] != "Sam" {
 			t.Fatalf("update args = %#v", db.updateProfileArgs)
 		}
 		var body map[string]string
@@ -97,7 +106,8 @@ func TestProfileEndpoints(t *testing.T) {
 			t.Fatalf("decode profile: %v", err)
 		}
 		if body["username"] != ownerID || body["full_name"] != "Updated User" ||
-			body["email"] != "updated@example.com" || body["role"] != "user" || len(body) != 4 {
+			body["preferred_name"] != "Sam" || body["email"] != "updated@example.com" ||
+			body["role"] != "user" || len(body) != 5 {
 			t.Fatalf("updated profile = %#v", body)
 		}
 	})
@@ -109,6 +119,7 @@ func TestProfileEndpoints(t *testing.T) {
 			`{"full_name":"User","email":"not-an-email"}`,
 			`{"full_name":"User","email":"User <user@example.com>"}`,
 			`{"full_name":"` + strings.Repeat("a", 101) + `","email":"valid@example.com"}`,
+			`{"full_name":"User","preferred_name":"` + strings.Repeat("a", 101) + `","email":"valid@example.com"}`,
 		} {
 			response := send(newHandler(&fakeDB{session: dbgen.Session{Token: "token", UserID: ownerID}}, nil, false),
 				http.MethodPut, "/api/profile", body, cookie)
@@ -157,6 +168,75 @@ func TestProfileEndpoints(t *testing.T) {
 	})
 }
 
+func TestProfilePictureEndpoints(t *testing.T) {
+	const ownerID = "owner1"
+	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
+	var imageBuffer bytes.Buffer
+	picture := image.NewRGBA(image.Rect(0, 0, 256, 256))
+	for y := 0; y < 256; y++ {
+		for x := 0; x < 256; x++ {
+			picture.Set(x, y, color.RGBA{R: 30, G: 100, B: 200, A: 255})
+		}
+	}
+	if err := jpeg.Encode(&imageBuffer, picture, nil); err != nil {
+		t.Fatalf("encode test picture: %v", err)
+	}
+	dataURL := "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(imageBuffer.Bytes())
+
+	t.Run("uploads picture and returns it", func(t *testing.T) {
+		db := &fakeDB{session: dbgen.Session{Token: "token", UserID: ownerID}}
+		response := send(newHandler(db, nil, false), http.MethodPut, "/api/profile/picture",
+			`{"profile_picture":"`+dataURL+`"}`, cookie)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+		}
+		if len(db.updateProfilePictureArgs) != 2 || db.updateProfilePictureArgs[1] != ownerID ||
+			db.updateProfilePictureArgs[0].(pgtype.Text).String != dataURL {
+			t.Fatalf("update args = %#v", db.updateProfilePictureArgs)
+		}
+		var body map[string]string
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode profile: %v", err)
+		}
+		if body["profile_picture"] != dataURL {
+			t.Fatal("profile picture was not returned")
+		}
+	})
+
+	t.Run("rejects invalid picture data", func(t *testing.T) {
+		for _, pictureData := range []string{"", "data:image/png;base64,YQ==", "data:image/jpeg;base64,YQ=="} {
+			response := send(newHandler(&fakeDB{session: dbgen.Session{Token: "token", UserID: ownerID}},
+				nil, false), http.MethodPut, "/api/profile/picture",
+				`{"profile_picture":"`+pictureData+`"}`, cookie)
+			if response.Code != http.StatusBadRequest {
+				t.Errorf("picture %q status = %d, want %d", pictureData, response.Code, http.StatusBadRequest)
+			}
+		}
+	})
+
+	t.Run("removes picture", func(t *testing.T) {
+		db := &fakeDB{session: dbgen.Session{Token: "token", UserID: ownerID}}
+		response := send(newHandler(db, nil, false), http.MethodDelete, "/api/profile/picture", "", cookie)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+		}
+		if len(db.updateProfilePictureArgs) != 2 || db.updateProfilePictureArgs[0].(pgtype.Text).Valid {
+			t.Fatalf("remove args = %#v", db.updateProfilePictureArgs)
+		}
+		if strings.Contains(response.Body.String(), "profile_picture") {
+			t.Fatalf("removed picture was returned: %s", response.Body.String())
+		}
+	})
+
+	t.Run("requires authentication", func(t *testing.T) {
+		response := send(newHandler(&fakeDB{}, nil, false), http.MethodPut, "/api/profile/picture",
+			`{"profile_picture":"`+dataURL+`"}`, nil)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
+		}
+	})
+}
+
 func TestAdminUserEndpoints(t *testing.T) {
 	const adminID = "admin1"
 	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
@@ -200,7 +280,7 @@ func TestAdminUserEndpoints(t *testing.T) {
 		db := &fakeDB{
 			session:    dbgen.Session{Token: "token", UserID: adminID},
 			user:       admin,
-			adminUsers: []dbgen.GetUsersForAdminRow{{ID: "member", FullName: "Member", Email: "member@example.com", Role: "user"}},
+			adminUsers: []dbgen.GetUsersForAdminRow{{ID: "member", FullName: "Member", PreferredName: "Sam", Email: "member@example.com", Role: "user"}},
 		}
 		response := send(newHandler(db, nil, false), http.MethodGet, "/api/admin/users", "", cookie)
 		if response.Code != http.StatusOK {
@@ -210,7 +290,8 @@ func TestAdminUserEndpoints(t *testing.T) {
 		if err := json.Unmarshal(response.Body.Bytes(), &users); err != nil {
 			t.Fatalf("decode admin users: %v", err)
 		}
-		if len(users) != 1 || users[0].Username != "member" || users[0].Role != "user" {
+		if len(users) != 1 || users[0].Username != "member" ||
+			users[0].PreferredName != "Sam" || users[0].Role != "user" {
 			t.Fatalf("admin users = %#v", users)
 		}
 		if strings.Contains(response.Body.String(), "password_hash") {
@@ -293,13 +374,13 @@ func TestAdminUserEndpoints(t *testing.T) {
 		response := send(newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
 			return tx, nil
 		}, false), http.MethodPost, "/api/admin/users",
-			`{"username":" NewUser ","full_name":" New User ","email":"new@example.com","password":"password123"}`, cookie)
+			`{"username":" NewUser ","full_name":" New User ","preferred_name":" Sam ","email":"new@example.com","password":"password123"}`, cookie)
 		if response.Code != http.StatusCreated || !tx.committed {
 			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusCreated, response.Body.String())
 		}
-		if len(db.createUserArgs) != 5 || db.createUserArgs[0] != "newuser" ||
+		if len(db.createUserArgs) != 6 || db.createUserArgs[0] != "newuser" ||
 			db.createUserArgs[1] != "new@example.com" || db.createUserArgs[3] != "New User" ||
-			db.createUserArgs[4] != "user" {
+			db.createUserArgs[4] != "Sam" || db.createUserArgs[5] != "user" {
 			t.Fatalf("create user args = %#v", db.createUserArgs)
 		}
 		if len(db.boardArgs) != 2 || db.boardArgs[0] != "New User" || db.boardArgs[1] != "newuser" {
@@ -310,6 +391,13 @@ func TestAdminUserEndpoints(t *testing.T) {
 		}
 		if strings.Contains(response.Body.String(), db.createUserArgs[2].(string)) {
 			t.Fatal("create user response exposed password hash")
+		}
+		var createdUser adminUserResponseTest
+		if err := json.Unmarshal(response.Body.Bytes(), &createdUser); err != nil {
+			t.Fatalf("decode created user: %v", err)
+		}
+		if createdUser.PreferredName != "Sam" {
+			t.Fatalf("created user preferred name = %q", createdUser.PreferredName)
 		}
 	})
 
@@ -341,6 +429,7 @@ func TestAdminUserEndpoints(t *testing.T) {
 			{name: "missing full name", body: `{"username":"newuser","email":"new@example.com","password":"password123"}`, wantStatus: http.StatusBadRequest},
 			{name: "blank full name", body: `{"username":"newuser","full_name":"  ","email":"new@example.com","password":"password123"}`, wantStatus: http.StatusBadRequest},
 			{name: "full name too long", body: `{"username":"newuser","full_name":"` + strings.Repeat("a", 101) + `","email":"new@example.com","password":"password123"}`, wantStatus: http.StatusBadRequest},
+			{name: "preferred name too long", body: `{"username":"newuser","full_name":"New User","preferred_name":"` + strings.Repeat("a", 101) + `","email":"new@example.com","password":"password123"}`, wantStatus: http.StatusBadRequest},
 			{name: "invalid email", body: `{"username":"newuser","email":"not-email","password":"password123"}`, wantStatus: http.StatusBadRequest},
 			{name: "short password", body: `{"username":"newuser","email":"new@example.com","password":"short"}`, wantStatus: http.StatusBadRequest},
 			{name: "duplicate", body: `{"username":"newuser","full_name":"New User","email":"new@example.com","password":"password123"}`, createErr: &pgconn.PgError{Code: "23505"}, wantStatus: http.StatusConflict},
