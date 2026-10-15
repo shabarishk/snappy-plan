@@ -476,7 +476,7 @@ describe('Tasks', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Confirm Task' }));
   
       expect(await screen.findByText('Review the garden plan')).toBeTruthy();
-      expect(screen.getAllByRole('heading', { name: 'Backlog' })).toHaveLength(2);
+      expect(screen.queryByRole('heading', { name: 'Backlog' })).toBeNull();
       expect(screen.getByText('Priority: Medium')).toBeTruthy();
       expect(fetchMock).toHaveBeenCalledWith('/api/tasks', expect.objectContaining({
         method: 'POST',

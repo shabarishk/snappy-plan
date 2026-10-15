@@ -65,6 +65,7 @@ export function Column({
   onSelectTask,
   droppableId,
   taskIdPrefix,
+  hideColumnTitle,
 }: {
   column: ColumnType;
   tasks: Task[];
@@ -72,6 +73,7 @@ export function Column({
   onSelectTask: (task: Task) => void;
   droppableId?: string;
   taskIdPrefix?: string;
+  hideColumnTitle?: boolean;
 }) {
   const { setNodeRef } = useDroppable({
     id: droppableId ?? column.id,
@@ -83,8 +85,8 @@ export function Column({
     {/* Columns stack and scroll with the page on mobile, then fill desktop grid cells. */}
     <div ref={setNodeRef} className="board-column bg-gray-50 flex flex-col rounded-xl max-h-full border border-gray-200 overflow-hidden">
       <div className="p-4 border-b border-gray-200 bg-gray-100">
-        <h2 className="font-bold text-gray-700">{column.title}</h2>
-        <span className="text-xs text-gray-500">{tasks.length} tasks</span>
+      {!hideColumnTitle && <h3 className="text-sm text-gray-500">{column.title}</h3>}
+        <span className="text-xs text-gray-400">{tasks.length} tasks</span>
       </div>
       
       <div className="board-column-tasks flex-1 p-3 overflow-y-auto">

@@ -53,7 +53,7 @@ describe('Account', () => {
       const userMenuButton = await screen.findByRole('button', { name: 'User menu for boardowner' });
       expect(userMenuButton.textContent).toBe('B');
       fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
-      expect(screen.getAllByRole('heading', { name: 'Backlog' })).toHaveLength(2);
+      expect(screen.queryByRole('heading', { name: 'Backlog' })).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: 'Home' }));
       expect(screen.getAllByRole('heading', { name: 'To Do' })).toHaveLength(2);
   

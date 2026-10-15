@@ -788,6 +788,7 @@ export function AuthenticatedBoard({
                           onSelectTask={(task) => setSelectedTask({ task, boardId: task.boardId ?? selectedBoardId })}
                           droppableId={`${group.id}:${column.id}`}
                           taskIdPrefix={group.id}
+                          hideColumnTitle={currentPage === 'backlog'}
                         />
                       ))}
                     </div>

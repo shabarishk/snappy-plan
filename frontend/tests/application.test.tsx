@@ -26,6 +26,12 @@ describe('Application', () => {
       expect(screen.getAllByRole('heading', { name: 'To Do' })).toHaveLength(2);
       expect(screen.getAllByRole('heading', { name: 'In Progress' })).toHaveLength(2);
       expect(screen.getAllByRole('heading', { name: 'Complete' })).toHaveLength(2);
+      for (const title of ['To Do', 'In Progress', 'Complete']) {
+        for (const heading of screen.getAllByRole('heading', { name: title })) {
+          expect(heading.className).toContain('text-sm');
+          expect(heading.className).toContain('font-normal');
+        }
+      }
       expect(screen.queryByRole('heading', { name: 'Backlog' })).toBeNull();
       expect((screen.getByLabelText('Group tasks by') as HTMLSelectElement).value).toBe('board');
       expect(screen.getAllByText('0 tasks')).toHaveLength(8);
@@ -39,7 +45,7 @@ describe('Application', () => {
       fireEvent.click(backlogTab);
       expect(backlogTab.querySelector('span[aria-hidden="true"]')).toBeTruthy();
       expect(activeTab.querySelector('span[aria-hidden="true"]')).toBeNull();
-      expect(screen.getAllByRole('heading', { name: 'Backlog' })).toHaveLength(2);
+      expect(screen.queryByRole('heading', { name: 'Backlog' })).toBeNull();
       expect(screen.getAllByText('0 tasks')).toHaveLength(4);
   
       fireEvent.click(activeTab);
