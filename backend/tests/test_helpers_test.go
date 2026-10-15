@@ -23,6 +23,8 @@ type fakeDB struct {
 	countErr                 error
 	user                     dbgen.User
 	userErr                  error
+	deleteTargetUser         dbgen.User
+	deleteTargetUserErr      error
 	session                  dbgen.Session
 	sessionErr               error
 	board                    dbgen.Board
@@ -77,6 +79,12 @@ type fakeDB struct {
 	createSessionError       error
 	createUserError          error
 	deleteSessionErr         error
+	transferUserBoardsArgs   []any
+	transferUserBoardsQuery  string
+	transferUserBoardsErr    error
+	deleteUserArgs           []any
+	deleteUserRows           int64
+	deleteUserErr            error
 }
 
 type failingResponseWriter struct {
@@ -114,6 +122,24 @@ func (db *fakeDB) Exec(_ context.Context, query string, args ...any) (pgconn.Com
 		canDelete := db.board.OwnerID == args[1].(string) ||
 			(strings.Contains(query, "role = 'admin'") && db.user.Role == "admin")
 		if canDelete && !(strings.Contains(query, "NOT board.is_personal") && db.board.IsPersonal) && db.deleteBoardRows > 0 {
+			return pgconn.NewCommandTag("DELETE 1"), nil
+		}
+		return pgconn.NewCommandTag("DELETE 0"), nil
+	}
+	if strings.Contains(query, "UPDATE boards") && strings.Contains(query, "is_personal = FALSE") {
+		db.transferUserBoardsArgs = args
+		db.transferUserBoardsQuery = query
+		if db.transferUserBoardsErr != nil {
+			return pgconn.CommandTag{}, db.transferUserBoardsErr
+		}
+		return pgconn.NewCommandTag("UPDATE 2"), nil
+	}
+	if strings.Contains(query, "DELETE FROM users") {
+		db.deleteUserArgs = args
+		if db.deleteUserErr != nil {
+			return pgconn.CommandTag{}, db.deleteUserErr
+		}
+		if db.deleteUserRows > 0 {
 			return pgconn.NewCommandTag("DELETE 1"), nil
 		}
 		return pgconn.NewCommandTag("DELETE 0"), nil
@@ -258,6 +284,12 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 		return fakeRow{values: userValues(db.user)}
 	case strings.Contains(query, "SELECT COUNT(*) FROM users"):
 		return fakeRow{values: []any{db.count}, err: db.countErr}
+	case strings.Contains(query, "FOR UPDATE"):
+		user, err := db.user, db.userErr
+		if db.deleteTargetUser.ID != "" || db.deleteTargetUserErr != nil {
+			user, err = db.deleteTargetUser, db.deleteTargetUserErr
+		}
+		return fakeRow{values: userValues(user), err: err}
 	case strings.Contains(query, "FROM users") && strings.Contains(query, "WHERE email"):
 		return fakeRow{values: userValues(db.user), err: db.userErr}
 	case strings.Contains(query, "FROM users") && strings.Contains(query, "WHERE id"):
@@ -438,6 +470,10 @@ type fakeTx struct {
 func (tx *fakeTx) Exec(ctx context.Context, query string, args ...any) (pgconn.CommandTag, error) {
 	if strings.Contains(query, "pg_advisory_xact_lock") {
 		return pgconn.CommandTag{}, tx.execErr
+	}
+	if (strings.Contains(query, "UPDATE boards") && strings.Contains(query, "is_personal = FALSE")) ||
+		strings.Contains(query, "DELETE FROM users") {
+		return tx.fakeDB.Exec(ctx, query, args...)
 	}
 	if strings.Contains(query, "INSERT INTO board_members") {
 		return tx.fakeDB.Exec(ctx, query, args...)

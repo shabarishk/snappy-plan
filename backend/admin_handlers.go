@@ -245,3 +245,64 @@ func (api *ApiConfig) handlePromoteUser(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Failed to encode updated user", http.StatusInternalServerError)
 	}
 }
+
+func (api *ApiConfig) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	session, ok := api.requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	userID := strings.ToLower(strings.TrimSpace(r.PathValue("userID")))
+	if !isAlphanumeric(userID) || len(userID) > 32 {
+		http.Error(w, "Username is invalid", http.StatusBadRequest)
+		return
+	}
+	if userID == session.UserID {
+		http.Error(w, "You cannot delete your own administrator account", http.StatusBadRequest)
+		return
+	}
+	if api.BeginTx == nil {
+		http.Error(w, "User deletion is unavailable", http.StatusInternalServerError)
+		return
+	}
+	tx, err := api.BeginTx(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to start user deletion", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback(context.Background())
+	txQueries := dbgen.New(tx)
+	user, err := txQueries.GetUserForDeletion(r.Context(), userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "Failed to load user for deletion", http.StatusInternalServerError)
+		return
+	}
+	if user.Role != "user" {
+		http.Error(w, "Only non-administrator users can be deleted", http.StatusConflict)
+		return
+	}
+	if err := txQueries.TransferUserBoards(r.Context(), dbgen.TransferUserBoardsParams{
+		OwnerID:   userID,
+		OwnerID_2: session.UserID,
+	}); err != nil {
+		http.Error(w, "Failed to transfer user's boards", http.StatusInternalServerError)
+		return
+	}
+	deleted, err := txQueries.DeleteUser(r.Context(), userID)
+	if err != nil {
+		http.Error(w, "Failed to delete user", http.StatusInternalServerError)
+		return
+	}
+	if deleted == 0 {
+		http.Error(w, "Only non-administrator users can be deleted", http.StatusConflict)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		http.Error(w, "Failed to delete user", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

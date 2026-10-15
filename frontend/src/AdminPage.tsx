@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { createUser, deleteBoard as persistDeleteBoard, getAdminBoards, getAdminUsers, promoteUserToAdmin } from './api';
+import { createUser, deleteAdminUser, deleteBoard as persistDeleteBoard, getAdminBoards, getAdminUsers, promoteUserToAdmin } from './api';
 import type { AdminBoard, AdminUser } from './api';
 import { ManageBoardOverlay } from './BoardComponents';
 
 export function AdminPage({ currentUsername }: { currentUsername: string }) {
   const [selectedSection, setSelectedSection] = useState<'users' | 'boards'>('users');
   const [managingBoard, setManagingBoard] = useState<AdminBoard | null>(null);
+  const [userToDelete, setUserToDelete] = useState<AdminUser | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [boards, setBoards] = useState<AdminBoard[]>([]);
   const [username, setUsername] = useState('');
@@ -16,12 +17,14 @@ export function AdminPage({ currentUsername }: { currentUsername: string }) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
   const [createUserError, setCreateUserError] = useState('');
+  const [deleteUserError, setDeleteUserError] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [boardsError, setBoardsError] = useState('');
   const [isBoardsLoading, setIsBoardsLoading] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeletingUser, setIsDeletingUser] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -114,6 +117,26 @@ export function AdminPage({ currentUsername }: { currentUsername: string }) {
     }
   };
 
+  const handleDeleteUser = async () => {
+    if (!userToDelete || isDeletingUser) return;
+    setDeleteUserError('');
+    setIsDeletingUser(true);
+    try {
+      await deleteAdminUser(userToDelete.username);
+      setUsers((currentUsers) => currentUsers.filter((user) => user.username !== userToDelete.username));
+      setSuccess(`User ${userToDelete.username} deleted. Their remaining boards are now yours.`);
+      setUserToDelete(null);
+      setBoardsError('');
+      getAdminBoards()
+        .then(setBoards)
+        .catch((err: unknown) => setBoardsError(err instanceof Error ? err.message : 'Failed to load boards'));
+    } catch (err) {
+      setDeleteUserError(err instanceof Error ? err.message : 'Failed to delete user');
+    } finally {
+      setIsDeletingUser(false);
+    }
+  };
+
   return (
     <section aria-label="Admin" className="mx-auto w-full max-w-7xl">
       <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
@@ -170,9 +193,23 @@ export function AdminPage({ currentUsername }: { currentUsername: string }) {
                     <td className="px-3 py-3 capitalize text-gray-600">{user.role}</td>
                     <td className="px-3 py-3">
                       {user.role === 'user' && user.username !== currentUsername ? (
-                        <button type="button" disabled={isSaving} onClick={() => void handlePromoteUser(user)} className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50">
-                          Make admin
-                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          <button type="button" disabled={isSaving || isDeletingUser} onClick={() => void handlePromoteUser(user)} className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+                            Make admin
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Delete user ${user.username}`}
+                            disabled={isSaving || isDeletingUser}
+                            onClick={() => {
+                              setDeleteUserError('');
+                              setUserToDelete(user);
+                            }}
+                            className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       ) : user.username === currentUsername ? (
                         <span className="text-xs text-gray-500">You</span>
                       ) : (
@@ -226,6 +263,38 @@ export function AdminPage({ currentUsername }: { currentUsername: string }) {
                   </button>
                 </div>
               </form>
+            </section>
+          </div>
+        )}
+        {userToDelete && (
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+            <section role="alertdialog" aria-modal="true" aria-labelledby="delete-user-title" className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+              <h2 id="delete-user-title" className="text-xl font-bold text-gray-800">Delete user {userToDelete.username}?</h2>
+              <p className="mt-3 text-sm text-gray-600">
+                This permanently deletes the account and its personal board. Tasks assigned to them on retained boards become unassigned; tasks on their personal board are deleted with it. Their other boards transfer to you, and initiatives they created are deleted.
+              </p>
+              {deleteUserError && <p role="alert" className="mt-3 text-sm text-red-700">{deleteUserError}</p>}
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  type="button"
+                  disabled={isDeletingUser}
+                  onClick={() => {
+                    setUserToDelete(null);
+                    setDeleteUserError('');
+                  }}
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingUser}
+                  onClick={() => void handleDeleteUser()}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {isDeletingUser ? 'Deleting…' : 'Confirm delete'}
+                </button>
+              </div>
             </section>
           </div>
         )}

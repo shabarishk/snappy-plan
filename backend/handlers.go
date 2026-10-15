@@ -58,6 +58,7 @@ func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, 
 	mux.HandleFunc("GET /api/admin/users", api.handleGetUsersForAdmin)
 	mux.HandleFunc("GET /api/admin/boards", api.handleGetBoardsForAdmin)
 	mux.HandleFunc("POST /api/admin/users", api.handleCreateUser)
+	mux.HandleFunc("DELETE /api/admin/users/{userID}", api.handleDeleteUser)
 	mux.HandleFunc("PATCH /api/admin/users/{userID}/role", api.handlePromoteUser)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Snappy Plan Backend is running!"))

@@ -416,6 +416,21 @@ SELECT * FROM users
 WHERE id = $1
 LIMIT 1;
 
+-- name: GetUserForDeletion :one
+SELECT * FROM users
+WHERE id = $1
+FOR UPDATE;
+
+-- name: TransferUserBoards :exec
+UPDATE boards
+SET owner_id = $2,
+    updated_at = NOW()
+WHERE owner_id = $1 AND is_personal = FALSE;
+
+-- name: DeleteUser :execrows
+DELETE FROM users
+WHERE id = $1 AND role = 'user';
+
 -- name: UpdateUserRole :one
 UPDATE users
 SET role = $2,
