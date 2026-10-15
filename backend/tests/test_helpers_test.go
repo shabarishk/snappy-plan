@@ -19,61 +19,63 @@ import (
 )
 
 type fakeDB struct {
-	count                  int64
-	countErr               error
-	user                   dbgen.User
-	userErr                error
-	session                dbgen.Session
-	sessionErr             error
-	board                  dbgen.Board
-	destinationBoard       dbgen.Board
-	boards                 []dbgen.Board
-	boardErr               error
-	destinationBoardErr    error
-	column                 dbgen.Column
-	columnErr              error
-	task                   dbgen.Task
-	createTaskErr          error
-	createColumnErr        error
-	moveTaskErr            error
-	updateTaskErr          error
-	moveDueTasksErr        error
-	moveDueTasksArgs       []any
-	updateProfileErr       error
-	updatePasswordErr      error
-	tasksErr               error
-	assigneesErr           error
-	assignees              []dbgen.GetUsersForAssignmentRow
-	adminUsers             []dbgen.GetUsersForAdminRow
-	adminBoards            []dbgen.GetAllBoardsForAdminRow
-	adminBoardsErr         error
-	tasks                  []dbgen.Task
-	boardArgs              []any
-	columnArgs             []any
-	taskArgs               []any
-	moveTaskArgs           []any
-	updateTaskArgs         []any
-	updateProfileArgs      []any
-	updateUserRoleErr      error
-	updateUserRoleArgs     []any
-	updatePasswordArgs     []any
-	deleteSessionArgs      []any
-	sessionArgs            []any
-	createUserArgs         []any
-	createBoardErr         error
-	boardMemberArgs        [][]any
-	boardMemberErr         error
-	boardMembers           []string
-	boardMembersErr        error
-	boardMembersDeleteArgs []any
-	boardMembersDeleteErr  error
-	deleteBoardArgs        []any
-	deleteBoardQuery       string
-	deleteBoardRows        int64
-	deleteBoardErr         error
-	createSessionError     error
-	createUserError        error
-	deleteSessionErr       error
+	count                    int64
+	countErr                 error
+	user                     dbgen.User
+	userErr                  error
+	session                  dbgen.Session
+	sessionErr               error
+	board                    dbgen.Board
+	destinationBoard         dbgen.Board
+	boards                   []dbgen.Board
+	boardErr                 error
+	destinationBoardErr      error
+	column                   dbgen.Column
+	columnErr                error
+	task                     dbgen.Task
+	createTaskErr            error
+	createColumnErr          error
+	moveTaskErr              error
+	updateTaskErr            error
+	moveDueTasksErr          error
+	moveDueTasksArgs         []any
+	updateProfileErr         error
+	updateProfilePictureErr  error
+	updatePasswordErr        error
+	tasksErr                 error
+	assigneesErr             error
+	assignees                []dbgen.GetUsersForAssignmentRow
+	adminUsers               []dbgen.GetUsersForAdminRow
+	adminBoards              []dbgen.GetAllBoardsForAdminRow
+	adminBoardsErr           error
+	tasks                    []dbgen.Task
+	boardArgs                []any
+	columnArgs               []any
+	taskArgs                 []any
+	moveTaskArgs             []any
+	updateTaskArgs           []any
+	updateProfileArgs        []any
+	updateProfilePictureArgs []any
+	updateUserRoleErr        error
+	updateUserRoleArgs       []any
+	updatePasswordArgs       []any
+	deleteSessionArgs        []any
+	sessionArgs              []any
+	createUserArgs           []any
+	createBoardErr           error
+	boardMemberArgs          [][]any
+	boardMemberErr           error
+	boardMembers             []string
+	boardMembersErr          error
+	boardMembersDeleteArgs   []any
+	boardMembersDeleteErr    error
+	deleteBoardArgs          []any
+	deleteBoardQuery         string
+	deleteBoardRows          int64
+	deleteBoardErr           error
+	createSessionError       error
+	createUserError          error
+	deleteSessionErr         error
 }
 
 type failingResponseWriter struct {
@@ -234,6 +236,14 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 		db.user.ID = args[0].(string)
 		db.user.Role = args[1].(string)
 		return fakeRow{values: userValues(db.user)}
+	case strings.Contains(query, "SET profile_picture"):
+		db.updateProfilePictureArgs = args
+		if db.updateProfilePictureErr != nil {
+			return fakeRow{err: db.updateProfilePictureErr}
+		}
+		db.user.ProfilePicture = args[0].(pgtype.Text)
+		db.user.ID = args[1].(string)
+		return fakeRow{values: userValues(db.user)}
 	case strings.Contains(query, "UPDATE users"):
 		db.updateProfileArgs = args
 		if db.updateProfileErr != nil {
@@ -319,7 +329,7 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 		}
 		return fakeRow{values: []any{
 			args[0], args[1], args[2], args[3], args[4],
-			db.user.CreatedAt, db.user.UpdatedAt,
+			db.user.CreatedAt, db.user.UpdatedAt, db.user.ProfilePicture,
 		}}
 	default:
 		return fakeRow{err: errors.New("unexpected query: " + query)}
@@ -329,7 +339,7 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 func userValues(user dbgen.User) []any {
 	return []any{
 		user.ID, user.Email, user.PasswordHash, user.FullName,
-		user.Role, user.CreatedAt, user.UpdatedAt,
+		user.Role, user.CreatedAt, user.UpdatedAt, user.ProfilePicture,
 	}
 }
 

@@ -27,6 +27,47 @@ describe('Account', () => {
     expect(screen.queryByRole('menu', { name: 'User menu' })).toBeNull();
   });
 
+  it('opens a crop dialog after selecting a profile picture', async () => {
+    const fetchMock = mockBoardReads();
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
+      if (url.startsWith('/api/tasks?board_id=') || url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('URL', {
+      createObjectURL: vi.fn(() => 'blob:profile-picture'),
+      revokeObjectURL: vi.fn(),
+    });
+    vi.stubGlobal('Image', class {
+      naturalWidth = 512;
+      naturalHeight = 256;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_value: string) {
+        this.onload?.();
+      }
+    });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'User menu for boardowner' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Profile' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Update photo' }));
+    const fileInput = document.querySelector('input[type="file"]');
+    if (!(fileInput instanceof HTMLInputElement)) throw new Error('Profile picture input was not rendered');
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['image'], 'profile.png', { type: 'image/png' })] },
+    });
+
+    expect(await screen.findByRole('dialog', { name: 'Crop profile picture' })).toBeTruthy();
+    expect(screen.getByLabelText('Zoom')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Save picture' })).toBeTruthy();
+  });
+
   it('provides Home and a user menu with an editable profile', async () => {
       const fetchMock = mockBoardReads();
       fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {

@@ -21,7 +21,8 @@ type schemaTestTx struct {
 func (tx *schemaTestTx) Exec(_ context.Context, query string, _ ...any) (pgconn.CommandTag, error) {
 	tx.execCalls = append(tx.execCalls, query)
 	if (strings.Contains(query, "DO $$") || strings.Contains(query, "INSERT INTO boards") ||
-		strings.Contains(query, "board_members") || strings.Contains(query, "CREATE TABLE IF NOT EXISTS initiatives")) &&
+		strings.Contains(query, "board_members") || strings.Contains(query, "CREATE TABLE IF NOT EXISTS initiatives") ||
+		strings.Contains(query, "ADD COLUMN IF NOT EXISTS profile_picture")) &&
 		tx.execErr != nil {
 		return pgconn.CommandTag{}, tx.execErr
 	}
@@ -130,6 +131,35 @@ func TestEnsureInitiativeSchema(t *testing.T) {
 		schemaErr := errors.New("schema failed")
 		tx := &schemaTestTx{execErr: schemaErr}
 		err := EnsureInitiativeSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if !errors.Is(err, schemaErr) || tx.committed || !tx.rolledBack {
+			t.Fatalf("error=%v committed=%t rolledBack=%t", err, tx.committed, tx.rolledBack)
+		}
+	})
+}
+
+func TestEnsureProfilePictureSchema(t *testing.T) {
+	t.Run("applies upgrade in a transaction", func(t *testing.T) {
+		tx := &schemaTestTx{}
+		err := EnsureProfilePictureSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if err != nil {
+			t.Fatalf("EnsureProfilePictureSchema returned error: %v", err)
+		}
+		if len(tx.execCalls) != 2 || !strings.Contains(tx.execCalls[0], "pg_advisory_xact_lock") ||
+			!strings.Contains(tx.execCalls[1], "ADD COLUMN IF NOT EXISTS profile_picture TEXT") ||
+			!tx.committed || tx.rolledBack {
+			t.Fatalf("profile picture schema calls=%#v committed=%t rolledBack=%t",
+				tx.execCalls, tx.committed, tx.rolledBack)
+		}
+	})
+
+	t.Run("reports schema errors without committing", func(t *testing.T) {
+		schemaErr := errors.New("schema failed")
+		tx := &schemaTestTx{execErr: schemaErr}
+		err := EnsureProfilePictureSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
 			return tx, nil
 		})
 		if !errors.Is(err, schemaErr) || tx.committed || !tx.rolledBack {

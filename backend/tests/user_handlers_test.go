@@ -1,9 +1,14 @@
 package backend_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -30,6 +35,7 @@ func TestProfileEndpoints(t *testing.T) {
 			if response.Code != http.StatusUnauthorized {
 				t.Errorf("%s status = %d, want %d", method, response.Code, http.StatusUnauthorized)
 			}
+
 		}
 	})
 
@@ -153,6 +159,75 @@ func TestProfileEndpoints(t *testing.T) {
 			if response.Code != http.StatusInternalServerError {
 				t.Errorf("%s status = %d, want %d", method, response.Code, http.StatusInternalServerError)
 			}
+		}
+	})
+}
+
+func TestProfilePictureEndpoints(t *testing.T) {
+	const ownerID = "owner1"
+	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
+	var imageBuffer bytes.Buffer
+	picture := image.NewRGBA(image.Rect(0, 0, 256, 256))
+	for y := 0; y < 256; y++ {
+		for x := 0; x < 256; x++ {
+			picture.Set(x, y, color.RGBA{R: 30, G: 100, B: 200, A: 255})
+		}
+	}
+	if err := jpeg.Encode(&imageBuffer, picture, nil); err != nil {
+		t.Fatalf("encode test picture: %v", err)
+	}
+	dataURL := "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(imageBuffer.Bytes())
+
+	t.Run("uploads picture and returns it", func(t *testing.T) {
+		db := &fakeDB{session: dbgen.Session{Token: "token", UserID: ownerID}}
+		response := send(newHandler(db, nil, false), http.MethodPut, "/api/profile/picture",
+			`{"profile_picture":"`+dataURL+`"}`, cookie)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+		}
+		if len(db.updateProfilePictureArgs) != 2 || db.updateProfilePictureArgs[1] != ownerID ||
+			db.updateProfilePictureArgs[0].(pgtype.Text).String != dataURL {
+			t.Fatalf("update args = %#v", db.updateProfilePictureArgs)
+		}
+		var body map[string]string
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode profile: %v", err)
+		}
+		if body["profile_picture"] != dataURL {
+			t.Fatal("profile picture was not returned")
+		}
+	})
+
+	t.Run("rejects invalid picture data", func(t *testing.T) {
+		for _, pictureData := range []string{"", "data:image/png;base64,YQ==", "data:image/jpeg;base64,YQ=="} {
+			response := send(newHandler(&fakeDB{session: dbgen.Session{Token: "token", UserID: ownerID}},
+				nil, false), http.MethodPut, "/api/profile/picture",
+				`{"profile_picture":"`+pictureData+`"}`, cookie)
+			if response.Code != http.StatusBadRequest {
+				t.Errorf("picture %q status = %d, want %d", pictureData, response.Code, http.StatusBadRequest)
+			}
+		}
+	})
+
+	t.Run("removes picture", func(t *testing.T) {
+		db := &fakeDB{session: dbgen.Session{Token: "token", UserID: ownerID}}
+		response := send(newHandler(db, nil, false), http.MethodDelete, "/api/profile/picture", "", cookie)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+		}
+		if len(db.updateProfilePictureArgs) != 2 || db.updateProfilePictureArgs[0].(pgtype.Text).Valid {
+			t.Fatalf("remove args = %#v", db.updateProfilePictureArgs)
+		}
+		if strings.Contains(response.Body.String(), "profile_picture") {
+			t.Fatalf("removed picture was returned: %s", response.Body.String())
+		}
+	})
+
+	t.Run("requires authentication", func(t *testing.T) {
+		response := send(newHandler(&fakeDB{}, nil, false), http.MethodPut, "/api/profile/picture",
+			`{"profile_picture":"`+dataURL+`"}`, nil)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
 		}
 	})
 }

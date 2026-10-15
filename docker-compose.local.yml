@@ -20,6 +20,7 @@ services:
       - ./migrations/000006_use_username_as_user_id.up.sql:/docker-entrypoint-initdb.d/006_use_username_as_user_id.sql:ro
       - ./migrations/000007_create_board_members.up.sql:/docker-entrypoint-initdb.d/007_create_board_members.sql:ro
       - ./migrations/000008_create_initiatives.up.sql:/docker-entrypoint-initdb.d/008_create_initiatives.sql:ro
+      - ./migrations/000009_add_profile_picture.up.sql:/docker-entrypoint-initdb.d/009_add_profile_picture.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d snappyplan"]
       interval: 2s

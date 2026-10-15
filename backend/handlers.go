@@ -52,6 +52,8 @@ func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, 
 	mux.HandleFunc("GET /api/users", api.handleGetUsersForAssignment)
 	mux.HandleFunc("GET /api/profile", api.handleGetProfile)
 	mux.HandleFunc("PUT /api/profile", api.handleUpdateProfile)
+	mux.HandleFunc("PUT /api/profile/picture", api.handleUpdateProfilePicture)
+	mux.HandleFunc("DELETE /api/profile/picture", api.handleRemoveProfilePicture)
 	mux.HandleFunc("PUT /api/profile/password", api.handleUpdatePassword)
 	mux.HandleFunc("GET /api/admin/users", api.handleGetUsersForAdmin)
 	mux.HandleFunc("GET /api/admin/boards", api.handleGetBoardsForAdmin)
@@ -99,8 +101,9 @@ func frontendHandler(files fs.FS) http.Handler {
 }
 
 type profileResponse struct {
-	Username string `json:"username"`
-	FullName string `json:"full_name"`
-	Email    string `json:"email"`
-	Role     string `json:"role"`
+	Username       string  `json:"username"`
+	FullName       string  `json:"full_name"`
+	Email          string  `json:"email"`
+	Role           string  `json:"role"`
+	ProfilePicture *string `json:"profile_picture,omitempty"`
 }

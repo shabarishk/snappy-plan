@@ -436,9 +436,11 @@ export function AuthenticatedBoard({
             aria-expanded={isProfileMenuOpen}
             title={profile?.full_name ?? 'User profile'}
             onClick={() => setIsProfileMenuOpen((isOpen) => !isOpen)}
-            className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-700 hover:bg-blue-200"
+            className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full bg-blue-100 font-bold text-blue-700 hover:bg-blue-200"
           >
-            {profileInitial}
+            {profile?.profile_picture
+              ? <img src={profile.profile_picture} alt="" className="h-full w-full object-cover" />
+              : profileInitial}
           </button>
           {isProfileMenuOpen && (
             <div role="menu" aria-label="User menu" className="absolute bottom-4 left-full ml-2 w-40 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">

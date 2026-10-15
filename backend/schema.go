@@ -242,3 +242,22 @@ func EnsureInitiativeSchema(ctx context.Context, beginTx func(context.Context) (
 	}
 	return nil
 }
+
+func EnsureProfilePictureSchema(ctx context.Context, beginTx func(context.Context) (SetupTransaction, error)) error {
+	tx, err := beginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin profile picture schema upgrade: %w", err)
+	}
+	defer tx.Rollback(context.Background())
+
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(731942615)); err != nil {
+		return fmt.Errorf("lock profile picture schema upgrade: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_picture TEXT"); err != nil {
+		return fmt.Errorf("apply profile picture schema upgrade: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit profile picture schema upgrade: %w", err)
+	}
+	return nil
+}

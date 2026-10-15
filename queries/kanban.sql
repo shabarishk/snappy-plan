@@ -425,6 +425,13 @@ SET email = $2,
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateUserProfilePicture :one
+UPDATE users
+SET profile_picture = sqlc.narg(profile_picture)::TEXT,
+    updated_at = NOW()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
 -- name: UpdateUserPassword :exec
 UPDATE users
 SET password_hash = $2,

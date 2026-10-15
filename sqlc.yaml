@@ -10,6 +10,7 @@ sql:
       - "migrations/000006_use_username_as_user_id.up.sql"
       - "migrations/000007_create_board_members.up.sql"
       - "migrations/000008_create_initiatives.up.sql"
+      - "migrations/000009_add_profile_picture.up.sql"
     queries: "queries/"
     gen:
       go:
