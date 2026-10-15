@@ -224,6 +224,7 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 		db.task.Description = args[3].(pgtype.Text)
 		db.task.Priority = args[4].(string)
 		db.task.CompleteBy = args[5].(pgtype.Timestamptz)
+		db.task.AssignedToID = args[6].(pgtype.Text)
 		return fakeRow{values: taskValues(db.task)}
 	case strings.Contains(query, "SET role ="):
 		db.updateUserRoleArgs = args
@@ -460,7 +461,7 @@ func newUser(password string) dbgen.User {
 	}
 }
 
-func newHandler(db *fakeDB, beginTx func(context.Context) (backend.SetupTransaction, error), secureCookie bool) http.Handler {
+func newHandler(db dbgen.DBTX, beginTx func(context.Context) (backend.SetupTransaction, error), secureCookie bool) http.Handler {
 	return backend.NewHandler(db, beginTx, secureCookie, fstest.MapFS{
 		"index.html":    &fstest.MapFile{Data: []byte("<main>Snappy Plan</main>")},
 		"assets/app.js": &fstest.MapFile{Data: []byte("console.log('app')")},

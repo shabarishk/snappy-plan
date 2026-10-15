@@ -373,12 +373,13 @@ func (api *ApiConfig) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var params struct {
-		BoardID     string  `json:"board_id"`
-		Title       string  `json:"title"`
-		Description string  `json:"description"`
-		Priority    string  `json:"priority"`
-		State       string  `json:"state"`
-		CompleteBy  *string `json:"complete_by"`
+		BoardID      string  `json:"board_id"`
+		Title        string  `json:"title"`
+		Description  string  `json:"description"`
+		Priority     string  `json:"priority"`
+		State        string  `json:"state"`
+		AssignedToID string  `json:"assigned_to_id"`
+		CompleteBy   *string `json:"complete_by"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&params); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
@@ -423,6 +424,23 @@ func (api *ApiConfig) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	description := pgtype.Text{}
 	if params.Description != "" {
 		description = pgtype.Text{String: params.Description, Valid: true}
+	}
+	assignedToID := pgtype.Text{}
+	if params.AssignedToID != "" {
+		if !isAlphanumeric(params.AssignedToID) || len(params.AssignedToID) > 32 {
+			http.Error(w, "Assigned user ID is invalid", http.StatusBadRequest)
+			return
+		}
+		user, err := api.DB.GetUserByID(r.Context(), params.AssignedToID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				http.Error(w, "Assigned user does not exist", http.StatusBadRequest)
+				return
+			}
+			http.Error(w, "Failed to validate assigned user", http.StatusInternalServerError)
+			return
+		}
+		assignedToID = pgtype.Text{String: user.ID, Valid: true}
 	}
 	completeBy := pgtype.Timestamptz{}
 	if params.CompleteBy != nil && *params.CompleteBy != "" {
@@ -491,7 +509,8 @@ func (api *ApiConfig) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	task, err := txQueries.UpdateTask(r.Context(), dbgen.UpdateTaskParams{
 		ColumnID: column.ID, State: params.State, Title: params.Title,
 		Description: description, Priority: params.Priority, CompleteBy: completeBy,
-		TaskID: taskID, OwnerID: session.UserID,
+		AssignedToID: assignedToID,
+		TaskID:       taskID, OwnerID: session.UserID,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		http.Error(w, "Task not found", http.StatusNotFound)

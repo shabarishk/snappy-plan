@@ -114,6 +114,28 @@ var taskSchemaCleanup = []string{
 	"CREATE INDEX IF NOT EXISTS idx_tasks_column_priority ON tasks(column_id, priority)",
 }
 
+var initiativeSchemaStatements = []string{
+	`CREATE TABLE IF NOT EXISTS initiatives (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		title VARCHAR(255) NOT NULL,
+		description TEXT,
+		complete_by TIMESTAMPTZ,
+		assigned_to_id VARCHAR(32) REFERENCES users(id) ON DELETE SET NULL,
+		created_by_id VARCHAR(32) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	)`,
+	`CREATE TABLE IF NOT EXISTS initiative_tasks (
+		initiative_id UUID NOT NULL REFERENCES initiatives(id) ON DELETE CASCADE,
+		task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		PRIMARY KEY (initiative_id, task_id)
+	)`,
+	"CREATE INDEX IF NOT EXISTS idx_initiatives_assigned_to ON initiatives(assigned_to_id)",
+	"CREATE INDEX IF NOT EXISTS idx_initiatives_created_by ON initiatives(created_by_id)",
+	"CREATE INDEX IF NOT EXISTS idx_initiative_tasks_task ON initiative_tasks(task_id)",
+}
+
 func EnsureUserIDSchema(ctx context.Context, beginTx func(context.Context) (SetupTransaction, error)) error {
 	tx, err := beginTx(ctx)
 	if err != nil {
@@ -196,6 +218,27 @@ func EnsureTaskSchema(ctx context.Context, beginTx func(context.Context) (SetupT
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit task schema upgrade: %w", err)
+	}
+	return nil
+}
+
+func EnsureInitiativeSchema(ctx context.Context, beginTx func(context.Context) (SetupTransaction, error)) error {
+	tx, err := beginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin initiative schema upgrade: %w", err)
+	}
+	defer tx.Rollback(context.Background())
+
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(731942614)); err != nil {
+		return fmt.Errorf("lock initiative schema upgrade: %w", err)
+	}
+	for _, statement := range initiativeSchemaStatements {
+		if _, err := tx.Exec(ctx, statement); err != nil {
+			return fmt.Errorf("apply initiative schema upgrade: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit initiative schema upgrade: %w", err)
 	}
 	return nil
 }

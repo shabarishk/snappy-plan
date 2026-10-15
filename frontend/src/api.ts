@@ -7,6 +7,25 @@ export interface Board {
   owner_id: string;
 }
 
+export interface Initiative {
+  id: string;
+  title: string;
+  description: string | null;
+  complete_by: string | null;
+  assigned_to_id: string | null;
+  created_by_id: string;
+  created_at: string;
+  updated_at: string;
+  assigned_to_name?: string | null;
+  task_count?: number;
+  completed_task_count?: number;
+}
+
+export interface InitiativeDetail {
+  initiative: Initiative;
+  tasks: ApiTask[];
+}
+
 export interface AdminBoard extends Board {
   owner_name: string;
 }
@@ -55,7 +74,15 @@ export interface UpdateTaskRequest {
   description: string;
   priority: ApiTask['priority'];
   state: ApiTask['state'];
+  assigned_to_id: string;
   complete_by: string | null;
+}
+
+export interface InitiativeRequest {
+  title: string;
+  description: string;
+  complete_by: string | null;
+  assigned_to_id: string;
 }
 
 // 2. Wrap standard fetch calls
@@ -80,6 +107,58 @@ export const getTasks = async (boardId?: string): Promise<ApiTask[]> => {
   const res = await fetch(path, { credentials: 'same-origin' });
   if (!res.ok) throw new Error('Failed to load tasks');
   return res.json();
+};
+
+export const getInitiatives = async (): Promise<Initiative[]> => {
+  const res = await fetch('/api/initiatives', { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+};
+
+export const createInitiative = async (initiative: InitiativeRequest): Promise<Initiative> => {
+  const res = await fetch('/api/initiatives', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify(initiative),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+};
+
+export const getInitiative = async (initiativeId: string): Promise<InitiativeDetail> => {
+  const res = await fetch(`/api/initiatives/${encodeURIComponent(initiativeId)}`, { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+};
+
+export const updateInitiative = async (initiativeId: string, initiative: InitiativeRequest): Promise<Initiative> => {
+  const res = await fetch(`/api/initiatives/${encodeURIComponent(initiativeId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify(initiative),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+};
+
+export const addTaskToInitiative = async (initiativeId: string, taskId: string): Promise<void> => {
+  const res = await fetch(`/api/initiatives/${encodeURIComponent(initiativeId)}/tasks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ task_id: taskId }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+};
+
+export const removeTaskFromInitiative = async (initiativeId: string, taskId: string): Promise<void> => {
+  const res = await fetch(`/api/initiatives/${encodeURIComponent(initiativeId)}/tasks/${encodeURIComponent(taskId)}`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(await res.text());
 };
 
 export const getBoards = async (): Promise<Board[]> => {

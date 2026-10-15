@@ -193,6 +193,111 @@ ORDER BY CASE priority
     ELSE 2
 END, created_at ASC;
 
+-- name: GetInitiativesByUser :many
+SELECT initiative.*,
+       assignee.full_name AS assigned_to_name,
+       COUNT(task.id) FILTER (WHERE
+           task_board.owner_id = sqlc.arg(user_id) OR EXISTS (
+               SELECT 1 FROM board_members
+               WHERE board_id = task_board.id AND user_id = sqlc.arg(user_id)
+           )
+       )::INT AS task_count,
+       COUNT(task.id) FILTER (WHERE task.state = 'Complete' AND (
+           task_board.owner_id = sqlc.arg(user_id) OR EXISTS (
+               SELECT 1 FROM board_members
+               WHERE board_id = task_board.id AND user_id = sqlc.arg(user_id)
+           )
+       ))::INT AS completed_task_count
+FROM initiatives AS initiative
+LEFT JOIN users AS assignee ON assignee.id = initiative.assigned_to_id
+LEFT JOIN initiative_tasks AS initiative_task ON initiative_task.initiative_id = initiative.id
+LEFT JOIN tasks AS task ON task.id = initiative_task.task_id
+LEFT JOIN columns AS task_column ON task_column.id = task.column_id
+LEFT JOIN boards AS task_board ON task_board.id = task_column.board_id
+WHERE initiative.created_by_id = sqlc.arg(user_id)
+   OR initiative.assigned_to_id = sqlc.arg(user_id)
+GROUP BY initiative.id, assignee.full_name
+ORDER BY initiative.complete_by ASC NULLS LAST, initiative.created_at DESC;
+
+-- name: GetInitiativeByIDAndUser :one
+SELECT initiative.*
+FROM initiatives AS initiative
+WHERE initiative.id = sqlc.arg(initiative_id)
+  AND (
+      initiative.created_by_id = sqlc.arg(user_id)
+      OR initiative.assigned_to_id = sqlc.arg(user_id)
+  )
+LIMIT 1;
+
+-- name: CreateInitiative :one
+INSERT INTO initiatives (title, description, complete_by, assigned_to_id, created_by_id)
+VALUES (sqlc.arg(title), sqlc.narg(description), sqlc.narg(complete_by),
+        sqlc.narg(assigned_to_id), sqlc.arg(created_by_id))
+RETURNING *;
+
+-- name: UpdateInitiative :one
+UPDATE initiatives AS initiative
+SET title = sqlc.arg(title),
+    description = sqlc.narg(description),
+    complete_by = sqlc.narg(complete_by),
+    assigned_to_id = sqlc.narg(assigned_to_id),
+    updated_at = NOW()
+WHERE initiative.id = sqlc.arg(initiative_id)
+  AND (
+      initiative.created_by_id = sqlc.arg(user_id)
+      OR initiative.assigned_to_id = sqlc.arg(user_id)
+  )
+RETURNING initiative.*;
+
+-- name: GetTasksByInitiativeAndUser :many
+SELECT task.*
+FROM initiative_tasks AS initiative_task
+JOIN tasks AS task ON task.id = initiative_task.task_id
+JOIN columns AS task_column ON task_column.id = task.column_id
+JOIN boards AS board ON board.id = task_column.board_id
+WHERE initiative_task.initiative_id = sqlc.arg(initiative_id)
+  AND (
+      board.owner_id = sqlc.arg(user_id)
+      OR EXISTS (
+          SELECT 1 FROM board_members
+          WHERE board_id = board.id AND user_id = sqlc.arg(user_id)
+      )
+  )
+ORDER BY task.created_at ASC;
+
+-- name: GetTaskByIDAndUser :one
+SELECT task.*
+FROM tasks AS task
+JOIN columns AS task_column ON task_column.id = task.column_id
+JOIN boards AS board ON board.id = task_column.board_id
+WHERE task.id = sqlc.arg(task_id)
+  AND (
+      board.owner_id = sqlc.arg(user_id)
+      OR EXISTS (
+          SELECT 1 FROM board_members
+          WHERE board_id = board.id AND user_id = sqlc.arg(user_id)
+      )
+  )
+LIMIT 1;
+
+-- name: AddTaskToInitiative :exec
+INSERT INTO initiative_tasks (initiative_id, task_id)
+VALUES (sqlc.arg(initiative_id), sqlc.arg(task_id))
+ON CONFLICT (initiative_id, task_id) DO NOTHING;
+
+-- name: RemoveTaskFromInitiative :execrows
+DELETE FROM initiative_tasks AS initiative_task
+WHERE initiative_task.initiative_id = sqlc.arg(initiative_id)
+  AND initiative_task.task_id = sqlc.arg(task_id)
+  AND EXISTS (
+      SELECT 1 FROM initiatives AS initiative
+      WHERE initiative.id = initiative_task.initiative_id
+        AND (
+            initiative.created_by_id = sqlc.arg(user_id)
+            OR initiative.assigned_to_id = sqlc.arg(user_id)
+        )
+  );
+
 -- name: MoveTask :one
 UPDATE tasks AS task
 SET column_id = $1,
@@ -257,6 +362,7 @@ SET column_id = sqlc.arg(column_id),
     description = sqlc.narg(description),
     priority = sqlc.arg(priority),
     complete_by = sqlc.narg(complete_by),
+    assigned_to_id = sqlc.narg(assigned_to_id),
     updated_at = NOW(),
     completed_at = CASE
         WHEN sqlc.arg(state)::VARCHAR = 'Complete' THEN COALESCE(task.completed_at, NOW())

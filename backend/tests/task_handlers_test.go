@@ -592,7 +592,7 @@ func TestUpdateTaskEndpoint(t *testing.T) {
 		if len(db.columnArgs) != 3 || db.columnArgs[0] != destinationBoardID {
 			t.Fatalf("created lane args = %#v, want destination board %v", db.columnArgs, destinationBoardID)
 		}
-		if len(db.updateTaskArgs) != 8 || db.updateTaskArgs[0] != columnID {
+		if len(db.updateTaskArgs) != 9 || db.updateTaskArgs[0] != columnID {
 			t.Fatalf("task update args = %#v, want destination lane %v", db.updateTaskArgs, columnID)
 		}
 	})
@@ -620,6 +620,7 @@ func TestUpdateTaskEndpoint(t *testing.T) {
 		columnID := newUUID(3)
 		db := &fakeDB{
 			session: dbgen.Session{Token: "token", UserID: ownerID},
+			user:    dbgen.User{ID: "assignee2"},
 			board:   dbgen.Board{ID: newUUID(4), OwnerID: ownerID},
 			column: dbgen.Column{
 				ID: columnID, BoardID: newUUID(4), Title: "In Progress",
@@ -631,7 +632,9 @@ func TestUpdateTaskEndpoint(t *testing.T) {
 			return tx, nil
 		}, false)
 
-		response := send(handler, http.MethodPut, "/api/tasks/"+taskID.String(), body, cookie)
+		requestBody := `{"title":"  Updated task  ","description":"Revised details","priority":"High",` +
+			`"state":"InProgress","assigned_to_id":"assignee2","complete_by":"` + due.Format(time.RFC3339) + `"}`
+		response := send(handler, http.MethodPut, "/api/tasks/"+taskID.String(), requestBody, cookie)
 		if response.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
 		}
@@ -639,13 +642,16 @@ func TestUpdateTaskEndpoint(t *testing.T) {
 			t.Fatal("task update transaction was not committed")
 		}
 		args := db.updateTaskArgs
-		if len(args) != 8 || args[0] != columnID || args[1] != "InProgress" ||
+		if len(args) != 9 || args[0] != columnID || args[1] != "InProgress" ||
 			args[2] != "Updated task" || args[3] != (pgtype.Text{String: "Revised details", Valid: true}) ||
-			args[4] != "High" || args[6] != taskID || args[7] != ownerID {
+			args[4] != "High" || args[7] != taskID || args[8] != ownerID {
 			t.Fatalf("update task args = %#v", args)
 		}
 		if got := args[5].(pgtype.Timestamptz); !got.Valid || !got.Time.Equal(due) {
 			t.Fatalf("complete-by arg = %#v, want %v", got, due)
+		}
+		if got := args[6].(pgtype.Text); got != (pgtype.Text{String: "assignee2", Valid: true}) {
+			t.Fatalf("assigned user arg = %#v", got)
 		}
 		var updated dbgen.Task
 		if err := json.Unmarshal(response.Body.Bytes(), &updated); err != nil {

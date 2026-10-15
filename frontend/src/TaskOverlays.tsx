@@ -122,12 +122,14 @@ export function CreateTaskOverlay({
 export function TaskDetailsOverlay({
   task,
   boards,
+  assignees,
   selectedBoardId,
   onClose,
   onSaved,
 }: {
   task: Task;
   boards: Board[];
+  assignees: TaskAssignee[];
   selectedBoardId: string;
   onClose: () => void;
   onSaved: (task: Task, boardId: string) => void;
@@ -135,6 +137,7 @@ export function TaskDetailsOverlay({
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? '');
   const [boardId, setBoardId] = useState(selectedBoardId);
+  const [assignedToId, setAssignedToId] = useState(task.assignedToId ?? '');
   const [priority, setPriority] = useState<TaskPriority>(task.priority);
   const [state, setState] = useState<TaskState>(task.state);
   const [completeBy, setCompleteBy] = useState(() => {
@@ -156,6 +159,7 @@ export function TaskDetailsOverlay({
         description,
         priority,
         state,
+        assigned_to_id: assignedToId,
         complete_by: completeBy ? new Date(completeBy).toISOString() : null,
       });
       onSaved(toBoardTask(updated), boardId);
@@ -195,6 +199,13 @@ export function TaskDetailsOverlay({
             <label htmlFor="edit-task-board" className="mb-1 block text-sm font-medium text-gray-700">Board</label>
             <select id="edit-task-board" required value={boardId} onChange={(event) => setBoardId(event.target.value)} className="w-full rounded-lg border border-gray-300 p-2">
               {boards.map((board) => <option key={board.id} value={board.id}>{board.title}</option>)}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="edit-task-assignee" className="mb-1 block text-sm font-medium text-gray-700">Assigned to</label>
+            <select id="edit-task-assignee" value={assignedToId} onChange={(event) => setAssignedToId(event.target.value)} className="w-full rounded-lg border border-gray-300 p-2">
+              <option value="">Unassigned</option>
+              {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.full_name}</option>)}
             </select>
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

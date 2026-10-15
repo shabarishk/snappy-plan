@@ -1,17 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { DndContext, DragOverlay, closestCorners, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core';
 import { deleteBoard as persistDeleteBoard, getBoards, getProfile, getTaskAssignees, getTasks, logout, moveTask as persistMoveTask } from './api';
 import type { Board, TaskAssignee, UserProfile } from './api';
 import type { ColumnId, Task } from './taskModel';
 import type { AppPage } from './navigation';
-import { pageFromPath, pathForPage } from './navigation';
+import { initiativeIdFromPath, pageFromPath, pathForPage } from './navigation';
 import { BOARD_COLUMNS, COLUMNS, COLUMN_STATES, moveTaskToColumn, toBoardTask } from './taskModel';
 import { CreateTaskOverlay, TaskDetailsOverlay } from './TaskOverlays';
 import { BoardsPage, CreateBoardOverlay } from './BoardComponents';
 import { AdminPage } from './AdminPage';
 import { SettingsPage } from './SettingsPage';
 import { ProfilePage } from './ProfilePage';
+import { InitiativeDetailPage, InitiativesPage } from './InitiativeComponents';
 import { Column } from './TaskBoard';
 
 export function AuthenticatedBoard({
@@ -42,13 +43,20 @@ export function AuthenticatedBoard({
   const [moveError, setMoveError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
-  const navigateToPage = (page: AppPage) => {
-    const path = pathForPage(page);
+  const navigateToPage = (page: AppPage, initiativeId?: string, initiativeTitle?: string) => {
+    const path = pathForPage(page, initiativeId, initiativeTitle);
     if (window.location.pathname !== path) {
       window.history.pushState({}, '', path);
     }
     setCurrentPage(page);
   };
+
+  const handleInitiativeTitleChanged = useCallback((title: string) => {
+    const initiativeId = initiativeIdFromPath(window.location.pathname);
+    if (initiativeId) {
+      window.history.replaceState({}, '', pathForPage('initiative', initiativeId, title));
+    }
+  }, []);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -213,6 +221,26 @@ export function AuthenticatedBoard({
         </button>
         <button
           type="button"
+          aria-label="Initiatives"
+          title="Initiatives"
+          aria-current={currentPage === 'initiatives' || currentPage === 'initiative' ? 'page' : undefined}
+          onClick={() => {
+            setIsProfileMenuOpen(false);
+            setIsCreateTaskOpen(false);
+            setSelectedTaskId(null);
+            navigateToPage('initiatives');
+          }}
+          className={`mt-2 flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'initiatives' || currentPage === 'initiative' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 5h14M5 12h14M5 19h14" />
+            <circle cx="3" cy="5" r="1" fill="currentColor" stroke="none" />
+            <circle cx="3" cy="12" r="1" fill="currentColor" stroke="none" />
+            <circle cx="3" cy="19" r="1" fill="currentColor" stroke="none" />
+          </svg>
+        </button>
+        <button
+          type="button"
           aria-label="Boards"
           title="Boards"
           aria-current={currentPage === 'boards' ? 'page' : undefined}
@@ -325,7 +353,7 @@ export function AuthenticatedBoard({
             </div>
           ) : (
             <h1 className="text-xl font-extrabold tracking-tight text-blue-600">
-              {currentPage === 'admin' ? 'Admin' : currentPage === 'settings' ? 'Settings' : currentPage === 'boards' ? 'Boards' : 'Profile'}
+              {currentPage === 'admin' ? 'Admin' : currentPage === 'settings' ? 'Settings' : currentPage === 'boards' ? 'Boards' : currentPage === 'initiatives' || currentPage === 'initiative' ? 'Initiatives' : 'Profile'}
             </h1>
           )}
           {(currentPage === 'board' || currentPage === 'backlog') && (
@@ -360,9 +388,9 @@ export function AuthenticatedBoard({
           assignees={assignees}
           onClose={() => setIsCreateTaskOpen(false)}
           onCreated={(task, boardId) => {
+            if (boardId !== selectedBoardId) setIsLoading(true);
             setSelectedBoardId(boardId);
             window.localStorage.setItem('snappy-plan-selected-board', boardId);
-            setIsLoading(true);
             setTasks((previous) => [...previous, task]);
             navigateToPage(task.columnId === 'backlog' ? 'backlog' : 'board');
             setIsCreateTaskOpen(false);
@@ -388,6 +416,7 @@ export function AuthenticatedBoard({
           key={selectedTask.id}
           task={selectedTask}
           boards={boards}
+          assignees={assignees}
           selectedBoardId={selectedBoardId}
           onClose={() => setSelectedTaskId(null)}
           onSaved={(updatedTask, assignedBoardId) => {
@@ -446,6 +475,19 @@ export function AuthenticatedBoard({
               }}
             />
             : <p role={loadError ? 'alert' : undefined} className="p-4 text-sm text-gray-600">{loadError || 'Loading boards…'}</p>
+        ) : currentPage === 'initiatives' ? (
+          <InitiativesPage
+            users={assignees}
+            onOpenInitiative={(initiative) => navigateToPage('initiative', initiative.id, initiative.title)}
+          />
+        ) : currentPage === 'initiative' ? (
+          <InitiativeDetailPage
+            key={initiativeIdFromPath(window.location.pathname) ?? ''}
+            initiativeId={initiativeIdFromPath(window.location.pathname) ?? ''}
+            users={assignees}
+            onBack={() => navigateToPage('initiatives')}
+            onTitleChanged={handleInitiativeTitleChanged}
+          />
         ) : (
           <>
         {(loadError || moveError) && <p role="alert" className="mb-3 rounded bg-red-100 p-3 text-sm text-red-700">{loadError || moveError}</p>}
