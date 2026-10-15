@@ -74,7 +74,8 @@ func TestSetupEndpoint(t *testing.T) {
 		}, false)
 		response := send(handler, http.MethodPost, "/api/setup", validBody, nil)
 		if response.Code != http.StatusCreated || !tx.committed ||
-			txDB.createUserArgs[0] != "adminuser" || txDB.createUserArgs[4] != "admin" {
+			txDB.createUserArgs[0] != "adminuser" || txDB.createUserArgs[4] != "" ||
+			txDB.createUserArgs[5] != "admin" {
 			t.Fatalf("status = %d; committed = %t; args = %#v", response.Code, tx.committed, txDB.createUserArgs)
 		}
 		if len(txDB.boardArgs) != 2 || txDB.boardArgs[0] != "Admin User" || txDB.boardArgs[1] != "adminuser" {

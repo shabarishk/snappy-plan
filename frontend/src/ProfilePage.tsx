@@ -18,6 +18,7 @@ export function ProfilePage({
   onSaved: (profile: UserProfile) => void;
 }) {
   const [fullName, setFullName] = useState(profile.full_name);
+  const [preferredName, setPreferredName] = useState(profile.preferred_name ?? '');
   const [email, setEmail] = useState(profile.email);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -48,8 +49,9 @@ export function ProfilePage({
     setError('');
     setIsSaving(true);
     try {
-      const savedProfile = await updateProfile({ full_name: fullName, email });
+      const savedProfile = await updateProfile({ full_name: fullName, preferred_name: preferredName, email });
       setFullName(savedProfile.full_name);
+      setPreferredName(savedProfile.preferred_name ?? '');
       setEmail(savedProfile.email);
       setIsEditing(false);
       onSaved(savedProfile);
@@ -160,6 +162,18 @@ export function ProfilePage({
             />
           </div>
           <div>
+            <label htmlFor="profile-preferred-name" className="mb-1 block text-sm font-medium text-gray-700">Preferred name</label>
+            <input
+              id="profile-preferred-name"
+              type="text"
+              maxLength={100}
+              value={preferredName}
+              onChange={(event) => setPreferredName(event.target.value)}
+              disabled={!isEditing || isSaving}
+              className="w-full rounded-lg border border-gray-300 p-2 disabled:border-transparent disabled:bg-gray-50 disabled:text-gray-700"
+            />
+          </div>
+          <div>
             <label htmlFor="profile-email" className="mb-1 block text-sm font-medium text-gray-700">Email address</label>
             <input
               id="profile-email"
@@ -178,6 +192,7 @@ export function ProfilePage({
               <>
                 <button type="button" disabled={isSaving} onClick={() => {
                   setFullName(profile.full_name);
+                  setPreferredName(profile.preferred_name ?? '');
                   setEmail(profile.email);
                   setError('');
                   setIsEditing(false);
@@ -196,7 +211,7 @@ export function ProfilePage({
             {profile.profile_picture
               ? <img src={profile.profile_picture} alt="Current profile" className="h-40 w-40 rounded-full object-cover" />
               : <span aria-hidden="true" className="flex h-40 w-40 items-center justify-center rounded-full bg-blue-100 text-5xl font-bold text-blue-700">
-                {profile.full_name.trim().charAt(0).toUpperCase() || profile.username.charAt(0).toUpperCase()}
+                {(profile.preferred_name?.trim() || profile.full_name).charAt(0).toUpperCase() || profile.username.charAt(0).toUpperCase()}
               </span>}
           </div>
           <input

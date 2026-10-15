@@ -34,6 +34,7 @@ describe('Admin', () => {
             json: async () => ({
               username: 'newuser',
               full_name: 'New User',
+              preferred_name: 'Sam',
               email: 'new@example.com',
               role: 'user',
             }),
@@ -94,6 +95,7 @@ describe('Admin', () => {
   
       fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'newuser' } });
       fireEvent.change(screen.getByLabelText('Full name'), { target: { value: 'New User' } });
+      fireEvent.change(screen.getByLabelText('Preferred name'), { target: { value: 'Sam' } });
       fireEvent.change(screen.getByLabelText('Email address'), { target: { value: 'new@example.com' } });
       fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });
       fireEvent.change(screen.getByLabelText('Confirm password'), { target: { value: 'different123' } });
@@ -108,7 +110,7 @@ describe('Admin', () => {
       expect(fetchMock).toHaveBeenCalledWith('/api/admin/users', expect.objectContaining({
         method: 'POST',
         credentials: 'same-origin',
-        body: JSON.stringify({ username: 'newuser', full_name: 'New User', email: 'new@example.com', password: 'password123' }),
+        body: JSON.stringify({ username: 'newuser', full_name: 'New User', preferred_name: 'Sam', email: 'new@example.com', password: 'password123' }),
       }));
   
       const memberRow = screen.getByText('member').closest('tr');

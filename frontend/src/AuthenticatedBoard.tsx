@@ -341,7 +341,8 @@ export function AuthenticatedBoard({
     ? COLUMNS.filter((column) => column.id === 'backlog')
     : BOARD_COLUMNS;
 
-  const profileInitial = profile?.full_name.trim().charAt(0).toUpperCase()
+  const profileDisplayName = profile?.preferred_name?.trim() || profile?.full_name || '';
+  const profileInitial = profileDisplayName.charAt(0).toUpperCase()
     || profile?.username.charAt(0).toUpperCase()
     || '?';
 
@@ -434,7 +435,7 @@ export function AuthenticatedBoard({
             aria-label={`User menu for ${profile?.username ?? 'user'}`}
             aria-haspopup="menu"
             aria-expanded={isProfileMenuOpen}
-            title={profile?.full_name ?? 'User profile'}
+            title={profileDisplayName || 'User profile'}
             onClick={() => setIsProfileMenuOpen((isOpen) => !isOpen)}
             className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full bg-blue-100 font-bold text-blue-700 hover:bg-blue-200"
           >

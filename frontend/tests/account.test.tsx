@@ -76,7 +76,7 @@ describe('Account', () => {
           return { ok: true, json: async () => ({ message: 'Password updated successfully' }) };
         }
         if (url === '/api/profile' && options?.method === 'PUT') {
-          const body = JSON.parse(options.body as string) as { full_name: string; email: string };
+          const body = JSON.parse(options.body as string) as { full_name: string; preferred_name: string; email: string };
           return { ok: true, json: async () => ({ username: 'boardowner', ...body }) };
         }
         if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
@@ -137,9 +137,11 @@ describe('Account', () => {
       expect(screen.getByRole('region', { name: 'Profile details' }).textContent).toContain('boardowner');
       expect(screen.queryByRole('dialog')).toBeNull();
       expect((screen.getByLabelText('Full name') as HTMLInputElement).disabled).toBe(true);
+      expect((screen.getByLabelText('Preferred name') as HTMLInputElement).value).toBe('');
       expect((screen.getByLabelText('Email address') as HTMLInputElement).value).toBe('owner@example.com');
       fireEvent.click(screen.getByRole('button', { name: 'Edit profile' }));
       fireEvent.change(screen.getByLabelText('Full name'), { target: { value: 'Updated Owner' } });
+      fireEvent.change(screen.getByLabelText('Preferred name'), { target: { value: 'Sam' } });
       fireEvent.change(screen.getByLabelText('Email address'), { target: { value: 'updated@example.com' } });
       fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
   
@@ -149,9 +151,9 @@ describe('Account', () => {
       expect(fetchMock).toHaveBeenCalledWith('/api/profile', expect.objectContaining({
         method: 'PUT',
         credentials: 'same-origin',
-        body: JSON.stringify({ full_name: 'Updated Owner', email: 'updated@example.com' }),
+        body: JSON.stringify({ full_name: 'Updated Owner', preferred_name: 'Sam', email: 'updated@example.com' }),
       }));
-      expect(screen.getByRole('button', { name: 'User menu for boardowner' }).textContent).toBe('U');
+      expect(screen.getByRole('button', { name: 'User menu for boardowner' }).textContent).toBe('S');
       fireEvent.click(screen.getByRole('button', { name: 'Home' }));
       expect(screen.getAllByRole('heading', { name: 'To Do' })).toHaveLength(2);
       expect(window.location.pathname).toBe('/');

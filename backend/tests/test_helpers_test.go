@@ -175,13 +175,13 @@ func (db *fakeDB) Query(_ context.Context, query string, _ ...any) (pgx.Rows, er
 			rows[i] = []any{userID}
 		}
 		return &fakeRows{values: rows}, nil
-	case strings.Contains(query, "SELECT id, full_name, email, role"):
+	case strings.Contains(query, "SELECT id, full_name, preferred_name, email, role"):
 		rows := make([][]any, len(db.adminUsers))
 		for i, user := range db.adminUsers {
-			rows[i] = []any{user.ID, user.FullName, user.Email, user.Role}
+			rows[i] = []any{user.ID, user.FullName, user.PreferredName, user.Email, user.Role}
 		}
 		return &fakeRows{values: rows}, nil
-	case strings.Contains(query, "SELECT id, full_name"):
+	case strings.Contains(query, "COALESCE(NULLIF(preferred_name"):
 		if db.assigneesErr != nil {
 			return nil, db.assigneesErr
 		}
@@ -252,6 +252,7 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 		db.user.ID = args[0].(string)
 		db.user.Email = args[1].(string)
 		db.user.FullName = args[2].(string)
+		db.user.PreferredName = args[3].(string)
 		return fakeRow{values: userValues(db.user)}
 	case strings.Contains(query, "SELECT COUNT(*) FROM users"):
 		return fakeRow{values: []any{db.count}, err: db.countErr}
@@ -328,8 +329,8 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 			return fakeRow{err: db.createUserError}
 		}
 		return fakeRow{values: []any{
-			args[0], args[1], args[2], args[3], args[4],
-			db.user.CreatedAt, db.user.UpdatedAt, db.user.ProfilePicture,
+			args[0], args[1], args[2], args[3], args[5],
+			db.user.CreatedAt, db.user.UpdatedAt, db.user.ProfilePicture, args[4],
 		}}
 	default:
 		return fakeRow{err: errors.New("unexpected query: " + query)}
@@ -339,7 +340,7 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 func userValues(user dbgen.User) []any {
 	return []any{
 		user.ID, user.Email, user.PasswordHash, user.FullName,
-		user.Role, user.CreatedAt, user.UpdatedAt, user.ProfilePicture,
+		user.Role, user.CreatedAt, user.UpdatedAt, user.ProfilePicture, user.PreferredName,
 	}
 }
 
@@ -489,6 +490,7 @@ func send(handler http.Handler, method, target, body string, cookie *http.Cookie
 }
 
 type adminUserResponseTest struct {
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	Username      string `json:"username"`
+	PreferredName string `json:"preferred_name"`
+	Role          string `json:"role"`
 }

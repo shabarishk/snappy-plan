@@ -50,6 +50,7 @@ export interface TaskAssignee {
 export interface UserProfile {
   username: string;
   full_name: string;
+  preferred_name: string;
   email: string;
   role: 'admin' | 'user';
   profile_picture?: string | null;
@@ -228,6 +229,7 @@ export const getAdminBoards = async (): Promise<AdminBoard[]> => {
 export const createUser = async (user: {
   username: string;
   full_name: string;
+  preferred_name: string;
   email: string;
   password: string;
 }): Promise<AdminUser> => {
@@ -252,7 +254,7 @@ export const promoteUserToAdmin = async (username: string): Promise<AdminUser> =
   return res.json();
 };
 
-export const updateProfile = async (profile: Pick<UserProfile, 'full_name' | 'email'>): Promise<UserProfile> => {
+export const updateProfile = async (profile: Pick<UserProfile, 'full_name' | 'preferred_name' | 'email'>): Promise<UserProfile> => {
   const res = await fetch('/api/profile', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

@@ -18,10 +18,11 @@ import (
 )
 
 type adminUserResponse struct {
-	Username string `json:"username"`
-	FullName string `json:"full_name"`
-	Email    string `json:"email"`
-	Role     string `json:"role"`
+	Username      string `json:"username"`
+	FullName      string `json:"full_name"`
+	PreferredName string `json:"preferred_name"`
+	Email         string `json:"email"`
+	Role          string `json:"role"`
 }
 
 func (api *ApiConfig) requireAdmin(w http.ResponseWriter, r *http.Request) (dbgen.Session, bool) {
@@ -63,10 +64,11 @@ func (api *ApiConfig) handleGetUsersForAdmin(w http.ResponseWriter, r *http.Requ
 	responseUsers := make([]adminUserResponse, 0, len(users))
 	for _, user := range users {
 		responseUsers = append(responseUsers, adminUserResponse{
-			Username: user.ID,
-			FullName: user.FullName,
-			Email:    user.Email,
-			Role:     user.Role,
+			Username:      user.ID,
+			FullName:      user.FullName,
+			PreferredName: user.PreferredName,
+			Email:         user.Email,
+			Role:          user.Role,
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -111,10 +113,11 @@ func (api *ApiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var params struct {
-		Username string `json:"username"`
-		FullName string `json:"full_name"`
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Username      string `json:"username"`
+		FullName      string `json:"full_name"`
+		PreferredName string `json:"preferred_name"`
+		Email         string `json:"email"`
+		Password      string `json:"password"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&params); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
@@ -122,13 +125,15 @@ func (api *ApiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	params.Username = strings.ToLower(strings.TrimSpace(params.Username))
 	params.FullName = strings.TrimSpace(params.FullName)
+	params.PreferredName = strings.TrimSpace(params.PreferredName)
 	params.Email = strings.TrimSpace(params.Email)
 	address, err := mail.ParseAddress(params.Email)
 	if !isAlphanumeric(params.Username) || len(params.Username) > 32 ||
 		params.FullName == "" || utf8.RuneCountInString(params.FullName) > 100 ||
+		utf8.RuneCountInString(params.PreferredName) > 100 ||
 		utf8.RuneCountInString(params.Email) > 255 || err != nil || address.Address != params.Email ||
 		len(params.Password) < 8 || len(params.Password) > 72 {
-		http.Error(w, "Provide an alphanumeric username of at most 32 characters, a full name of at most 100 characters, a valid email, and a password of 8 to 72 bytes", http.StatusBadRequest)
+		http.Error(w, "Provide an alphanumeric username of at most 32 characters, full and preferred names of at most 100 characters, a valid email, and a password of 8 to 72 bytes", http.StatusBadRequest)
 		return
 	}
 
@@ -149,11 +154,12 @@ func (api *ApiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(context.Background())
 	txQueries := dbgen.New(tx)
 	user, err := txQueries.CreateUser(r.Context(), dbgen.CreateUserParams{
-		ID:           params.Username,
-		Email:        params.Email,
-		PasswordHash: string(passwordHash),
-		FullName:     params.FullName,
-		Role:         "user",
+		ID:            params.Username,
+		Email:         params.Email,
+		PasswordHash:  string(passwordHash),
+		FullName:      params.FullName,
+		PreferredName: params.PreferredName,
+		Role:          "user",
 	})
 	var databaseError *pgconn.PgError
 	if errors.As(err, &databaseError) && databaseError.Code == "23505" {
@@ -179,10 +185,11 @@ func (api *ApiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(adminUserResponse{
-		Username: user.ID,
-		FullName: user.FullName,
-		Email:    user.Email,
-		Role:     user.Role,
+		Username:      user.ID,
+		FullName:      user.FullName,
+		PreferredName: user.PreferredName,
+		Email:         user.Email,
+		Role:          user.Role,
 	}); err != nil {
 		http.Error(w, "Failed to encode created user", http.StatusInternalServerError)
 	}
@@ -227,10 +234,11 @@ func (api *ApiConfig) handlePromoteUser(w http.ResponseWriter, r *http.Request) 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(adminUserResponse{
-		Username: user.ID,
-		FullName: user.FullName,
-		Email:    user.Email,
-		Role:     user.Role,
+		Username:      user.ID,
+		FullName:      user.FullName,
+		PreferredName: user.PreferredName,
+		Email:         user.Email,
+		Role:          user.Role,
 	}); err != nil {
 		http.Error(w, "Failed to encode updated user", http.StatusInternalServerError)
 	}

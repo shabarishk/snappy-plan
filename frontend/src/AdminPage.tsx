@@ -10,6 +10,7 @@ export function AdminPage({ currentUsername }: { currentUsername: string }) {
   const [boards, setBoards] = useState<AdminBoard[]>([]);
   const [username, setUsername] = useState('');
   const [fullName, setFullName] = useState('');
+  const [preferredName, setPreferredName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -56,6 +57,7 @@ export function AdminPage({ currentUsername }: { currentUsername: string }) {
     setIsCreateUserOpen(false);
     setUsername('');
     setFullName('');
+    setPreferredName('');
     setEmail('');
     setPassword('');
     setConfirmPassword('');
@@ -73,12 +75,13 @@ export function AdminPage({ currentUsername }: { currentUsername: string }) {
     setSuccess('');
     setIsSaving(true);
     try {
-      const newUser = await createUser({ username, full_name: fullName, email, password });
+      const newUser = await createUser({ username, full_name: fullName, preferred_name: preferredName, email, password });
       setUsers((currentUsers) => [...currentUsers, newUser].sort((left, right) =>
         left.full_name.localeCompare(right.full_name) || left.username.localeCompare(right.username)
       ));
       setUsername('');
       setFullName('');
+      setPreferredName('');
       setEmail('');
       setPassword('');
       setConfirmPassword('');
@@ -200,6 +203,10 @@ export function AdminPage({ currentUsername }: { currentUsername: string }) {
                   <input id="admin-full-name" required maxLength={100} autoComplete="name" value={fullName} onChange={(event) => setFullName(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
                 </div>
                 <div>
+                  <label htmlFor="admin-preferred-name" className="mb-1 block text-sm font-medium text-gray-700">Preferred name</label>
+                  <input id="admin-preferred-name" maxLength={100} autoComplete="nickname" value={preferredName} onChange={(event) => setPreferredName(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
+                </div>
+                <div>
                   <label htmlFor="admin-email" className="mb-1 block text-sm font-medium text-gray-700">Email address</label>
                   <input id="admin-email" type="email" required maxLength={255} autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} disabled={isSaving} className="w-full rounded-lg border border-gray-300 p-2" />
                 </div>
@@ -254,7 +261,10 @@ export function AdminPage({ currentUsername }: { currentUsername: string }) {
       {managingBoard && (
         <ManageBoardOverlay
           board={managingBoard}
-          users={users.map((user) => ({ id: user.username, full_name: user.full_name }))}
+          users={users.map((user) => ({
+            id: user.username,
+            full_name: user.preferred_name?.trim() || user.full_name,
+          }))}
           onClose={() => setManagingBoard(null)}
           onDeleteBoard={async (board) => {
             await persistDeleteBoard(board.id);

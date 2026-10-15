@@ -64,6 +64,11 @@ func main() { // Read from Docker env, fallback to localhost for manual testing
 	}); err != nil {
 		log.Fatalf("Unable to update profile picture schema: %v\n", err)
 	}
+	if err := backend.EnsurePreferredNameSchema(context.Background(), func(ctx context.Context) (backend.SetupTransaction, error) {
+		return pool.Begin(ctx)
+	}); err != nil {
+		log.Fatalf("Unable to update preferred name schema: %v\n", err)
+	}
 
 	frontendFiles, err := backend.FrontendFiles()
 	if err != nil {

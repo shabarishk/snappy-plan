@@ -103,6 +103,7 @@ func frontendHandler(files fs.FS) http.Handler {
 type profileResponse struct {
 	Username       string  `json:"username"`
 	FullName       string  `json:"full_name"`
+	PreferredName  string  `json:"preferred_name"`
 	Email          string  `json:"email"`
 	Role           string  `json:"role"`
 	ProfilePicture *string `json:"profile_picture,omitempty"`

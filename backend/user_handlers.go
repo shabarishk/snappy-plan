@@ -73,6 +73,7 @@ func (api *ApiConfig) handleGetProfile(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(profileResponse{
 		Username:       user.ID,
 		FullName:       user.FullName,
+		PreferredName:  user.PreferredName,
 		Email:          user.Email,
 		Role:           user.Role,
 		ProfilePicture: profilePicture,
@@ -93,26 +94,30 @@ func (api *ApiConfig) handleUpdateProfile(w http.ResponseWriter, r *http.Request
 	}
 
 	var params struct {
-		FullName string `json:"full_name"`
-		Email    string `json:"email"`
+		FullName      string `json:"full_name"`
+		PreferredName string `json:"preferred_name"`
+		Email         string `json:"email"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&params); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
 	params.FullName = strings.TrimSpace(params.FullName)
+	params.PreferredName = strings.TrimSpace(params.PreferredName)
 	params.Email = strings.TrimSpace(params.Email)
 	address, err := mail.ParseAddress(params.Email)
 	if params.FullName == "" || utf8.RuneCountInString(params.FullName) > 100 ||
+		utf8.RuneCountInString(params.PreferredName) > 100 ||
 		utf8.RuneCountInString(params.Email) > 255 || err != nil || address.Address != params.Email {
-		http.Error(w, "Provide a full name of at most 100 characters and a valid email", http.StatusBadRequest)
+		http.Error(w, "Provide a full name and preferred name of at most 100 characters and a valid email", http.StatusBadRequest)
 		return
 	}
 
 	user, err := api.DB.UpdateUserProfile(r.Context(), dbgen.UpdateUserProfileParams{
-		ID:       session.UserID,
-		Email:    params.Email,
-		FullName: params.FullName,
+		ID:            session.UserID,
+		Email:         params.Email,
+		FullName:      params.FullName,
+		PreferredName: params.PreferredName,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		http.Error(w, "User not found", http.StatusNotFound)
@@ -136,6 +141,7 @@ func (api *ApiConfig) handleUpdateProfile(w http.ResponseWriter, r *http.Request
 	if err := json.NewEncoder(w).Encode(profileResponse{
 		Username:       user.ID,
 		FullName:       user.FullName,
+		PreferredName:  user.PreferredName,
 		Email:          user.Email,
 		Role:           user.Role,
 		ProfilePicture: profilePicture,
@@ -234,6 +240,7 @@ func respondWithProfile(w http.ResponseWriter, user dbgen.User) {
 	if err := json.NewEncoder(w).Encode(profileResponse{
 		Username:       user.ID,
 		FullName:       user.FullName,
+		PreferredName:  user.PreferredName,
 		Email:          user.Email,
 		Role:           user.Role,
 		ProfilePicture: profilePicture,
