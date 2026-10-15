@@ -12,8 +12,14 @@ import { BoardsPage, CreateBoardOverlay } from './BoardComponents';
 import { AdminPage } from './AdminPage';
 import { SettingsPage } from './SettingsPage';
 import { ProfilePage } from './ProfilePage';
-import { InitiativeDetailPage, InitiativesPage } from './InitiativeComponents';
+import { CreateInitiativeOverlay, InitiativeDetailPage, InitiativesPage } from './InitiativeComponents';
+import { TaskSearch } from './TaskSearch';
 import { Column } from './TaskBoard';
+
+type SelectedTask = {
+  task: Task;
+  boardId: string;
+};
 
 export function AuthenticatedBoard({
   tasks,
@@ -26,7 +32,7 @@ export function AuthenticatedBoard({
 }) {
   const [currentPage, setCurrentPage] = useState<AppPage>(() => pageFromPath(window.location.pathname));
   const [activeTask, setActiveTask] = useState<Task | null>(null);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTask, setSelectedTask] = useState<SelectedTask | null>(null);
   const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
   const [boards, setBoards] = useState<Board[]>([]);
   const [selectedBoardId, setSelectedBoardId] = useState('');
@@ -34,11 +40,15 @@ export function AuthenticatedBoard({
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const boardMenuRef = useRef<HTMLDivElement>(null);
+  const createMenuRef = useRef<HTMLDivElement>(null);
   const [logoutError, setLogoutError] = useState('');
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
   const [isCreateBoardOpen, setIsCreateBoardOpen] = useState(false);
+  const [isCreateInitiativeOpen, setIsCreateInitiativeOpen] = useState(false);
+  const [initiativeRefreshToken, setInitiativeRefreshToken] = useState(0);
   const [isBoardMenuOpen, setIsBoardMenuOpen] = useState(false);
+  const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [moveError, setMoveError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -48,6 +58,10 @@ export function AuthenticatedBoard({
     if (window.location.pathname !== path) {
       window.history.pushState({}, '', path);
     }
+    setIsCreateMenuOpen(false);
+    setIsCreateTaskOpen(false);
+    setIsCreateBoardOpen(false);
+    setIsCreateInitiativeOpen(false);
     setCurrentPage(page);
   };
 
@@ -63,7 +77,10 @@ export function AuthenticatedBoard({
       setCurrentPage(pageFromPath(window.location.pathname));
       setIsProfileMenuOpen(false);
       setIsCreateTaskOpen(false);
-      setSelectedTaskId(null);
+      setIsCreateBoardOpen(false);
+      setIsCreateInitiativeOpen(false);
+      setIsCreateMenuOpen(false);
+      setSelectedTask(null);
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
@@ -92,6 +109,18 @@ export function AuthenticatedBoard({
     document.addEventListener('pointerdown', handlePointerDown);
     return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, [isBoardMenuOpen]);
+
+  useEffect(() => {
+    if (!isCreateMenuOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && !createMenuRef.current?.contains(event.target)) {
+        setIsCreateMenuOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [isCreateMenuOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -185,7 +214,6 @@ export function AuthenticatedBoard({
     void persistTaskMove(task, 'todo');
   };
 
-  const selectedTask = tasks.find((task) => task.id === selectedTaskId);
   const selectedBoard = boards.find((board) => board.id === selectedBoardId);
   const profileInitial = profile?.full_name.trim().charAt(0).toUpperCase()
     || profile?.username.charAt(0).toUpperCase()
@@ -227,7 +255,7 @@ export function AuthenticatedBoard({
           onClick={() => {
             setIsProfileMenuOpen(false);
             setIsCreateTaskOpen(false);
-            setSelectedTaskId(null);
+            setSelectedTask(null);
             navigateToPage('initiatives');
           }}
           className={`mt-2 flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'initiatives' || currentPage === 'initiative' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
@@ -247,7 +275,7 @@ export function AuthenticatedBoard({
           onClick={() => {
             setIsProfileMenuOpen(false);
             setIsCreateTaskOpen(false);
-            setSelectedTaskId(null);
+            setSelectedTask(null);
             navigateToPage('boards');
           }}
           className={`mt-2 flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'boards' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
@@ -267,7 +295,7 @@ export function AuthenticatedBoard({
               onClick={() => {
                 setIsProfileMenuOpen(false);
                 setIsCreateTaskOpen(false);
-                setSelectedTaskId(null);
+                setSelectedTask(null);
                 navigateToPage('admin');
               }}
               className={`flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'admin' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
@@ -295,13 +323,13 @@ export function AuthenticatedBoard({
               <button type="button" role="menuitem" onClick={() => {
                 setIsProfileMenuOpen(false);
                 setIsCreateTaskOpen(false);
-                setSelectedTaskId(null);
+                setSelectedTask(null);
                 navigateToPage('profile');
               }} className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">Profile</button>
               <button type="button" role="menuitem" onClick={() => {
                 setIsProfileMenuOpen(false);
                 setIsCreateTaskOpen(false);
-                setSelectedTaskId(null);
+                setSelectedTask(null);
                 navigateToPage('settings');
               }} className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">Settings</button>
               <button type="button" role="menuitem" disabled={isLoggingOut} onClick={() => void handleLogout()} className="w-full rounded-md px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50 disabled:opacity-50">
@@ -356,12 +384,48 @@ export function AuthenticatedBoard({
               {currentPage === 'admin' ? 'Admin' : currentPage === 'settings' ? 'Settings' : currentPage === 'boards' ? 'Boards' : currentPage === 'initiatives' || currentPage === 'initiative' ? 'Initiatives' : 'Profile'}
             </h1>
           )}
-          {(currentPage === 'board' || currentPage === 'backlog') && (
-            <button type="button" disabled={isLoading || Boolean(loadError)} onClick={() => setIsCreateTaskOpen(true)} className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
-              Create task
-            </button>
-          )}
         </div>
+        {currentPage !== 'profile' && currentPage !== 'settings' && (
+          <div className="mx-4 flex min-w-0 max-w-2xl flex-1 items-center gap-2">
+            <TaskSearch
+              boards={boards}
+              onSelectTask={(task, boardId) => setSelectedTask({ task, boardId })}
+            />
+            <div ref={createMenuRef} className="relative shrink-0">
+              <button
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={isCreateMenuOpen}
+                onClick={() => setIsCreateMenuOpen((open) => !open)}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                + Create
+              </button>
+              {isCreateMenuOpen && (
+                <div role="menu" aria-label="Create" className="absolute right-0 top-full z-30 mt-2 w-48 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
+                  <button type="button" role="menuitem" onClick={() => {
+                    setIsCreateMenuOpen(false);
+                    setIsCreateTaskOpen(true);
+                  }} className="block w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
+                    Create task
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => {
+                    setIsCreateMenuOpen(false);
+                    setIsCreateBoardOpen(true);
+                  }} className="block w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
+                    Create board
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => {
+                    setIsCreateMenuOpen(false);
+                    setIsCreateInitiativeOpen(true);
+                  }} className="block w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
+                    Create initiative
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         {(currentPage === 'board' || currentPage === 'backlog') && <nav aria-label="Main navigation" className="flex items-center gap-2">
           <button
             type="button"
@@ -381,7 +445,7 @@ export function AuthenticatedBoard({
           </button>
         </nav>}
       </header>
-      {(currentPage === 'board' || currentPage === 'backlog') && isCreateTaskOpen && (
+      {currentPage !== 'profile' && currentPage !== 'settings' && isCreateTaskOpen && (
         <CreateTaskOverlay
           boards={boards}
           selectedBoardId={selectedBoardId}
@@ -397,7 +461,7 @@ export function AuthenticatedBoard({
           }}
         />
       )}
-      {(currentPage === 'board' || currentPage === 'backlog' || currentPage === 'boards') && isCreateBoardOpen && (
+      {currentPage !== 'profile' && currentPage !== 'settings' && isCreateBoardOpen && (
         <CreateBoardOverlay
           users={assignees}
           onClose={() => setIsCreateBoardOpen(false)}
@@ -411,19 +475,36 @@ export function AuthenticatedBoard({
           }}
         />
       )}
-      {(currentPage === 'board' || currentPage === 'backlog') && selectedTask && (
+      {currentPage !== 'profile' && currentPage !== 'settings' && isCreateInitiativeOpen && (
+        <CreateInitiativeOverlay
+          users={assignees}
+          onClose={() => setIsCreateInitiativeOpen(false)}
+          onCreated={() => {
+            setInitiativeRefreshToken((version) => version + 1);
+            setIsCreateInitiativeOpen(false);
+          }}
+        />
+      )}
+      {selectedTask && currentPage !== 'profile' && currentPage !== 'settings' && (
         <TaskDetailsOverlay
-          key={selectedTask.id}
-          task={selectedTask}
+          key={selectedTask.task.id}
+          task={selectedTask.task}
           boards={boards}
           assignees={assignees}
-          selectedBoardId={selectedBoardId}
-          onClose={() => setSelectedTaskId(null)}
+          selectedBoardId={selectedTask.boardId}
+          onClose={() => setSelectedTask(null)}
           onSaved={(updatedTask, assignedBoardId) => {
-            setTasks((previous) => assignedBoardId === selectedBoardId
-              ? previous.map((task) => task.id === updatedTask.id ? updatedTask : task)
-              : previous.filter((task) => task.id !== updatedTask.id));
-            setSelectedTaskId(null);
+            setTasks((previous) => {
+              const wasOnSelectedBoard = selectedTask.boardId === selectedBoardId;
+              const isOnSelectedBoard = assignedBoardId === selectedBoardId;
+              if (wasOnSelectedBoard && isOnSelectedBoard) {
+                return previous.map((task) => task.id === updatedTask.id ? updatedTask : task);
+              }
+              if (wasOnSelectedBoard) return previous.filter((task) => task.id !== updatedTask.id);
+              if (isOnSelectedBoard) return [...previous, updatedTask];
+              return previous;
+            });
+            setSelectedTask(null);
           }}
         />
       )}
@@ -477,7 +558,8 @@ export function AuthenticatedBoard({
             : <p role={loadError ? 'alert' : undefined} className="p-4 text-sm text-gray-600">{loadError || 'Loading boards…'}</p>
         ) : currentPage === 'initiatives' ? (
           <InitiativesPage
-            users={assignees}
+            refreshToken={initiativeRefreshToken}
+            onCreateInitiative={() => setIsCreateInitiativeOpen(true)}
             onOpenInitiative={(initiative) => navigateToPage('initiative', initiative.id, initiative.title)}
           />
         ) : currentPage === 'initiative' ? (
@@ -514,7 +596,7 @@ export function AuthenticatedBoard({
                 column={col}
                 tasks={tasks.filter((task) => task.columnId === col.id)}
                 onMoveToTodo={currentPage === 'backlog' ? moveBacklogTaskToTodo : undefined}
-                onSelectTask={(task) => setSelectedTaskId(task.id)}
+                onSelectTask={(task) => setSelectedTask({ task, boardId: selectedBoardId })}
               />
             ))}
           </div>

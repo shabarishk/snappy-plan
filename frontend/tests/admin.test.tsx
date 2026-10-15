@@ -68,7 +68,8 @@ describe('Admin', () => {
       const userTile = await screen.findByRole('button', { name: 'User menu for adminuser' });
       expect(adminTile.compareDocumentPosition(userTile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       fireEvent.click(adminTile);
-      expect(await screen.findByRole('heading', { name: 'Create user' })).toBeTruthy();
+      expect(await screen.findByRole('button', { name: '+ New user' })).toBeTruthy();
+      expect(screen.queryByRole('dialog', { name: 'Create user' })).toBeNull();
       expect(screen.getByRole('navigation', { name: 'Admin sections' })).toBeTruthy();
       expect(screen.getByRole('heading', { name: 'User management' })).toBeTruthy();
       expect(screen.queryByRole('heading', { name: 'All boards' })).toBeNull();
@@ -88,14 +89,22 @@ describe('Admin', () => {
       });
       expect(screen.queryByRole('heading', { name: 'Create user' })).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: 'User management' }));
-      expect(await screen.findByRole('heading', { name: 'Create user' })).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: '+ New user' }));
+      expect(await screen.findByRole('dialog', { name: 'Create user' })).toBeTruthy();
   
       fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'newuser' } });
       fireEvent.change(screen.getByLabelText('Full name'), { target: { value: 'New User' } });
       fireEvent.change(screen.getByLabelText('Email address'), { target: { value: 'new@example.com' } });
       fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });
+      fireEvent.change(screen.getByLabelText('Confirm password'), { target: { value: 'different123' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Create user' }));
+      expect((await screen.findByRole('alert')).textContent).toBe('Passwords do not match.');
+      expect(fetchMock).not.toHaveBeenCalledWith('/api/admin/users', expect.objectContaining({ method: 'POST' }));
+
+      fireEvent.change(screen.getByLabelText('Confirm password'), { target: { value: 'password123' } });
       fireEvent.click(screen.getByRole('button', { name: 'Create user' }));
       expect((await screen.findByRole('status')).textContent).toContain('User newuser created.');
+      expect(screen.queryByRole('dialog', { name: 'Create user' })).toBeNull();
       expect(fetchMock).toHaveBeenCalledWith('/api/admin/users', expect.objectContaining({
         method: 'POST',
         credentials: 'same-origin',

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import App, { AuthenticatedBoard } from '../src/App';
 import type { Task } from '../src/App';
@@ -269,8 +269,8 @@ describe('Tasks', () => {
       render(<App />);
   
       await screen.findByRole('button', { name: 'Current board: Board Owner' });
-      await waitFor(() => expect((screen.getByRole('button', { name: 'Create task' }) as HTMLButtonElement).disabled).toBe(false));
-      fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
+      fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Create task' }));
       const dialog = screen.getByRole('dialog', { name: 'Create task' });
       expect((screen.getByLabelText('Current state') as HTMLSelectElement).value).toBe('Backlog');
       expect((screen.getByLabelText('Priority') as HTMLSelectElement).value).toBe('Medium');
@@ -312,6 +312,7 @@ describe('Tasks', () => {
         }
         if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
         if (url === '/api/users') return { ok: true, json: async () => [] };
+        if (url === '/api/initiatives') return { ok: true, json: async () => [] };
         if (url === '/api/profile') return {
           ok: true,
           json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
@@ -322,15 +323,14 @@ describe('Tasks', () => {
       render(<App />);
   
       await screen.findByRole('button', { name: 'Current board: Board Owner' });
-      await waitFor(() => expect((screen.getByRole('button', { name: 'Create task' }) as HTMLButtonElement).disabled).toBe(false));
-      fireEvent.click(screen.getByRole('button', { name: 'Create task' }));
+      fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Create task' }));
       fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Review the garden plan' } });
       fireEvent.click(screen.getByRole('button', { name: 'Confirm Task' }));
   
       expect(await screen.findByText('Review the garden plan')).toBeTruthy();
       expect(screen.getByRole('heading', { name: 'Backlog' })).toBeTruthy();
       expect(screen.getByText('Priority: Medium')).toBeTruthy();
-      await waitFor(() => expect((screen.getByRole('button', { name: 'Create task' }) as HTMLButtonElement).disabled).toBe(false));
       expect(fetchMock).toHaveBeenCalledWith('/api/tasks', expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
@@ -344,4 +344,73 @@ describe('Tasks', () => {
         }),
       }));
     });
+
+  it('searches tasks across boards and opens their details from non-board pages', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
+      if (url === '/api/tasks?board_id=board-2') return {
+        ok: true,
+        json: async () => [taskResponse({
+          id: 'shared-task',
+          title: 'Prepare launch report',
+          description: 'Summarize project progress',
+          state: 'ToDo',
+        })],
+      };
+      if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
+      if (url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/initiatives') return { ok: true, json: async () => [] };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    await screen.findByRole('button', { name: 'Current board: Board Owner' });
+    const sidebar = screen.getByRole('complementary', { name: 'Sidebar' });
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'Initiatives' }));
+    const search = screen.getByRole('searchbox', { name: 'Search tasks' });
+    fireEvent.change(search, { target: { value: 'launch' } });
+
+    fireEvent.click(await screen.findByRole('option', { name: 'Prepare launch report — Project Board' }));
+    await screen.findByRole('dialog', { name: 'Task details' });
+    expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Prepare launch report');
+    expect((screen.getByLabelText('Board') as HTMLSelectElement).value).toBe('board-2');
+    fireEvent.click(screen.getByRole('button', { name: 'Close task details' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'User menu for boardowner' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Profile' }));
+    expect(screen.queryByRole('searchbox', { name: 'Search tasks' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'User menu for boardowner' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));
+    expect(screen.queryByRole('searchbox', { name: 'Search tasks' })).toBeNull();
+  });
+
+  it('opens each create overlay from the shared create menu', async () => {
+    vi.stubGlobal('fetch', mockBoardReads());
+    render(<App />);
+
+    await screen.findByRole('button', { name: 'Current board: Board Owner' });
+    fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
+    expect(screen.getByRole('menuitem', { name: 'Create task' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Create board' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Create initiative' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Create task' }));
+    expect(screen.getByRole('dialog', { name: 'Create task' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Close create task form' }));
+
+    fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Create board' }));
+    expect(screen.getByRole('dialog', { name: 'Create a new board' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Close create board form' }));
+
+    fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Create initiative' }));
+    expect(screen.getByRole('dialog', { name: 'Create initiative' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Close create initiative form' }));
+  });
 });
