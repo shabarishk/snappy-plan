@@ -109,6 +109,7 @@ describe('Tasks', () => {
               description: 'Updated details',
               state: 'InProgress',
               priority: 'High',
+              assigned_to_id: 'user-2',
               complete_by: '2026-10-20T16:30:00.000Z',
             }),
           };
@@ -126,7 +127,13 @@ describe('Tasks', () => {
             })],
           };
         }
-        if (url === '/api/users') return { ok: true, json: async () => [] };
+        if (url === '/api/users') return {
+          ok: true,
+          json: async () => [
+            { id: 'user-1', full_name: 'First user' },
+            { id: 'user-2', full_name: 'Second user' },
+          ],
+        };
         if (url === '/api/profile') return {
           ok: true,
           json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
@@ -140,6 +147,7 @@ describe('Tasks', () => {
       expect(screen.getByRole('dialog', { name: 'Task details' })).toBeTruthy();
       fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Updated task title' } });
       fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Updated details' } });
+      fireEvent.change(screen.getByLabelText('Assigned to'), { target: { value: 'user-2' } });
       fireEvent.change(screen.getByLabelText('Priority'), { target: { value: 'High' } });
       fireEvent.change(screen.getByLabelText('State'), { target: { value: 'InProgress' } });
       fireEvent.change(screen.getByLabelText('Complete by'), { target: { value: '2026-10-20T09:30' } });
@@ -155,6 +163,7 @@ describe('Tasks', () => {
           description: 'Updated details',
           priority: 'High',
           state: 'InProgress',
+          assigned_to_id: 'user-2',
           complete_by: new Date('2026-10-20T09:30').toISOString(),
         }),
       }));
@@ -321,6 +330,7 @@ describe('Tasks', () => {
       expect(await screen.findByText('Review the garden plan')).toBeTruthy();
       expect(screen.getByRole('heading', { name: 'Backlog' })).toBeTruthy();
       expect(screen.getByText('Priority: Medium')).toBeTruthy();
+      await waitFor(() => expect((screen.getByRole('button', { name: 'Create task' }) as HTMLButtonElement).disabled).toBe(false));
       expect(fetchMock).toHaveBeenCalledWith('/api/tasks', expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({

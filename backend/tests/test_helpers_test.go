@@ -224,6 +224,7 @@ func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row
 		db.task.Description = args[3].(pgtype.Text)
 		db.task.Priority = args[4].(string)
 		db.task.CompleteBy = args[5].(pgtype.Timestamptz)
+		db.task.AssignedToID = args[6].(pgtype.Text)
 		return fakeRow{values: taskValues(db.task)}
 	case strings.Contains(query, "SET role ="):
 		db.updateUserRoleArgs = args

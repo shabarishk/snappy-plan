@@ -381,9 +381,9 @@ export function AuthenticatedBoard({
           assignees={assignees}
           onClose={() => setIsCreateTaskOpen(false)}
           onCreated={(task, boardId) => {
+            if (boardId !== selectedBoardId) setIsLoading(true);
             setSelectedBoardId(boardId);
             window.localStorage.setItem('snappy-plan-selected-board', boardId);
-            setIsLoading(true);
             setTasks((previous) => [...previous, task]);
             navigateToPage(task.columnId === 'backlog' ? 'backlog' : 'board');
             setIsCreateTaskOpen(false);
@@ -409,6 +409,7 @@ export function AuthenticatedBoard({
           key={selectedTask.id}
           task={selectedTask}
           boards={boards}
+          assignees={assignees}
           selectedBoardId={selectedBoardId}
           onClose={() => setSelectedTaskId(null)}
           onSaved={(updatedTask, assignedBoardId) => {

@@ -362,6 +362,7 @@ SET column_id = sqlc.arg(column_id),
     description = sqlc.narg(description),
     priority = sqlc.arg(priority),
     complete_by = sqlc.narg(complete_by),
+    assigned_to_id = sqlc.narg(assigned_to_id),
     updated_at = NOW(),
     completed_at = CASE
         WHEN sqlc.arg(state)::VARCHAR = 'Complete' THEN COALESCE(task.completed_at, NOW())

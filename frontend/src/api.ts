@@ -74,6 +74,7 @@ export interface UpdateTaskRequest {
   description: string;
   priority: ApiTask['priority'];
   state: ApiTask['state'];
+  assigned_to_id: string;
   complete_by: string | null;
 }
 
