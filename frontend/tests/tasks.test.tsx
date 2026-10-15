@@ -62,8 +62,8 @@ describe('Tasks', () => {
       expect(setTasks).toHaveBeenCalled();
       rerender(<AuthenticatedBoard tasks={tasks} setTasks={setTasks} />);
       expect(screen.getByRole('region', { name: 'Backlog tasks' }).textContent).toContain('0 tasks');
-      expect(screen.getByRole('button', { name: 'Kanban board' })).toBeTruthy();
-      fireEvent.click(screen.getByRole('button', { name: 'Kanban board' }));
+      expect(screen.getByRole('button', { name: 'Active' })).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Active' }));
   
       fireEvent.click(screen.getByRole('button', { name: 'Mock drag start' }));
       expect(screen.getAllByText('Test task')).toHaveLength(2);

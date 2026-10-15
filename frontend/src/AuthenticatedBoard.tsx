@@ -521,24 +521,6 @@ export function AuthenticatedBoard({
             </div>
           </div>
         )}
-        {(currentPage === 'board' || currentPage === 'backlog') && <nav aria-label="Main navigation" className="flex items-center justify-self-center gap-2 sm:col-start-3 sm:row-start-1 sm:justify-self-end">
-          <button
-            type="button"
-            aria-current={currentPage === 'board' ? 'page' : undefined}
-            onClick={() => navigateToPage('board')}
-            className={`rounded-lg px-3 py-2 text-sm font-medium ${currentPage === 'board' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
-          >
-            Kanban board
-          </button>
-          <button
-            type="button"
-            aria-current={currentPage === 'backlog' ? 'page' : undefined}
-            onClick={() => navigateToPage('backlog')}
-            className={`rounded-lg px-3 py-2 text-sm font-medium ${currentPage === 'backlog' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
-          >
-            Backlog
-          </button>
-        </nav>}
       </header>
       {currentPage !== 'profile' && currentPage !== 'settings' && isCreateTaskOpen && (
         <CreateTaskOverlay
@@ -662,7 +644,41 @@ export function AuthenticatedBoard({
           />
         ) : (
           <>
-        {(loadError || moveError) && <p role="alert" className="mb-3 rounded bg-red-100 p-3 text-sm text-red-700">{loadError || moveError}</p>}
+          <div className="mb-4 border-b border-gray-200">
+            <nav aria-label="Main navigation" className="flex items-center gap-2">
+              <button
+                type="button"
+                aria-current={currentPage === 'board' ? 'page' : undefined}
+                onClick={() => navigateToPage('board')}
+                className={`relative inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${currentPage === 'board' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+                  <rect x="3" y="4" width="18" height="16" rx="2" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 4v16m6-16v16" />
+                </svg>
+                Active
+                {currentPage === 'board' && (
+                  <span aria-hidden="true" className="absolute -bottom-px left-0 right-0 h-0.5 rounded-full bg-blue-500 shadow-[0_0_8px_2px_rgba(59,130,246,0.7)]" />
+                )}
+              </button>
+              <button
+                type="button"
+                aria-current={currentPage === 'backlog' ? 'page' : undefined}
+                onClick={() => navigateToPage('backlog')}
+                className={`relative inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${currentPage === 'backlog' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 rotate-90">
+                  <rect x="3" y="4" width="18" height="16" rx="2" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 4v16m6-16v16" />
+                </svg>
+                Backlog
+                {currentPage === 'backlog' && (
+                  <span aria-hidden="true" className="absolute -bottom-px left-0 right-0 h-0.5 rounded-full bg-blue-500 shadow-[0_0_8px_2px_rgba(59,130,246,0.7)]" />
+                )}
+              </button>
+            </nav>
+          </div>
+          {(loadError || moveError) && <p role="alert" className="mb-3 rounded bg-red-100 p-3 text-sm text-red-700">{loadError || moveError}</p>}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
             <label className="flex items-center gap-2 text-sm font-medium text-gray-700">

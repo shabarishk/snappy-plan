@@ -32,12 +32,18 @@ describe('Application', () => {
       expect(screen.queryByText('Setup Unraid Docker')).toBeNull();
       expect(screen.queryByText('Configure iOS PWA settings')).toBeNull();
       expect(screen.queryByText('Build React UI')).toBeNull();
+      const activeTab = screen.getByRole('button', { name: 'Active' });
+      expect(activeTab.querySelector('span[aria-hidden="true"]')).toBeTruthy();
   
-      fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
+      const backlogTab = screen.getByRole('button', { name: 'Backlog' });
+      fireEvent.click(backlogTab);
+      expect(backlogTab.querySelector('span[aria-hidden="true"]')).toBeTruthy();
+      expect(activeTab.querySelector('span[aria-hidden="true"]')).toBeNull();
       expect(screen.getAllByRole('heading', { name: 'Backlog' })).toHaveLength(2);
       expect(screen.getAllByText('0 tasks')).toHaveLength(4);
   
-      fireEvent.click(screen.getByRole('button', { name: 'Kanban board' }));
+      fireEvent.click(activeTab);
+      expect(activeTab.querySelector('span[aria-hidden="true"]')).toBeTruthy();
       expect(screen.getAllByRole('heading', { name: 'To Do' })).toHaveLength(2);
       expect(screen.getAllByText('0 tasks')).toHaveLength(8);
     });
