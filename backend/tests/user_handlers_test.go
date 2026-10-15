@@ -101,6 +101,10 @@ func TestProfileEndpoints(t *testing.T) {
 			db.updateProfileArgs[3] != "Sam" {
 			t.Fatalf("update args = %#v", db.updateProfileArgs)
 		}
+		if !strings.Contains(db.profileUpdateQuery, "UPDATE boards AS board") ||
+			!strings.Contains(db.profileUpdateQuery, "board.is_personal") {
+			t.Fatalf("profile update query does not rename the personal board: %s", db.profileUpdateQuery)
+		}
 		var body map[string]string
 		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 			t.Fatalf("decode profile: %v", err)
@@ -305,7 +309,7 @@ func TestAdminUserEndpoints(t *testing.T) {
 			session: dbgen.Session{Token: "token", UserID: adminID},
 			user:    admin,
 			adminBoards: []dbgen.GetAllBoardsForAdminRow{{
-				ID: boardID, Title: "Personal board", OwnerID: "member", FullName: "Member User",
+				ID: boardID, Title: "Personal board", OwnerID: "member", IsPersonal: true, FullName: "Member User",
 			}},
 		}
 		response := send(newHandler(db, nil, false), http.MethodGet, "/api/admin/boards", "", cookie)
@@ -313,16 +317,17 @@ func TestAdminUserEndpoints(t *testing.T) {
 			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
 		}
 		var boards []struct {
-			ID        pgtype.UUID `json:"id"`
-			Title     string      `json:"title"`
-			OwnerID   string      `json:"owner_id"`
-			OwnerName string      `json:"owner_name"`
+			ID         pgtype.UUID `json:"id"`
+			Title      string      `json:"title"`
+			OwnerID    string      `json:"owner_id"`
+			OwnerName  string      `json:"owner_name"`
+			IsPersonal bool        `json:"is_personal"`
 		}
 		if err := json.Unmarshal(response.Body.Bytes(), &boards); err != nil {
 			t.Fatalf("decode admin boards: %v", err)
 		}
 		if len(boards) != 1 || boards[0].ID != boardID || boards[0].Title != "Personal board" ||
-			boards[0].OwnerID != "member" || boards[0].OwnerName != "Member User" {
+			boards[0].OwnerID != "member" || boards[0].OwnerName != "Member User" || !boards[0].IsPersonal {
 			t.Fatalf("admin boards = %#v", boards)
 		}
 	})
@@ -355,7 +360,7 @@ func TestAdminUserEndpoints(t *testing.T) {
 			session: dbgen.Session{Token: "token", UserID: adminID},
 			user:    admin,
 			adminBoards: []dbgen.GetAllBoardsForAdminRow{{
-				ID: newUUID(8), Title: "Board", OwnerID: "member", FullName: "Member",
+				ID: newUUID(8), Title: "Board", OwnerID: "member", IsPersonal: true, FullName: "Member",
 			}},
 		}, nil, false)
 		request := httptest.NewRequest(http.MethodGet, "/api/admin/boards", nil)
@@ -383,7 +388,8 @@ func TestAdminUserEndpoints(t *testing.T) {
 			db.createUserArgs[4] != "Sam" || db.createUserArgs[5] != "user" {
 			t.Fatalf("create user args = %#v", db.createUserArgs)
 		}
-		if len(db.boardArgs) != 2 || db.boardArgs[0] != "New User" || db.boardArgs[1] != "newuser" {
+		if len(db.boardArgs) != 2 || db.boardArgs[0] != "Sam's personal board" || db.boardArgs[1] != "newuser" ||
+			!db.board.IsPersonal {
 			t.Fatalf("personal board args = %#v", db.boardArgs)
 		}
 		if err := bcrypt.CompareHashAndPassword([]byte(db.createUserArgs[2].(string)), []byte("password123")); err != nil {

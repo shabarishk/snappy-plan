@@ -165,12 +165,43 @@ func EnsurePersonalBoards(ctx context.Context, beginTx func(context.Context) (Se
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(731942613)); err != nil {
 		return fmt.Errorf("lock personal board upgrade: %w", err)
 	}
+	if _, err := tx.Exec(ctx, "ALTER TABLE boards ADD COLUMN IF NOT EXISTS is_personal BOOLEAN NOT NULL DEFAULT FALSE"); err != nil {
+		return fmt.Errorf("add personal board marker: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "ALTER TABLE boards ALTER COLUMN title TYPE VARCHAR(120)"); err != nil {
+		return fmt.Errorf("expand board title limit: %w", err)
+	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO boards (title, owner_id)
-		SELECT full_name, id
+			WITH ranked_boards AS (
+				SELECT id, ROW_NUMBER() OVER (PARTITION BY owner_id ORDER BY created_at, id) AS board_rank
+				FROM boards
+			)
+			UPDATE boards
+			SET is_personal = ranked_boards.board_rank = 1
+			FROM ranked_boards
+			WHERE boards.id = ranked_boards.id
+	`); err != nil {
+		return fmt.Errorf("mark existing personal boards: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "CREATE UNIQUE INDEX IF NOT EXISTS idx_boards_one_personal_per_owner ON boards(owner_id) WHERE is_personal"); err != nil {
+		return fmt.Errorf("index personal boards: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE boards AS board
+		SET title = COALESCE(NULLIF(user_account.preferred_name, ''), user_account.full_name) || '''s personal board',
+		    updated_at = NOW()
+		FROM users AS user_account
+		WHERE board.owner_id = user_account.id AND board.is_personal
+		  AND board.title IS DISTINCT FROM COALESCE(NULLIF(user_account.preferred_name, ''), user_account.full_name) || '''s personal board'
+	`); err != nil {
+		return fmt.Errorf("rename existing personal boards: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO boards (title, owner_id, is_personal)
+		SELECT COALESCE(NULLIF(preferred_name, ''), full_name) || '''s personal board', id, TRUE
 		FROM users AS user_account
 		WHERE NOT EXISTS (
-			SELECT 1 FROM boards WHERE owner_id = user_account.id
+			SELECT 1 FROM boards WHERE owner_id = user_account.id AND is_personal
 		)
 	`); err != nil {
 		return fmt.Errorf("create missing personal boards: %w", err)

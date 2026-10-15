@@ -593,7 +593,15 @@ export function AuthenticatedBoard({
           <SettingsPage />
         ) : currentPage === 'profile' ? (
           profile
-            ? <ProfilePage profile={profile} onSaved={setProfile} />
+            ? <ProfilePage profile={profile} onSaved={(savedProfile) => {
+              setProfile(savedProfile);
+              const personalName = savedProfile.preferred_name?.trim() || savedProfile.full_name;
+              setBoards((currentBoards) => currentBoards.map((board) =>
+                board.is_personal && board.owner_id === savedProfile.username
+                  ? { ...board, title: `${personalName}'s personal board` }
+                  : board
+              ));
+            }} />
             : <p role={loadError ? 'alert' : undefined} className="p-4 text-sm text-gray-600">{loadError || 'Loading profile…'}</p>
         ) : currentPage === 'boards' ? (
           profile

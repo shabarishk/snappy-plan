@@ -89,10 +89,11 @@ func (api *ApiConfig) handleGetBoardsForAdmin(w http.ResponseWriter, r *http.Req
 	responseBoards := make([]adminBoardResponse, 0, len(boards))
 	for _, board := range boards {
 		responseBoards = append(responseBoards, adminBoardResponse{
-			ID:        board.ID,
-			Title:     board.Title,
-			OwnerID:   board.OwnerID,
-			OwnerName: board.FullName,
+			ID:         board.ID,
+			Title:      board.Title,
+			OwnerID:    board.OwnerID,
+			IsPersonal: board.IsPersonal,
+			OwnerName:  board.FullName,
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -102,10 +103,11 @@ func (api *ApiConfig) handleGetBoardsForAdmin(w http.ResponseWriter, r *http.Req
 }
 
 type adminBoardResponse struct {
-	ID        pgtype.UUID `json:"id"`
-	Title     string      `json:"title"`
-	OwnerID   string      `json:"owner_id"`
-	OwnerName string      `json:"owner_name"`
+	ID         pgtype.UUID `json:"id"`
+	Title      string      `json:"title"`
+	OwnerID    string      `json:"owner_id"`
+	IsPersonal bool        `json:"is_personal"`
+	OwnerName  string      `json:"owner_name"`
 }
 
 func (api *ApiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
@@ -170,8 +172,8 @@ func (api *ApiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to create user", http.StatusInternalServerError)
 		return
 	}
-	if _, err := txQueries.CreateBoard(r.Context(), dbgen.CreateBoardParams{
-		Title:   user.FullName,
+	if _, err := txQueries.CreatePersonalBoard(r.Context(), dbgen.CreatePersonalBoardParams{
+		Title:   personalBoardTitle(user.PreferredName, user.FullName),
 		OwnerID: user.ID,
 	}); err != nil {
 		http.Error(w, "Failed to create personal board", http.StatusInternalServerError)

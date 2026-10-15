@@ -45,11 +45,6 @@ func main() { // Read from Docker env, fallback to localhost for manual testing
 	}); err != nil {
 		log.Fatalf("Unable to update user ID schema: %v\n", err)
 	}
-	if err := backend.EnsurePersonalBoards(context.Background(), func(ctx context.Context) (backend.SetupTransaction, error) {
-		return pool.Begin(ctx)
-	}); err != nil {
-		log.Fatalf("Unable to create personal boards: %v\n", err)
-	}
 	if err := backend.EnsureTaskSchema(context.Background(), func(ctx context.Context) (backend.SetupTransaction, error) {
 		return pool.Begin(ctx)
 	}); err != nil {
@@ -64,6 +59,11 @@ func main() { // Read from Docker env, fallback to localhost for manual testing
 		return pool.Begin(ctx)
 	}); err != nil {
 		log.Fatalf("Unable to update profile schemas: %v\n", err)
+	}
+	if err := backend.EnsurePersonalBoards(context.Background(), func(ctx context.Context) (backend.SetupTransaction, error) {
+		return pool.Begin(ctx)
+	}); err != nil {
+		log.Fatalf("Unable to create personal boards: %v\n", err)
 	}
 
 	frontendFiles, err := backend.FrontendFiles()

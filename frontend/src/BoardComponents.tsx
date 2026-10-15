@@ -157,9 +157,13 @@ export function ManageBoardOverlay({
           </div>
         </form>
         <div className="mt-6 border-t border-gray-200 pt-4">
-          <button type="button" onClick={() => setIsConfirmingDelete(true)} className="rounded-lg px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50">
-            Delete board
-          </button>
+          {board.is_personal ? (
+            <p className="text-sm text-gray-500">Personal boards cannot be deleted.</p>
+          ) : (
+            <button type="button" onClick={() => setIsConfirmingDelete(true)} className="rounded-lg px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50">
+              Delete board
+            </button>
+          )}
         </div>
         {isConfirmingDelete && (
           <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4">

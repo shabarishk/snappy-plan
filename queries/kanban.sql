@@ -28,6 +28,11 @@ INSERT INTO boards (title, owner_id)
 VALUES ($1, $2)
 RETURNING *;
 
+-- name: CreatePersonalBoard :one
+INSERT INTO boards (title, owner_id, is_personal)
+VALUES ($1, $2, TRUE)
+RETURNING *;
+
 -- name: CreateBoardMember :exec
 INSERT INTO board_members (board_id, user_id)
 VALUES ($1, $2)
@@ -66,7 +71,7 @@ ORDER BY created_at ASC, id ASC;
 
 -- name: DeleteBoard :execrows
 DELETE FROM boards AS board
-WHERE board.id = $1 AND (
+WHERE board.id = $1 AND NOT board.is_personal AND (
     board.owner_id = $2 OR EXISTS (
         SELECT 1 FROM users AS user_account
         WHERE user_account.id = $2 AND user_account.role = 'admin'
@@ -74,7 +79,7 @@ WHERE board.id = $1 AND (
 );
 
 -- name: GetAllBoardsForAdmin :many
-SELECT board.id, board.title, board.owner_id,
+SELECT board.id, board.title, board.owner_id, board.is_personal,
        COALESCE(NULLIF(owner.preferred_name, ''), owner.full_name) AS full_name
 FROM boards AS board
 JOIN users AS owner ON owner.id = board.owner_id
@@ -419,13 +424,22 @@ WHERE id = $1
 RETURNING *;
 
 -- name: UpdateUserProfile :one
-UPDATE users
-SET email = $2,
-    full_name = $3,
-    preferred_name = $4,
-    updated_at = NOW()
-WHERE id = $1
-RETURNING *;
+WITH updated_user AS (
+    UPDATE users
+    SET email = $2,
+        full_name = $3,
+        preferred_name = $4,
+        updated_at = NOW()
+    WHERE users.id = $1
+    RETURNING *
+), renamed_personal_board AS (
+    UPDATE boards AS board
+    SET title = COALESCE(NULLIF(updated_user.preferred_name, ''), updated_user.full_name) || '''s personal board',
+        updated_at = NOW()
+    FROM updated_user
+    WHERE board.owner_id = updated_user.id AND board.is_personal
+)
+SELECT updated_user.* FROM updated_user;
 
 -- name: UpdateUserProfilePicture :one
 UPDATE users

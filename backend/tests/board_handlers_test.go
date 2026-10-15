@@ -171,6 +171,7 @@ func TestDeleteBoardEndpoint(t *testing.T) {
 		sessionErr error
 		role       string
 		boardOwner string
+		personal   bool
 		wantStatus int
 	}{
 		{name: "invalid board ID", boardID: "invalid", wantStatus: http.StatusBadRequest},
@@ -179,13 +180,15 @@ func TestDeleteBoardEndpoint(t *testing.T) {
 		{name: "database error", boardID: newUUID(8).String(), deleteErr: errors.New("delete failed"), wantStatus: http.StatusInternalServerError},
 		{name: "deletes owned board", boardID: newUUID(8).String(), rows: 1, role: "user", boardOwner: "owner7", wantStatus: http.StatusNoContent},
 		{name: "admin deletes any board", boardID: newUUID(8).String(), rows: 1, role: "admin", boardOwner: "other", wantStatus: http.StatusNoContent},
+		{name: "user cannot delete personal board", boardID: newUUID(8).String(), rows: 1, role: "user", boardOwner: "owner7", personal: true, wantStatus: http.StatusNotFound},
+		{name: "admin cannot delete personal board", boardID: newUUID(8).String(), rows: 1, role: "admin", boardOwner: "other", personal: true, wantStatus: http.StatusNotFound},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			db := &fakeDB{
 				session:         dbgen.Session{Token: "token", UserID: "owner7"},
 				sessionErr:      test.sessionErr,
 				user:            dbgen.User{ID: "owner7", Role: test.role},
-				board:           dbgen.Board{OwnerID: test.boardOwner},
+				board:           dbgen.Board{OwnerID: test.boardOwner, IsPersonal: test.personal},
 				deleteBoardRows: test.rows,
 				deleteBoardErr:  test.deleteErr,
 			}
@@ -204,6 +207,9 @@ func TestDeleteBoardEndpoint(t *testing.T) {
 				}
 				if !strings.Contains(db.deleteBoardQuery, "role = 'admin'") {
 					t.Fatalf("delete query = %q, want admin role check", db.deleteBoardQuery)
+				}
+				if !strings.Contains(db.deleteBoardQuery, "NOT board.is_personal") {
+					t.Fatalf("delete query = %q, want personal board protection", db.deleteBoardQuery)
 				}
 			}
 		})

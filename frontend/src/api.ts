@@ -5,6 +5,7 @@ export interface Board {
   id: string;
   title: string;
   owner_id: string;
+  is_personal: boolean;
 }
 
 export interface Initiative {

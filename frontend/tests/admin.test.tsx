@@ -14,7 +14,7 @@ describe('Admin', () => {
         if (url === '/api/admin/boards') return {
           ok: true,
           json: async () => [
-            { id: 'board-1', title: 'Admin Personal Board', owner_id: 'adminuser', owner_name: 'Admin User' },
+            { id: 'board-1', title: 'Admin Personal Board', owner_id: 'adminuser', owner_name: 'Admin User', is_personal: true },
             { id: 'board-2', title: 'Member Board', owner_id: 'member', owner_name: 'Member User' },
           ],
         };
@@ -79,6 +79,10 @@ describe('Admin', () => {
       expect(await screen.findByText('Member Board')).toBeTruthy();
       expect(screen.getByText('Owned by Member User (member)')).toBeTruthy();
       expect(fetchMock).toHaveBeenCalledWith('/api/admin/boards', { credentials: 'same-origin' });
+      fireEvent.click(screen.getByRole('button', { name: 'Manage Admin Personal Board' }));
+      expect(await screen.findByRole('dialog', { name: 'Manage Admin Personal Board' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Delete board' })).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Close manage board form' }));
       fireEvent.click(screen.getByRole('button', { name: 'Manage Member Board' }));
       expect(await screen.findByRole('dialog', { name: 'Manage Member Board' })).toBeTruthy();
       fireEvent.click(screen.getByRole('button', { name: 'Delete board' }));
