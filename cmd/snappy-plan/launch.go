@@ -64,27 +64,46 @@ func (settings databaseSettings) connectionURL() (string, error) {
 }
 
 type launchRuntime struct {
-	mu            sync.RWMutex
-	configureMu   sync.Mutex
-	active        http.Handler
-	configPath    string
-	setupToken    string
-	secureCookie  bool
-	frontend      http.Handler
-	frontendFiles fs.FS
+	mu                    sync.RWMutex
+	configureMu           sync.Mutex
+	active                http.Handler
+	configPath            string
+	setupToken            string
+	secureCookie          bool
+	frontend              http.Handler
+	frontendFiles         fs.FS
+	pingDatabase          func(context.Context, *pgxpool.Pool) error
+	applySchemaMigrations func(context.Context, *pgxpool.Pool) error
+	ensureSchema          func(context.Context, *pgxpool.Pool) error
+	newAppHandler         func(*pgxpool.Pool) http.Handler
 }
 
 func newLaunchRuntime(configPath, setupToken string, secureCookie bool, frontendFiles fs.FS) *launchRuntime {
 	if configPath == "" {
 		configPath = defaultLaunchConfigPath
 	}
-	return &launchRuntime{
+	runtime := &launchRuntime{
 		configPath:    configPath,
 		setupToken:    setupToken,
 		secureCookie:  secureCookie,
 		frontend:      backend.NewFrontendHandler(frontendFiles),
 		frontendFiles: frontendFiles,
 	}
+	runtime.pingDatabase = func(ctx context.Context, pool *pgxpool.Pool) error {
+		return pool.Ping(ctx)
+	}
+	runtime.applySchemaMigrations = migrations.Apply
+	runtime.ensureSchema = func(ctx context.Context, pool *pgxpool.Pool) error {
+		return ensureApplicationSchema(ctx, func(ctx context.Context) (backend.SetupTransaction, error) {
+			return pool.Begin(ctx)
+		})
+	}
+	runtime.newAppHandler = func(pool *pgxpool.Pool) http.Handler {
+		return backend.NewHandlerWithSetupToken(pool, func(ctx context.Context) (backend.SetupTransaction, error) {
+			return pool.Begin(ctx)
+		}, runtime.secureCookie, runtime.setupToken, runtime.frontendFiles)
+	}
+	return runtime
 }
 
 func (runtime *launchRuntime) handler() http.Handler {
@@ -182,13 +201,13 @@ func (runtime *launchRuntime) activateURL(ctx context.Context, databaseURL strin
 			pool.Close()
 		}
 	}()
-	if err := pool.Ping(ctx); err != nil {
+	if err := runtime.pingDatabase(ctx, pool); err != nil {
 		return fmt.Errorf("connect to PostgreSQL: %w", err)
 	}
-	if err := migrations.Apply(ctx, pool); err != nil {
+	if err := runtime.applySchemaMigrations(ctx, pool); err != nil {
 		return fmt.Errorf("apply initial schema: %w", err)
 	}
-	if err := ensureApplicationSchema(ctx, pool); err != nil {
+	if err := runtime.ensureSchema(ctx, pool); err != nil {
 		return err
 	}
 	if persist {
@@ -200,9 +219,7 @@ func (runtime *launchRuntime) activateURL(ctx context.Context, databaseURL strin
 		}
 	}
 
-	handler := backend.NewHandlerWithSetupToken(pool, func(ctx context.Context) (backend.SetupTransaction, error) {
-		return pool.Begin(ctx)
-	}, runtime.secureCookie, runtime.setupToken, runtime.frontendFiles)
+	handler := runtime.newAppHandler(pool)
 	runtime.mu.Lock()
 	runtime.active = handler
 	runtime.mu.Unlock()
@@ -210,8 +227,7 @@ func (runtime *launchRuntime) activateURL(ctx context.Context, databaseURL strin
 	return nil
 }
 
-func ensureApplicationSchema(ctx context.Context, pool *pgxpool.Pool) error {
-	beginTx := func(ctx context.Context) (backend.SetupTransaction, error) { return pool.Begin(ctx) }
+func ensureApplicationSchema(ctx context.Context, beginTx func(context.Context) (backend.SetupTransaction, error)) error {
 	if err := backend.EnsureUserIDSchema(ctx, beginTx); err != nil {
 		return fmt.Errorf("update user ID schema: %w", err)
 	}

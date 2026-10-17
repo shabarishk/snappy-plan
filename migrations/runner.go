@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -19,6 +20,12 @@ var files embed.FS
 
 const historyTable = "snappy_plan_schema_migrations"
 
+type migrationConnection interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+	Begin(context.Context) (pgx.Tx, error)
+}
+
 func Apply(ctx context.Context, pool *pgxpool.Pool) error {
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
@@ -26,6 +33,10 @@ func Apply(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 	defer conn.Release()
 
+	return applyWithConnection(ctx, conn, files)
+}
+
+func applyWithConnection(ctx context.Context, conn migrationConnection, migrationFiles fs.FS) error {
 	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", int64(731942617)); err != nil {
 		return fmt.Errorf("lock schema migrations: %w", err)
 	}
@@ -39,7 +50,7 @@ func Apply(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("create migration history: %w", err)
 	}
 
-	names, err := fs.Glob(files, "*.up.sql")
+	names, err := fs.Glob(migrationFiles, "*.up.sql")
 	if err != nil {
 		return fmt.Errorf("list embedded migrations: %w", err)
 	}
@@ -94,7 +105,7 @@ func Apply(ctx context.Context, pool *pgxpool.Pool) error {
 			continue
 		}
 
-		sql, err := files.ReadFile(name)
+		sql, err := fs.ReadFile(migrationFiles, name)
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}
