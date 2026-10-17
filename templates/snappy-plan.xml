@@ -7,6 +7,7 @@
   <Support>https://github.com/shabarishk/snappy-plan/issues</Support>
   <Project>https://github.com/shabarishk/snappy-plan</Project>
   <Overview>Self-hosted Kanban task planning with boards, initiatives, and user accounts.</Overview>
+  <Icon>https://raw.githubusercontent.com/shabarishk/snappy-plan/main/frontend/public/pwa-192x192.png</Icon>
   <Description>Snappy Plan is a self-hosted task planning application. Create a PostgreSQL database and connect both containers to the Unraid proxynet network. The first-run Launch page applies the schema and then guides you through administrator setup. Back up the database regularly before upgrading.</Description>
   <Category>Productivity:</Category>
   <WebUI>http://[IP]:[PORT:8080]</WebUI>
