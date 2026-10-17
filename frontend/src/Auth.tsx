@@ -1,11 +1,21 @@
 import { useState, useEffect } from 'react';
 
 export function AuthWrapper({ onAuthenticated }: { onAuthenticated: () => void }) {
-  const [view, setView] = useState<'loading' | 'setup' | 'login' | 'error'>('loading');
+  const [view, setView] = useState<'loading' | 'launch' | 'setup' | 'login' | 'error'>('loading');
+  const [setupTokenRequired, setSetupTokenRequired] = useState(false);
+  const [setupToken, setSetupToken] = useState('');
 
   useEffect(() => {
-    const checkAuth = async () => {
+    const checkAuth = async (token = '') => {
       try {
+        const launchRes = await fetch('/api/launch/status', { credentials: 'same-origin' });
+        if (!launchRes.ok) throw new Error('Failed to check launch status');
+        const launchData: { launch_required: boolean } = await launchRes.json();
+        if (launchData.launch_required) {
+          setView('launch');
+          return;
+        }
+
         const authRes = await fetch('/api/auth/status', { credentials: 'same-origin' });
         if (!authRes.ok) throw new Error('Failed to check authentication status');
         const authData: { authenticated: boolean } = await authRes.json();
@@ -16,7 +26,9 @@ export function AuthWrapper({ onAuthenticated }: { onAuthenticated: () => void }
 
         const setupRes = await fetch('/api/setup/status', { credentials: 'same-origin' });
         if (!setupRes.ok) throw new Error('Failed to check setup status');
-        const setupData: { setup_required: boolean } = await setupRes.json();
+        const setupData: { setup_required: boolean; setup_token_required?: boolean } = await setupRes.json();
+        setSetupTokenRequired(setupData.setup_token_required ?? false);
+        if (token) setSetupToken(token);
         setView(setupData.setup_required ? 'setup' : 'login');
       } catch (err) {
         console.error('Failed to initialize authentication', err);
@@ -45,11 +57,146 @@ export function AuthWrapper({ onAuthenticated }: { onAuthenticated: () => void }
     );
   }
 
-  if (view === 'setup') return <SetupScreen onComplete={() => setView('login')} />;
+  if (view === 'launch') {
+    return <LaunchScreen onComplete={(token) => {
+      setSetupToken(token);
+      setView('loading');
+      void refreshAfterLaunch(token);
+    }} />;
+  }
+  if (view === 'setup') {
+    return <SetupScreen
+      onComplete={() => {
+        setSetupToken('');
+        setSetupTokenRequired(false);
+        setView('login');
+      }}
+      tokenRequired={setupTokenRequired}
+      setupToken={setupToken}
+      setSetupToken={setSetupToken}
+    />;
+  }
   return <LoginScreen onLoginSuccess={onAuthenticated} />;
+
+  async function refreshAfterLaunch(token: string) {
+    try {
+      const authRes = await fetch('/api/auth/status', { credentials: 'same-origin' });
+      if (!authRes.ok) throw new Error('Failed to check authentication status');
+      const authData: { authenticated: boolean } = await authRes.json();
+      if (authData.authenticated) {
+        onAuthenticated();
+        return;
+      }
+      const setupRes = await fetch('/api/setup/status', { credentials: 'same-origin' });
+      if (!setupRes.ok) throw new Error('Failed to check setup status');
+      const setupData: { setup_required: boolean; setup_token_required?: boolean } = await setupRes.json();
+      setSetupTokenRequired(setupData.setup_token_required ?? false);
+      setSetupToken(token);
+      setView(setupData.setup_required ? 'setup' : 'login');
+    } catch (err) {
+      console.error('Failed to initialize authentication', err);
+      setView('error');
+    }
+  }
 }
 
-function SetupScreen({ onComplete }: { onComplete: () => void }) {
+function LaunchScreen({ onComplete }: { onComplete: (token: string) => void }) {
+  const [host, setHost] = useState('');
+  const [port, setPort] = useState('5432');
+  const [database, setDatabase] = useState('snappyplan');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [setupToken, setSetupToken] = useState('');
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleLaunch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/launch/configure', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Setup-Token': setupToken,
+        },
+        body: JSON.stringify({ host, port: Number(port), database, username, password }),
+      });
+      if (!res.ok) {
+        const message = await res.text();
+        setError(message.trim() || 'Could not configure PostgreSQL. Check the settings and try again.');
+        return;
+      }
+      onComplete(setupToken);
+    } catch (err) {
+      console.error('Failed to configure PostgreSQL', err);
+      setError('Unable to reach Snappy Plan. Check the container logs and try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-200 flex items-center justify-center p-4">
+      <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md">
+        <div className="text-center mb-6">
+          <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-xl mx-auto mb-4">S</div>
+          <h1 className="text-2xl font-extrabold text-gray-800">Launch Snappy Plan</h1>
+          <p className="text-sm text-gray-500 mt-2">Connect to PostgreSQL to prepare the application database.</p>
+        </div>
+
+        {error && <div role="alert" className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg text-sm">{error}</div>}
+        <form onSubmit={handleLaunch} className="space-y-3">
+          <div>
+            <label htmlFor="launch-token" className="block text-sm font-medium text-gray-700 mb-1">Launch setup key</label>
+            <input id="launch-token" type="password" autoComplete="off" required minLength={32} value={setupToken} onChange={(e) => setSetupToken(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg" />
+            <p className="text-xs text-gray-500 mt-1">Use the 32-character-or-longer secret configured in the Unraid template.</p>
+          </div>
+          <div>
+            <label htmlFor="database-host" className="block text-sm font-medium text-gray-700 mb-1">PostgreSQL host</label>
+            <input id="database-host" type="text" required value={host} onChange={(e) => setHost(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg" placeholder="PostgreSQL container name on proxynet" />
+            <p className="text-xs text-gray-500 mt-1">On a shared proxynet, use the PostgreSQL container name or network alias, not localhost.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="database-port" className="block text-sm font-medium text-gray-700 mb-1">Port</label>
+              <input id="database-port" type="number" min="1" max="65535" required value={port} onChange={(e) => setPort(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg" />
+            </div>
+            <div>
+              <label htmlFor="database-name" className="block text-sm font-medium text-gray-700 mb-1">Database</label>
+              <input id="database-name" type="text" required value={database} onChange={(e) => setDatabase(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg" />
+            </div>
+          </div>
+          <div>
+            <label htmlFor="database-username" className="block text-sm font-medium text-gray-700 mb-1">Database username</label>
+            <input id="database-username" type="text" required autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg" />
+          </div>
+          <div>
+            <label htmlFor="database-password" className="block text-sm font-medium text-gray-700 mb-1">Database password</label>
+            <input id="database-password" type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg" />
+          </div>
+          <button type="submit" disabled={submitting} className="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors">
+            {submitting ? 'Connecting to PostgreSQL…' : 'Connect and prepare database'}
+          </button>
+        </form>
+        <p className="text-xs text-gray-500 mt-4">The database must already exist. Snappy Plan will apply its schema, then show the administrator setup page. Use HTTPS or a trusted LAN connection during setup.</p>
+      </div>
+    </div>
+  );
+}
+
+function SetupScreen({
+  onComplete,
+  tokenRequired,
+  setupToken,
+  setSetupToken,
+}: {
+  onComplete: () => void;
+  tokenRequired: boolean;
+  setupToken: string;
+  setSetupToken: (token: string) => void;
+}) {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
@@ -61,12 +208,15 @@ function SetupScreen({ onComplete }: { onComplete: () => void }) {
     try {
       const res = await fetch('/api/setup', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(tokenRequired ? { 'X-Setup-Token': setupToken } : {}),
+        },
         body: JSON.stringify({ username, email, full_name: fullName, password }),
       });
 
       if (!res.ok) {
-        setError('Setup failed. Please try again.');
+        setError('Setup failed. Check the launch setup key and try again.');
         return;
       }
       onComplete();
@@ -88,6 +238,12 @@ function SetupScreen({ onComplete }: { onComplete: () => void }) {
         {error && <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg text-sm">{error}</div>}
 
         <form onSubmit={handleSetup} className="space-y-4">
+          {tokenRequired && (
+            <div>
+              <label htmlFor="admin-setup-token" className="block text-sm font-medium text-gray-700 mb-1">Launch setup key</label>
+              <input id="admin-setup-token" type="password" autoComplete="off" required minLength={32} value={setupToken} onChange={(e) => setSetupToken(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+            </div>
+          )}
           <div>
             <label htmlFor="setup-username" className="block text-sm font-medium text-gray-700 mb-1">Username</label>
             <input id="setup-username" type="text" required minLength={1} maxLength={32} pattern="[A-Za-z0-9]+" value={username} onChange={(e) => setUsername(e.target.value)} className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Choose a username" />

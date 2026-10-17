@@ -24,10 +24,15 @@ type ApiConfig struct {
 	DB           *dbgen.Queries
 	BeginTx      func(context.Context) (SetupTransaction, error)
 	SecureCookie bool
+	SetupToken   string
 }
 
 func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, error), secureCookie bool, frontendFiles fs.FS) http.Handler {
-	api := &ApiConfig{DB: dbgen.New(db), BeginTx: beginTx, SecureCookie: secureCookie}
+	return NewHandlerWithSetupToken(db, beginTx, secureCookie, "", frontendFiles)
+}
+
+func NewHandlerWithSetupToken(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, error), secureCookie bool, setupToken string, frontendFiles fs.FS) http.Handler {
+	api := &ApiConfig{DB: dbgen.New(db), BeginTx: beginTx, SecureCookie: secureCookie, SetupToken: setupToken}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/setup/status", api.handleSetupStatus)
 	mux.HandleFunc("POST /api/setup", api.handleInitialSetup)
@@ -71,6 +76,10 @@ func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, 
 		}
 		mux.ServeHTTP(w, r)
 	})
+}
+
+func NewFrontendHandler(files fs.FS) http.Handler {
+	return frontendHandler(files)
 }
 
 func frontendHandler(files fs.FS) http.Handler {

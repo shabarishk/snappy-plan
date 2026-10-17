@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -41,6 +42,35 @@ func TestSetupStatusEndpoint(t *testing.T) {
 				if body["setup_required"] != test.setupRequired {
 					t.Fatalf("setup_required = %t, want %t", body["setup_required"], test.setupRequired)
 				}
+			}
+		})
+	}
+}
+
+func TestSetupStatusReportsSetupTokenRequirement(t *testing.T) {
+	for _, test := range []struct {
+		name              string
+		userCount         int64
+		setupToken        string
+		wantSetup         bool
+		wantTokenRequired bool
+	}{
+		{name: "first launch requires setup token", setupToken: "0123456789abcdef0123456789abcdef", wantSetup: true, wantTokenRequired: true},
+		{name: "first launch without setup token", wantSetup: true},
+		{name: "existing users do not require setup token", userCount: 1, setupToken: "0123456789abcdef0123456789abcdef"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := backend.NewHandlerWithSetupToken(&fakeDB{count: test.userCount}, nil, false, test.setupToken, nil)
+			response := send(handler, http.MethodGet, "/api/setup/status", "", nil)
+			if response.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+			}
+			var body map[string]bool
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode setup status: %v", err)
+			}
+			if body["setup_required"] != test.wantSetup || body["setup_token_required"] != test.wantTokenRequired {
+				t.Fatalf("setup status = %#v", body)
 			}
 		})
 	}
@@ -137,6 +167,37 @@ func TestSetupEndpointWithoutTransaction(t *testing.T) {
 	response := send(newHandler(&fakeDB{}, nil, false), http.MethodPost, "/api/setup", body, nil)
 	if response.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestSetupEndpointRequiresConfiguredSetupToken(t *testing.T) {
+	validBody := `{"username":"admin1","email":"admin@example.com","full_name":"Admin User","password":"password123"}`
+	txDB := &fakeDB{user: newUser("")}
+	tx := &fakeTx{fakeDB: txDB}
+	handler := backend.NewHandlerWithSetupToken(&fakeDB{}, func(context.Context) (backend.SetupTransaction, error) {
+		return tx, nil
+	}, false, "0123456789abcdef0123456789abcdef", nil)
+
+	unauthorized := send(handler, http.MethodPost, "/api/setup", validBody, nil)
+	if unauthorized.Code != http.StatusUnauthorized || tx.committed {
+		t.Fatalf("missing setup key status = %d; committed = %t", unauthorized.Code, tx.committed)
+	}
+
+	shortTokenHandler := backend.NewHandlerWithSetupToken(&fakeDB{}, nil, false, "weak", nil)
+	request := httptest.NewRequest(http.MethodPost, "/api/setup", strings.NewReader(validBody))
+	request.Header.Set("X-Setup-Token", "weak")
+	response := httptest.NewRecorder()
+	shortTokenHandler.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("insecure setup key status = %d, want %d", response.Code, http.StatusServiceUnavailable)
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/setup", strings.NewReader(validBody))
+	request.Header.Set("X-Setup-Token", "0123456789abcdef0123456789abcdef")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !tx.committed {
+		t.Fatalf("valid setup key status = %d; committed = %t", response.Code, tx.committed)
 	}
 }
 

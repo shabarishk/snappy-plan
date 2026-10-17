@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -27,8 +28,10 @@ func (api *ApiConfig) handleSetupStatus(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	setupRequired := count == 0
 	json.NewEncoder(w).Encode(map[string]bool{
-		"setup_required": count == 0,
+		"setup_required":       setupRequired,
+		"setup_token_required": setupRequired && api.SetupToken != "",
 	})
 }
 
@@ -45,6 +48,16 @@ func (api *ApiConfig) handleInitialSetup(w http.ResponseWriter, r *http.Request)
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&params); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
+	}
+	if api.SetupToken != "" {
+		if len(api.SetupToken) < 32 {
+			http.Error(w, "Setup authorization is not securely configured", http.StatusServiceUnavailable)
+			return
+		}
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Setup-Token")), []byte(api.SetupToken)) != 1 {
+			http.Error(w, "Setup authorization required", http.StatusUnauthorized)
+			return
+		}
 	}
 	params.Username = strings.ToLower(strings.TrimSpace(params.Username))
 	params.Email = strings.TrimSpace(params.Email)

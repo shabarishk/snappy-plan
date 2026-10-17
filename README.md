@@ -52,4 +52,23 @@ npm run test:coverage
 
 Coverage reports are generated under `frontend/coverage/`; they are local test artifacts and should not be committed.
 
-The initial schema in `migrations/000001_init_schema.up.sql` defines the task description and completion timestamp. Compose initialization scripts run only when PostgreSQL creates a new data directory. On application startup, the backend idempotently ensures the task `state` and `priority` columns and constraints exist, removes the obsolete task position column, and creates personal boards for existing users who do not yet have one, including for existing database volumes. Existing tasks without a priority default to `Medium`; the board orders them High to Low.
+The initial schema in `migrations/000001_init_schema.up.sql` defines the task description and completion timestamp. Compose initialization scripts run only when PostgreSQL creates a new data directory. On application startup, the backend applies embedded `*.up.sql` migrations to a new database and records applied versions. An existing database with the core Snappy Plan tables is baselined, then the backend idempotently ensures task `state` and `priority` columns and constraints exist, removes the obsolete task position column, and creates personal boards for existing users who do not yet have one. Existing tasks without a priority default to `Medium`; the board orders them High to Low.
+
+## GitHub releases and Unraid
+
+Publishing a GitHub Release whose tag follows `vMAJOR.MINOR.PATCH` (for example, `v1.2.0`) runs the release workflow. It runs backend and frontend checks, builds the application image for `linux/amd64` and `linux/arm64`, and publishes it to `ghcr.io/shabarishk/snappy-plan` with version, major, minor, and (for stable releases) `latest` tags. The source tag remains the versioned release record; deploy `:latest` for automatic updates or a version tag to pin an installation.
+
+Before the first release:
+
+1. In GitHub, open the published container package settings and change its visibility to **Public**. Unraid servers must be able to pull the image anonymously.
+2. Ensure the repository is public and includes its OSI-approved license and valid `ca_profile.xml`; Unraid Community Applications requires these.
+3. Create a version tag and publish a GitHub Release for that tag. Confirm the Release workflow succeeds and that the image tags appear in GitHub Packages.
+4. Submit `https://github.com/shabarishk/snappy-plan` through the [Unraid Community Applications submission page](https://ca.unraid.net/submit/new). Validate and scan the repository template as part of submission.
+
+The repository includes `templates/snappy-plan.xml` for the Unraid app and `ca_profile.xml` for the repository profile. The app template attaches Snappy Plan to the `proxynet` Docker network and mounts `/mnt/user/appdata/snappy-plan/config` for its saved database connection settings. Install PostgreSQL separately, give it persistent storage, and attach it to that same custom network. Create the `snappyplan` database and a database user with permission to create and alter tables. The PostgreSQL server/container must be configured to accept connections from `proxynet`; no host port needs to be published when both containers share that network.
+
+On first launch, Snappy Plan presents a Launch page before administrator creation. Enter the PostgreSQL container's name or network alias as the host, its **container port** (normally `5432`), database name, username, and password. Do not enter `localhost` or the Unraid host IP when using the shared Docker network. The launch page connects to the database, applies embedded `*.up.sql` migrations, runs the application's schema upgrades, and saves the connection details under `/config/database.json`. Existing databases that already have the core Snappy Plan schema are baselined rather than having the initial tables recreated.
+
+Set `SNAPPY_SETUP_TOKEN` in the Unraid template to a random secret of at least 32 characters before launching. The Launch page requires this key, and initial administrator creation requires it as well; keep it private. Generate one from a password manager or with `openssl rand -hex 32`. The saved database settings include the database password in plaintext, so restrict access to the appdata config directory and back it up securely. Use HTTPS (or only a trusted LAN) while entering the database credentials and setup key. Once configured, container restarts reuse the saved settings. If PostgreSQL is temporarily unavailable, the Launch page remains available so you can retry the connection.
+
+Use HTTPS through a reverse proxy for remote access and leave `COOKIE_SECURE=true`. Keep the app and database backups, and back up PostgreSQL before installing an updated image.

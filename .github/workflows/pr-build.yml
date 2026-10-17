@@ -114,7 +114,7 @@ jobs:
         run: go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
 
       - name: Run backend tests with coverage
-        run: go test -coverprofile=coverage.out -coverpkg=./backend/...,./cmd/...,./dbgen/... ./backend/... ./cmd/... ./dbgen/...
+        run: go test -coverprofile=coverage.out -coverpkg=./backend/...,./cmd/...,./dbgen/...,./migrations/... ./backend/... ./cmd/... ./dbgen/... ./migrations/...
 
       - name: Convert Go coverage to Cobertura
         run: |
