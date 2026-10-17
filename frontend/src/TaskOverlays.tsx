@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { TaskPriority } from './taskPriority';
-import { createTask as persistTask, updateTask as persistUpdateTask } from './api';
-import type { Board, TaskAssignee } from './api';
+import { addTaskToInitiative, createTask as persistTask, getInitiatives, updateTask as persistUpdateTask } from './api';
+import type { ApiTask, Board, Initiative, TaskAssignee } from './api';
 import type { Task, TaskState } from './taskModel';
 import { toBoardTask } from './taskModel';
 
@@ -22,29 +22,55 @@ export function CreateTaskOverlay({
   const [description, setDescription] = useState('');
   const [boardId, setBoardId] = useState(selectedBoardId);
   const [assignedToId, setAssignedToId] = useState('');
+  const [initiativeId, setInitiativeId] = useState('');
+  const [initiatives, setInitiatives] = useState<Initiative[]>([]);
+  const [initiativeLoadError, setInitiativeLoadError] = useState('');
+  const [createdTask, setCreatedTask] = useState<ApiTask | null>(null);
   const [state, setState] = useState<'Backlog' | 'ToDo'>('Backlog');
   const [priority, setPriority] = useState<TaskPriority>('Medium');
   const [completeBy, setCompleteBy] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    let cancelled = false;
+    getInitiatives()
+      .then((availableInitiatives) => {
+        if (!cancelled) setInitiatives(availableInitiatives);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setInitiativeLoadError(err instanceof Error ? err.message : 'Failed to load initiatives');
+      });
+    return () => { cancelled = true; };
+  }, []);
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSaving(true);
     setError('');
+    let taskWasCreated = false;
     try {
-      const task = await persistTask({
-        board_id: boardId,
-        title,
-        description,
-        assigned_to_id: assignedToId,
-        state,
-        priority,
-        complete_by: completeBy ? new Date(completeBy).toISOString() : null,
-      });
+      let task = createdTask;
+      if (!task) {
+        task = await persistTask({
+          board_id: boardId,
+          title,
+          description,
+          assigned_to_id: assignedToId,
+          state,
+          priority,
+          complete_by: completeBy ? new Date(completeBy).toISOString() : null,
+        });
+        taskWasCreated = true;
+        setCreatedTask(task);
+      }
+      if (initiativeId) await addTaskToInitiative(initiativeId, task.id);
       onCreated(toBoardTask(task), boardId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create task');
+      const message = err instanceof Error ? err.message : 'Failed to create task';
+      setError(taskWasCreated || createdTask
+        ? `Task created, but it could not be assigned to the initiative. Try again. ${message}`
+        : message);
     } finally {
       setSaving(false);
     }
@@ -65,37 +91,53 @@ export function CreateTaskOverlay({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="task-title" className="mb-1 block text-sm font-medium text-gray-700">Title</label>
-            <input id="task-title" name="title" required maxLength={255} value={title} onChange={(event) => setTitle(event.target.value)} className="w-full rounded-lg border border-gray-300 p-2" />
+            <input id="task-title" name="title" required maxLength={255} value={title} onChange={(event) => setTitle(event.target.value)} disabled={Boolean(createdTask)} className="w-full rounded-lg border border-gray-300 p-2" />
           </div>
           <div>
             <label htmlFor="task-description" className="mb-1 block text-sm font-medium text-gray-700">Description</label>
-            <textarea id="task-description" name="description" value={description} onChange={(event) => setDescription(event.target.value)} rows={3} className="w-full rounded-lg border border-gray-300 p-2" />
+            <textarea id="task-description" name="description" value={description} onChange={(event) => setDescription(event.target.value)} rows={3} disabled={Boolean(createdTask)} className="w-full rounded-lg border border-gray-300 p-2" />
           </div>
           <div>
             <label htmlFor="task-board" className="mb-1 block text-sm font-medium text-gray-700">Board</label>
-            <select id="task-board" name="board_id" required value={boardId} onChange={(event) => setBoardId(event.target.value)} className="w-full rounded-lg border border-gray-300 p-2">
+            <select id="task-board" name="board_id" required value={boardId} onChange={(event) => setBoardId(event.target.value)} disabled={Boolean(createdTask)} className="w-full rounded-lg border border-gray-300 p-2">
               <option value="" disabled>Select a board</option>
               {boards.map((board) => <option key={board.id} value={board.id}>{board.title}</option>)}
             </select>
           </div>
           <div>
             <label htmlFor="task-assignee" className="mb-1 block text-sm font-medium text-gray-700">Assigned to</label>
-            <select id="task-assignee" name="assigned_to_id" value={assignedToId} onChange={(event) => setAssignedToId(event.target.value)} className="w-full rounded-lg border border-gray-300 p-2">
+            <select id="task-assignee" name="assigned_to_id" value={assignedToId} onChange={(event) => setAssignedToId(event.target.value)} disabled={Boolean(createdTask)} className="w-full rounded-lg border border-gray-300 p-2">
               <option value="">Unassigned</option>
               {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.full_name}</option>)}
             </select>
           </div>
+          <div>
+            <label htmlFor="task-initiative" className="mb-1 block text-sm font-medium text-gray-700">Initiative</label>
+            <select
+              id="task-initiative"
+              name="initiative_id"
+              value={initiativeId}
+              onChange={(event) => setInitiativeId(event.target.value)}
+              disabled={Boolean(initiativeLoadError) || initiatives.length === 0}
+              className="w-full rounded-lg border border-gray-300 p-2"
+            >
+              <option value="">No initiative</option>
+              {initiatives.map((initiative) => <option key={initiative.id} value={initiative.id}>{initiative.title}</option>)}
+            </select>
+            {initiativeLoadError && <p role="alert" className="mt-1 text-sm text-red-700">Failed to load initiatives: {initiativeLoadError}</p>}
+            {!initiativeLoadError && initiatives.length === 0 && <p className="mt-1 text-sm text-gray-500">No initiatives available.</p>}
+          </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
               <label htmlFor="task-state" className="mb-1 block text-sm font-medium text-gray-700">Current state</label>
-              <select id="task-state" name="state" value={state} onChange={(event) => setState(event.target.value as 'Backlog' | 'ToDo')} className="w-full rounded-lg border border-gray-300 p-2">
+              <select id="task-state" name="state" value={state} onChange={(event) => setState(event.target.value as 'Backlog' | 'ToDo')} disabled={Boolean(createdTask)} className="w-full rounded-lg border border-gray-300 p-2">
                 <option value="Backlog">Backlog</option>
                 <option value="ToDo">ToDo</option>
               </select>
             </div>
             <div>
               <label htmlFor="task-priority" className="mb-1 block text-sm font-medium text-gray-700">Priority</label>
-              <select id="task-priority" name="priority" value={priority} onChange={(event) => setPriority(event.target.value as TaskPriority)} className="w-full rounded-lg border border-gray-300 p-2">
+              <select id="task-priority" name="priority" value={priority} onChange={(event) => setPriority(event.target.value as TaskPriority)} disabled={Boolean(createdTask)} className="w-full rounded-lg border border-gray-300 p-2">
                 <option value="Low">Low</option>
                 <option value="Medium">Medium</option>
                 <option value="High">High</option>
@@ -103,14 +145,14 @@ export function CreateTaskOverlay({
             </div>
             <div>
               <label htmlFor="task-complete-by" className="mb-1 block text-sm font-medium text-gray-700">Complete by</label>
-              <input id="task-complete-by" name="complete_by" type="datetime-local" value={completeBy} onChange={(event) => setCompleteBy(event.target.value)} className="w-full rounded-lg border border-gray-300 p-2" />
+              <input id="task-complete-by" name="complete_by" type="datetime-local" value={completeBy} onChange={(event) => setCompleteBy(event.target.value)} disabled={Boolean(createdTask)} className="w-full rounded-lg border border-gray-300 p-2" />
             </div>
           </div>
           {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
           <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
             <button type="button" onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100">Cancel</button>
             <button type="submit" disabled={saving || boards.length === 0} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
-              {saving ? 'Creating…' : 'Confirm Task'}
+              {saving ? (createdTask ? 'Assigning…' : 'Creating…') : (createdTask ? 'Retry initiative assignment' : 'Confirm Task')}
             </button>
           </div>
         </form>

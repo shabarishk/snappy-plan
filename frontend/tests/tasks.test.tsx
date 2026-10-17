@@ -685,6 +685,46 @@ describe('Tasks', () => {
       }));
     });
 
+  it('assigns a newly created task to a selected initiative', async () => {
+    const originalFetchMock = mockBoardReads();
+    const initiative = {
+      id: 'initiative-1',
+      title: 'Launch planning',
+      description: null,
+      complete_by: null,
+      assigned_to_id: null,
+      created_by_id: 'boardowner',
+      created_at: '2026-10-01T00:00:00Z',
+      updated_at: '2026-10-01T00:00:00Z',
+    };
+    const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/initiatives') return { ok: true, json: async () => [initiative] };
+      if (url === '/api/tasks' && options?.method === 'POST') {
+        return { ok: true, json: async () => taskResponse({ id: 'created-task', title: 'Plan launch' }) };
+      }
+      if (url === '/api/initiatives/initiative-1/tasks' && options?.method === 'POST') {
+        return { ok: true, status: 204 };
+      }
+      return originalFetchMock(url);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Board Owner' });
+    fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Task' }));
+    const createTaskDialog = screen.getByRole('dialog', { name: 'Create task' });
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Plan launch' } });
+    fireEvent.change(await within(createTaskDialog).findByLabelText('Initiative'), { target: { value: 'initiative-1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Task' }));
+
+    expect(await screen.findByText('Plan launch')).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith('/api/initiatives/initiative-1/tasks', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ task_id: 'created-task' }),
+    }));
+  });
+
   it('searches tasks across boards and opens their details from non-board pages', async () => {
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {
       if (url === '/api/boards') return { ok: true, json: async () => boardList };
