@@ -675,8 +675,14 @@ describe('Tasks', () => {
       expect(document.activeElement).toBe(assignToMeButton);
       fireEvent.click(leaveUnassignedButton);
   
-      expect(await screen.findByText('Review the garden plan')).toBeTruthy();
       expect(screen.queryByRole('heading', { name: 'Backlog' })).toBeNull();
+      expect(screen.getByRole('button', { name: 'Active' }).getAttribute('aria-current')).toBe('page');
+      expect(window.location.pathname).toBe('/');
+      const backlogNotification = await screen.findByRole('status');
+      expect(backlogNotification.textContent).toContain('Review the garden plan was added to Backlog.');
+      fireEvent.click(within(backlogNotification).getByRole('button', { name: 'Show task on board' }));
+      expect(screen.getByRole('button', { name: 'Backlog' }).getAttribute('aria-current')).toBe('page');
+      expect(await screen.findByText('Review the garden plan')).toBeTruthy();
       expect(screen.getByText('Priority: Medium')).toBeTruthy();
       expect(fetchMock).toHaveBeenCalledWith('/api/tasks', expect.objectContaining({
         method: 'POST',
@@ -726,7 +732,7 @@ describe('Tasks', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirm Task' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Assign Task to me' }));
 
-    expect(await screen.findByText('Plan launch')).toBeTruthy();
+    expect((await screen.findByRole('status')).textContent).toContain('Plan launch was added to Backlog.');
     expect(fetchMock).toHaveBeenCalledWith('/api/tasks', expect.objectContaining({
       method: 'POST',
       body: expect.stringContaining('"assigned_to_id":"boardowner"'),

@@ -31,6 +31,7 @@ type TaskGroup = {
 };
 
 const COMPLETED_TASK_RETENTION_MS = 24 * 60 * 60 * 1000;
+const BACKLOG_TASK_NOTIFICATION_MS = 5_000;
 
 export function AuthenticatedBoard({
   tasks,
@@ -73,6 +74,7 @@ export function AuthenticatedBoard({
   const [moveError, setMoveError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
+  const [backlogTaskNotification, setBacklogTaskNotification] = useState<string | null>(null);
 
   const navigateToPage = (page: AppPage, initiativeId?: string, initiativeTitle?: string) => {
     const path = pathForPage(page, initiativeId, initiativeTitle);
@@ -117,6 +119,12 @@ export function AuthenticatedBoard({
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, [needsInitiativeGrouping]);
+
+  useEffect(() => {
+    if (!backlogTaskNotification) return;
+    const timeout = window.setTimeout(() => setBacklogTaskNotification(null), BACKLOG_TASK_NOTIFICATION_MS);
+    return () => window.clearTimeout(timeout);
+  }, [backlogTaskNotification]);
 
   useEffect(() => {
     if (currentPage !== 'board') return;
@@ -590,10 +598,32 @@ export function AuthenticatedBoard({
             setSelectedBoardId(boardId);
             window.localStorage.setItem('snappy-plan-selected-board', boardId);
             setTasks((previous) => [...previous, { ...task, boardId }]);
-            navigateToPage(task.columnId === 'backlog' ? 'backlog' : 'board');
+            if (task.columnId === 'backlog' && currentPage === 'board') {
+              setBacklogTaskNotification(task.title);
+            } else {
+              navigateToPage(task.columnId === 'backlog' ? 'backlog' : 'board');
+            }
             setIsCreateTaskOpen(false);
           }}
         />
+      )}
+      {backlogTaskNotification && (
+        <div
+          role="status"
+          className="fixed bottom-4 right-4 z-40 flex max-w-sm items-center gap-3 rounded-lg bg-gray-900 px-4 py-3 text-sm text-white shadow-lg"
+        >
+          <span>{backlogTaskNotification} was added to Backlog.</span>
+          <button
+            type="button"
+            onClick={() => {
+              setBacklogTaskNotification(null);
+              navigateToPage('backlog');
+            }}
+            className="shrink-0 font-semibold text-blue-300 underline hover:text-blue-200"
+          >
+            Show task on board
+          </button>
+        </div>
       )}
       {currentPage !== 'profile' && currentPage !== 'settings' && isCreateBoardOpen && (
         <CreateBoardOverlay
