@@ -9,12 +9,14 @@ export function CreateTaskOverlay({
   boards,
   selectedBoardId,
   assignees,
+  currentUserId,
   onClose,
   onCreated,
 }: {
   boards: Board[];
   selectedBoardId: string;
   assignees: TaskAssignee[];
+  currentUserId: string;
   onClose: () => void;
   onCreated: (task: Task, boardId: string) => void;
 }) {
@@ -31,6 +33,7 @@ export function CreateTaskOverlay({
   const [completeBy, setCompleteBy] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [confirmUnassigned, setConfirmUnassigned] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -44,8 +47,7 @@ export function CreateTaskOverlay({
     return () => { cancelled = true; };
   }, []);
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const createTask = async (assigneeId: string) => {
     setSaving(true);
     setError('');
     let taskWasCreated = false;
@@ -56,7 +58,7 @@ export function CreateTaskOverlay({
           board_id: boardId,
           title,
           description,
-          assigned_to_id: assignedToId,
+          assigned_to_id: assigneeId,
           state,
           priority,
           complete_by: completeBy ? new Date(completeBy).toISOString() : null,
@@ -74,6 +76,31 @@ export function CreateTaskOverlay({
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!createdTask && !assignedToId) {
+      setConfirmUnassigned(true);
+      return;
+    }
+    void createTask(assignedToId);
+  };
+
+  const handleAssignToMe = () => {
+    if (!currentUserId) {
+      setError('Could not determine your account. Please try again.');
+      return;
+    }
+    setAssignedToId(currentUserId);
+    setConfirmUnassigned(false);
+    void createTask(currentUserId);
+  };
+
+  const handleLeaveUnassigned = () => {
+    setAssignedToId('');
+    setConfirmUnassigned(false);
+    void createTask('');
   };
 
   return (
@@ -157,6 +184,40 @@ export function CreateTaskOverlay({
           </div>
         </form>
       </section>
+      {confirmUnassigned && (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4">
+          <section
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="confirm-unassigned-title"
+            aria-describedby="confirm-unassigned-description"
+            className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl"
+          >
+            <h2 id="confirm-unassigned-title" className="text-lg font-bold text-gray-800">Create task without an assignee?</h2>
+            <p id="confirm-unassigned-description" className="mt-2 text-sm text-gray-600">Choose whether to assign this task to yourself or leave it unassigned.</p>
+            {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
+            <div className="mt-5 flex flex-col-reverse justify-end gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={handleLeaveUnassigned}
+                disabled={saving}
+                className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Leave Task Unassigned
+              </button>
+              <button
+                type="button"
+                onClick={handleAssignToMe}
+                disabled={saving}
+                autoFocus
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                Assign Task to me
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

@@ -583,6 +583,7 @@ export function AuthenticatedBoard({
           boards={boards}
           selectedBoardId={selectedBoardId}
           assignees={assignees}
+          currentUserId={profile?.username ?? ''}
           onClose={() => setIsCreateTaskOpen(false)}
           onCreated={(task, boardId) => {
             if (boardId !== selectedBoardId) setIsLoading(true);

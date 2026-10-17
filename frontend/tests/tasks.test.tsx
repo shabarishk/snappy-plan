@@ -667,6 +667,13 @@ describe('Tasks', () => {
       fireEvent.click(screen.getByRole('menuitem', { name: 'Task' }));
       fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Review the garden plan' } });
       fireEvent.click(screen.getByRole('button', { name: 'Confirm Task' }));
+      const confirmation = await screen.findByRole('alertdialog', { name: 'Create task without an assignee?' });
+      const assignToMeButton = within(confirmation).getByRole('button', { name: 'Assign Task to me' });
+      const leaveUnassignedButton = within(confirmation).getByRole('button', { name: 'Leave Task Unassigned' });
+      expect(assignToMeButton.className).toContain('bg-blue-600');
+      expect(leaveUnassignedButton.className).toContain('bg-white');
+      expect(document.activeElement).toBe(assignToMeButton);
+      fireEvent.click(leaveUnassignedButton);
   
       expect(await screen.findByText('Review the garden plan')).toBeTruthy();
       expect(screen.queryByRole('heading', { name: 'Backlog' })).toBeNull();
@@ -717,8 +724,13 @@ describe('Tasks', () => {
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Plan launch' } });
     fireEvent.change(await within(createTaskDialog).findByLabelText('Initiative'), { target: { value: 'initiative-1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Confirm Task' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Assign Task to me' }));
 
     expect(await screen.findByText('Plan launch')).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith('/api/tasks', expect.objectContaining({
+      method: 'POST',
+      body: expect.stringContaining('"assigned_to_id":"boardowner"'),
+    }));
     expect(fetchMock).toHaveBeenCalledWith('/api/initiatives/initiative-1/tasks', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ task_id: 'created-task' }),
