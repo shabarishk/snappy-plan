@@ -67,6 +67,7 @@ type launchRuntime struct {
 	mu                    sync.RWMutex
 	configureMu           sync.Mutex
 	active                http.Handler
+	configured            bool
 	configPath            string
 	setupToken            string
 	secureCookie          bool
@@ -125,6 +126,12 @@ func (runtime *launchRuntime) activateSavedConfig(ctx context.Context) error {
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return fmt.Errorf("decode saved database settings: %w", err)
 	}
+	if _, err := settings.connectionURL(); err != nil {
+		return fmt.Errorf("validate saved database settings: %w", err)
+	}
+	runtime.mu.Lock()
+	runtime.configured = true
+	runtime.mu.Unlock()
 	return runtime.activate(ctx, settings, false)
 }
 
@@ -132,9 +139,13 @@ func (runtime *launchRuntime) handleStatus(w http.ResponseWriter, _ *http.Reques
 	w.Header().Set("Cache-Control", "no-store")
 	runtime.mu.RLock()
 	connected := runtime.active != nil
+	configured := runtime.configured
 	runtime.mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]bool{"launch_required": !connected})
+	_ = json.NewEncoder(w).Encode(map[string]bool{
+		"launch_required": !configured,
+		"database_ready":  connected,
+	})
 }
 
 func (runtime *launchRuntime) handleConfigure(w http.ResponseWriter, r *http.Request) {
@@ -222,9 +233,45 @@ func (runtime *launchRuntime) activateURL(ctx context.Context, databaseURL strin
 	handler := runtime.newAppHandler(pool)
 	runtime.mu.Lock()
 	runtime.active = handler
+	runtime.configured = true
 	runtime.mu.Unlock()
 	keepPool = true
 	return nil
+}
+
+func (runtime *launchRuntime) retrySavedConfig(ctx context.Context) {
+	delay := 5 * time.Second
+	for {
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+
+		runtime.mu.RLock()
+		connected := runtime.active != nil
+		runtime.mu.RUnlock()
+		if connected {
+			return
+		}
+
+		attemptCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		err := runtime.activateSavedConfig(attemptCtx)
+		cancel()
+		if err == nil {
+			log.Println("Reconnected to PostgreSQL using saved configuration.")
+			return
+		}
+		log.Printf("PostgreSQL reconnect using saved configuration failed: %v", err)
+		if delay < time.Minute {
+			delay *= 2
+			if delay > time.Minute {
+				delay = time.Minute
+			}
+		}
+	}
 }
 
 func ensureApplicationSchema(ctx context.Context, beginTx func(context.Context) (backend.SetupTransaction, error)) error {

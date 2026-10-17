@@ -246,6 +246,17 @@ func TestActivateSavedConfig(t *testing.T) {
 				(!test.notExist && !strings.Contains(err.Error(), test.wantError)) {
 				t.Fatalf("activateSavedConfig error = %v, want containing %q", err, test.wantError)
 			}
+			if test.name == "connection failure" {
+				status := httptest.NewRecorder()
+				runtime.handler().ServeHTTP(status, httptest.NewRequest(http.MethodGet, "/api/launch/status", nil))
+				var response map[string]bool
+				if err := json.Unmarshal(status.Body.Bytes(), &response); err != nil {
+					t.Fatalf("decode launch status: %v", err)
+				}
+				if response["launch_required"] || response["database_ready"] {
+					t.Fatalf("launch status after saved-config connection failure = %v, want configured but unavailable", response)
+				}
+			}
 		})
 	}
 }
