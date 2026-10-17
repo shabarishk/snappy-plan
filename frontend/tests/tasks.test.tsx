@@ -248,6 +248,70 @@ describe('Tasks', () => {
       }));
     });
 
+  it('searches initiatives and assigns the selected initiative from task details', async () => {
+    const initiative = {
+      id: 'initiative-1',
+      title: 'Launch planning',
+      description: null,
+      complete_by: null,
+      assigned_to_id: null,
+      created_by_id: 'boardowner',
+      created_at: '2026-10-01T00:00:00Z',
+      updated_at: '2026-10-01T00:00:00Z',
+    };
+    let assignmentAttempts = 0;
+    const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
+      if (url === '/api/tasks?board_id=board-1') return {
+        ok: true,
+        json: async () => [taskResponse({
+          id: 'task-1',
+          title: 'Plan launch work',
+          state: 'ToDo',
+        })],
+      };
+      if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
+      if (url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
+      if (url === '/api/initiatives') return { ok: true, json: async () => [initiative] };
+      if (url === '/api/initiatives/initiative-1') {
+        return { ok: true, json: async () => ({ initiative, tasks: [] }) };
+      }
+      if (url === '/api/initiatives/initiative-1/tasks' && options?.method === 'POST') {
+        assignmentAttempts += 1;
+        return assignmentAttempts === 1
+          ? { ok: false, status: 500, text: async () => 'Assignment failed' }
+          : { ok: true, status: 204 };
+      }
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByText('Plan launch work'));
+    const taskDialog = screen.getByRole('dialog', { name: 'Task details' });
+    const initiativeCombo = within(taskDialog).getByRole('combobox', { name: 'Initiatives' });
+    fireEvent.change(initiativeCombo, { target: { value: 'launch' } });
+    expect(await within(taskDialog).findByRole('option', { name: 'Launch planning' })).toBeTruthy();
+    fireEvent.click(within(taskDialog).getByRole('option', { name: 'Launch planning' }));
+    expect((await within(taskDialog).findByRole('alert')).textContent).toContain('Assignment failed');
+
+    fireEvent.change(initiativeCombo, { target: { value: 'launch' } });
+    fireEvent.click(within(taskDialog).getByRole('option', { name: 'Launch planning' }));
+    await within(taskDialog).findByText('Assigned to: Launch planning');
+    expect((initiativeCombo as HTMLInputElement).value).toBe('Launch planning');
+    expect(fetchMock).toHaveBeenCalledWith('/api/initiatives/initiative-1/tasks', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ task_id: 'task-1' }),
+    }));
+
+    fireEvent.change(initiativeCombo, { target: { value: 'launch' } });
+    expect(within(taskDialog).getByText('No matching initiatives found.')).toBeTruthy();
+  });
+
   it('moves a task to the selected board from the details overlay', async () => {
       const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
         if (url === '/api/boards') return { ok: true, json: async () => boardList };

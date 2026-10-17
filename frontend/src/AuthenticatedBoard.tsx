@@ -655,8 +655,16 @@ export function AuthenticatedBoard({
           task={selectedTask.task}
           boards={boards}
           assignees={assignees}
+          initiatives={initiatives}
+          linkedInitiatives={taskInitiatives[selectedTask.task.id] ?? []}
           selectedBoardId={selectedTask.boardId}
           onClose={() => setSelectedTask(null)}
+          onInitiativeAssigned={(initiative) => {
+            setTaskInitiatives((previous) => ({
+              ...previous,
+              [selectedTask.task.id]: [...(previous[selectedTask.task.id] ?? []), initiative],
+            }));
+          }}
           onSaved={(updatedTask, assignedBoardId) => {
             setTasks((previous) => [
               ...previous.filter((task) => task.id !== updatedTask.id),
