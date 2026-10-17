@@ -53,3 +53,18 @@ npm run test:coverage
 Coverage reports are generated under `frontend/coverage/`; they are local test artifacts and should not be committed.
 
 The initial schema in `migrations/000001_init_schema.up.sql` defines the task description and completion timestamp. Compose initialization scripts run only when PostgreSQL creates a new data directory. On application startup, the backend idempotently ensures the task `state` and `priority` columns and constraints exist, removes the obsolete task position column, and creates personal boards for existing users who do not yet have one, including for existing database volumes. Existing tasks without a priority default to `Medium`; the board orders them High to Low.
+
+## GitHub releases and Unraid
+
+Publishing a GitHub Release whose tag follows `vMAJOR.MINOR.PATCH` (for example, `v1.2.0`) runs the release workflow. It runs backend and frontend checks, builds the application image for `linux/amd64` and `linux/arm64`, and publishes it to `ghcr.io/shabarishk/snappy-plan` with version, major, minor, and (for stable releases) `latest` tags. The source tag remains the versioned release record; deploy `:latest` for automatic updates or a version tag to pin an installation.
+
+Before the first release:
+
+1. In GitHub, open the published container package settings and change its visibility to **Public**. Unraid servers must be able to pull the image anonymously.
+2. Decide on and add an OSI-approved license. Unraid Community Applications requires a public repository with an OSI-approved license and a valid `ca_profile.xml`; this repository currently has no license.
+3. Create a version tag and publish a GitHub Release for that tag. Confirm the Release workflow succeeds and that the image tags appear in GitHub Packages.
+4. Submit `https://github.com/shabarishk/snappy-plan` through the [Unraid Community Applications submission page](https://ca.unraid.net/submit/new). Validate and scan the repository template as part of submission.
+
+The repository includes `templates/snappy-plan.xml` for the Unraid app and `ca_profile.xml` for the repository profile. The template installs only the application container; PostgreSQL is a separate prerequisite and must have persistent storage. Create the `snappyplan` database and apply only the `*.up.sql` files in `migrations/` in ascending numeric order to a new database before starting the application. Set `DATABASE_URL` in the template to the database's reachable connection URI. If PostgreSQL is another container, ensure the app can reach it on the Docker network; if it is hosted on Unraid, use its reachable address and PostgreSQL port. Do not expose PostgreSQL publicly.
+
+Use HTTPS through a reverse proxy for remote access and leave `COOKIE_SECURE=true`. Keep the app and database backups, and back up PostgreSQL before installing an updated image. Startup applies some schema upgrades, but it does not automatically run every file in `migrations/`.

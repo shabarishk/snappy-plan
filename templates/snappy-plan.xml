@@ -1,0 +1,17 @@
+<Container version="2">
+  <Name>Snappy Plan</Name>
+  <Repository>ghcr.io/shabarishk/snappy-plan:latest</Repository>
+  <Registry>https://ghcr.io</Registry>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/shabarishk/snappy-plan/issues</Support>
+  <Project>https://github.com/shabarishk/snappy-plan</Project>
+  <Overview>Self-hosted Kanban task planning with boards, initiatives, and user accounts.</Overview>
+  <Description>Snappy Plan is a self-hosted task planning application. It requires an existing PostgreSQL database; set DATABASE_URL to a PostgreSQL connection URI. Back up the database regularly before upgrading.</Description>
+  <Category>Productivity:</Category>
+  <WebUI>http://[IP]:[PORT:8080]</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/shabarishk/snappy-plan/main/templates/snappy-plan.xml</TemplateURL>
+  <Config Name="Web UI Port" Target="8080" Default="3000" Mode="tcp" Description="Snappy Plan web interface" Type="Port" Display="always" Required="true" Mask="false">3000</Config>
+  <Config Name="PostgreSQL connection URI" Target="DATABASE_URL" Default="" Mode="rw" Description="Required. Example: postgres://USER:PASSWORD@HOST:5432/snappyplan?sslmode=disable" Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="Secure session cookies" Target="COOKIE_SECURE" Default="true" Mode="rw" Description="Keep true when accessing through HTTPS. Set false only for HTTP on a trusted LAN." Type="Variable" Display="always" Required="true" Mask="false">true</Config>
+</Container>
