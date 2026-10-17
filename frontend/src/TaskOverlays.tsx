@@ -226,16 +226,22 @@ export function TaskDetailsOverlay({
   task,
   boards,
   assignees,
+  initiatives,
+  linkedInitiatives,
   selectedBoardId,
   onClose,
   onSaved,
+  onInitiativeAssigned,
 }: {
   task: Task;
   boards: Board[];
   assignees: TaskAssignee[];
+  initiatives: Initiative[];
+  linkedInitiatives: Initiative[];
   selectedBoardId: string;
   onClose: () => void;
   onSaved: (task: Task, boardId: string) => void;
+  onInitiativeAssigned: (initiative: Initiative) => void;
 }) {
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? '');
@@ -250,6 +256,10 @@ export function TaskDetailsOverlay({
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [initiativeSearch, setInitiativeSearch] = useState('');
+  const [showInitiativeOptions, setShowInitiativeOptions] = useState(false);
+  const [initiativeError, setInitiativeError] = useState('');
+  const [isAssigningInitiative, setIsAssigningInitiative] = useState(false);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -270,6 +280,27 @@ export function TaskDetailsOverlay({
       setError(err instanceof Error ? err.message : 'Failed to update task');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const matchingInitiatives = initiativeSearch.trim()
+    ? initiatives.filter((initiative) =>
+      !linkedInitiatives.some((linked) => linked.id === initiative.id)
+      && initiative.title.toLocaleLowerCase().includes(initiativeSearch.trim().toLocaleLowerCase()))
+    : [];
+
+  const handleAssignInitiative = async (initiative: Initiative) => {
+    setInitiativeError('');
+    setIsAssigningInitiative(true);
+    try {
+      await addTaskToInitiative(initiative.id, task.id);
+      onInitiativeAssigned(initiative);
+      setInitiativeSearch(initiative.title);
+      setShowInitiativeOptions(false);
+    } catch (err) {
+      setInitiativeError(err instanceof Error ? err.message : 'Failed to assign initiative');
+    } finally {
+      setIsAssigningInitiative(false);
     }
   };
 
@@ -310,6 +341,62 @@ export function TaskDetailsOverlay({
               <option value="">Unassigned</option>
               {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.full_name}</option>)}
             </select>
+          </div>
+          <div>
+            <label htmlFor="task-initiative-search" className="mb-1 block text-sm font-medium text-gray-700">Initiatives</label>
+            <div className="relative">
+              <input
+                id="task-initiative-search"
+                type="search"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded={showInitiativeOptions && Boolean(initiativeSearch.trim())}
+                aria-controls="task-initiative-options"
+                autoComplete="off"
+                placeholder="Search initiatives…"
+                value={initiativeSearch}
+                onFocus={() => setShowInitiativeOptions(true)}
+                onChange={(event) => {
+                  setInitiativeSearch(event.target.value);
+                  setShowInitiativeOptions(true);
+                  setInitiativeError('');
+                }}
+                disabled={isAssigningInitiative}
+                className="w-full rounded-lg border border-gray-300 p-2"
+              />
+              {showInitiativeOptions && initiativeSearch.trim() && (
+                <ul
+                  id="task-initiative-options"
+                  role="listbox"
+                  aria-label="Matching initiatives"
+                  className="absolute left-0 right-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+                >
+                  {matchingInitiatives.length === 0 ? (
+                    <li className="px-3 py-2 text-sm text-gray-500">No matching initiatives found.</li>
+                  ) : matchingInitiatives.map((initiative) => (
+                    <li key={initiative.id}>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected="false"
+                        disabled={isAssigningInitiative}
+                        onClick={() => void handleAssignInitiative(initiative)}
+                        className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50 disabled:opacity-50"
+                      >
+                        {initiative.title}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            {linkedInitiatives.length > 0 && (
+              <p className="mt-1 text-sm text-gray-600">
+                Assigned to: {linkedInitiatives.map((initiative) => initiative.title).join(', ')}
+              </p>
+            )}
+            {initiatives.length === 0 && <p className="mt-1 text-sm text-gray-500">No initiatives available.</p>}
+            {initiativeError && <p role="alert" className="mt-1 text-sm text-red-700">{initiativeError}</p>}
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
