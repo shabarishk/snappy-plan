@@ -162,6 +162,7 @@ describe('Account', () => {
   it('logs out from the user menu and returns to the login screen', async () => {
       let authChecks = 0;
       const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+        if (url === '/api/launch/status') return { ok: true, json: async () => ({ launch_required: false }) };
         if (url === '/api/auth/status') {
           authChecks += 1;
           return { ok: true, json: async () => ({ authenticated: authChecks === 1 }) };

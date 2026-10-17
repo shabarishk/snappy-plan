@@ -7,12 +7,17 @@ import (
 	"net/http"
 	"os"
 	"snappy-plan/backend"
+	"snappy-plan/migrations"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func main() { // Read from Docker env, fallback to localhost for manual testing
+func main() {
+	if os.Getenv("DATABASE_URL") == "" {
+		launchMain()
+		return
+	}
 	dbUrl := os.Getenv("DATABASE_URL")
 	if dbUrl == "" {
 		dbUrl = "postgres://postgres:password@localhost:5432/snappyplan?sslmode=disable"
@@ -40,6 +45,9 @@ func main() { // Read from Docker env, fallback to localhost for manual testing
 	defer pool.Close()
 
 	log.Println("Successfully connected to PostgreSQL!")
+	if err := migrations.Apply(context.Background(), pool); err != nil {
+		log.Fatalf("Unable to apply database migrations: %v\n", err)
+	}
 	if err := backend.EnsureUserIDSchema(context.Background(), func(ctx context.Context) (backend.SetupTransaction, error) {
 		return pool.Begin(ctx)
 	}); err != nil {
@@ -70,14 +78,36 @@ func main() { // Read from Docker env, fallback to localhost for manual testing
 	if err != nil {
 		log.Fatalf("Unable to load frontend assets: %v\n", err)
 	}
-	handler := backend.NewHandler(pool, func(ctx context.Context) (backend.SetupTransaction, error) {
+	handler := backend.NewHandlerWithSetupToken(pool, func(ctx context.Context) (backend.SetupTransaction, error) {
 		return pool.Begin(ctx)
-	}, os.Getenv("COOKIE_SECURE") == "true", frontendFiles)
+	}, os.Getenv("COOKIE_SECURE") == "true", os.Getenv("SNAPPY_SETUP_TOKEN"), frontendFiles)
 
 	// 5. Start the server
 	log.Println("Server starting on port 8080...")
 	err = http.ListenAndServe(":8080", handler)
 	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func launchMain() {
+	frontendFiles, err := backend.FrontendFiles()
+	if err != nil {
+		log.Fatalf("Unable to load frontend assets: %v", err)
+	}
+	configPath := os.Getenv("SNAPPY_CONFIG_FILE")
+	if configPath == "" {
+		configPath = defaultLaunchConfigPath
+	}
+	runtime := newLaunchRuntime(configPath, os.Getenv("SNAPPY_SETUP_TOKEN"), os.Getenv("COOKIE_SECURE") == "true", frontendFiles)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	err = runtime.activateSavedConfig(ctx)
+	cancel()
+	if err != nil && !os.IsNotExist(err) {
+		log.Printf("Saved PostgreSQL configuration is unavailable; use the Launching page to retry: %v", err)
+	}
+	log.Println("Server starting on port 8080...")
+	if err := http.ListenAndServe(":8080", runtime.handler()); err != nil {
 		log.Fatal(err)
 	}
 }

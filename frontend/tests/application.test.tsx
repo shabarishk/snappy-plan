@@ -7,6 +7,7 @@ import { mockBoardReads } from './appTestUtils';
 describe('Application', () => {
   it('requires auth before rendering the board', async () => {
       const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ launch_required: false }) })
         .mockResolvedValueOnce({ ok: true, json: async () => ({ authenticated: false }) })
         .mockResolvedValueOnce({ ok: true, json: async () => ({ setup_required: false }) });
       vi.stubGlobal('fetch', fetchMock);

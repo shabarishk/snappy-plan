@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -137,6 +138,28 @@ func TestSetupEndpointWithoutTransaction(t *testing.T) {
 	response := send(newHandler(&fakeDB{}, nil, false), http.MethodPost, "/api/setup", body, nil)
 	if response.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestSetupEndpointRequiresConfiguredSetupToken(t *testing.T) {
+	validBody := `{"username":"admin1","email":"admin@example.com","full_name":"Admin User","password":"password123"}`
+	txDB := &fakeDB{user: newUser("")}
+	tx := &fakeTx{fakeDB: txDB}
+	handler := backend.NewHandlerWithSetupToken(&fakeDB{}, func(context.Context) (backend.SetupTransaction, error) {
+		return tx, nil
+	}, false, "0123456789abcdef0123456789abcdef", nil)
+
+	unauthorized := send(handler, http.MethodPost, "/api/setup", validBody, nil)
+	if unauthorized.Code != http.StatusUnauthorized || tx.committed {
+		t.Fatalf("missing setup key status = %d; committed = %t", unauthorized.Code, tx.committed)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/setup", strings.NewReader(validBody))
+	request.Header.Set("X-Setup-Token", "0123456789abcdef0123456789abcdef")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !tx.committed {
+		t.Fatalf("valid setup key status = %d; committed = %t", response.Code, tx.committed)
 	}
 }
 
