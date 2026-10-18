@@ -1,18 +1,23 @@
 import { useState, useEffect } from 'react';
 
 export function AuthWrapper({ onAuthenticated }: { onAuthenticated: () => void }) {
-  const [view, setView] = useState<'loading' | 'launch' | 'setup' | 'login' | 'error'>('loading');
+  const [view, setView] = useState<'loading' | 'launch' | 'reconnecting' | 'setup' | 'login' | 'error'>('loading');
   const [setupTokenRequired, setSetupTokenRequired] = useState(false);
   const [setupToken, setSetupToken] = useState('');
+  const [reconnectError, setReconnectError] = useState('');
 
   useEffect(() => {
     const checkAuth = async (token = '') => {
       try {
         const launchRes = await fetch('/api/launch/status', { credentials: 'same-origin' });
         if (!launchRes.ok) throw new Error('Failed to check launch status');
-        const launchData: { launch_required: boolean } = await launchRes.json();
+        const launchData: { launch_required: boolean; database_ready?: boolean } = await launchRes.json();
         if (launchData.launch_required) {
           setView('launch');
+          return;
+        }
+        if (launchData.database_ready === false) {
+          setView('reconnecting');
           return;
         }
 
@@ -39,6 +44,51 @@ export function AuthWrapper({ onAuthenticated }: { onAuthenticated: () => void }
     void checkAuth();
   }, [onAuthenticated]);
 
+  useEffect(() => {
+    if (view !== 'reconnecting') return;
+    let cancelled = false;
+    const checkDatabase = async () => {
+      try {
+        const launchRes = await fetch('/api/launch/status', { credentials: 'same-origin' });
+        if (!launchRes.ok) throw new Error('Failed to check database connection');
+        const launchData: { launch_required: boolean; database_ready?: boolean } = await launchRes.json();
+        if (cancelled) return;
+        if (launchData.launch_required) {
+          setView('launch');
+          return;
+        }
+        if (launchData.database_ready === false) return;
+
+        const authRes = await fetch('/api/auth/status', { credentials: 'same-origin' });
+        if (!authRes.ok) throw new Error('Failed to check authentication status');
+        const authData: { authenticated: boolean } = await authRes.json();
+        if (cancelled) return;
+        if (authData.authenticated) {
+          onAuthenticated();
+          return;
+        }
+        const setupRes = await fetch('/api/setup/status', { credentials: 'same-origin' });
+        if (!setupRes.ok) throw new Error('Failed to check setup status');
+        const setupData: { setup_required: boolean; setup_token_required?: boolean } = await setupRes.json();
+        if (cancelled) return;
+        setSetupTokenRequired(setupData.setup_token_required ?? false);
+        setView(setupData.setup_required ? 'setup' : 'login');
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Failed to reconnect to Snappy Plan', err);
+          setReconnectError('Still unable to reach the database. Snappy Plan will keep retrying automatically.');
+        }
+      }
+    };
+
+    void checkDatabase();
+    const interval = window.setInterval(() => void checkDatabase(), 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [view, onAuthenticated]);
+
   if (view === 'loading') {
     return (
       <div className="h-screen bg-gray-200 flex items-center justify-center">
@@ -52,6 +102,21 @@ export function AuthWrapper({ onAuthenticated }: { onAuthenticated: () => void }
       <div className="h-screen bg-gray-200 flex items-center justify-center p-4">
         <div role="alert" className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md text-center text-red-700">
           Unable to connect to Snappy Plan. Please refresh the page and try again.
+        </div>
+      </div>
+    );
+  }
+
+  if (view === 'reconnecting') {
+    return (
+      <div className="min-h-screen bg-gray-200 flex items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md text-center">
+          <h1 className="text-2xl font-extrabold text-gray-800">Reconnecting to PostgreSQL</h1>
+          <p className="text-sm text-gray-600 mt-3">Your saved database configuration was found. Snappy Plan is retrying the connection; this page will continue automatically when the database is ready.</p>
+          {reconnectError && <p role="alert" className="mt-4 text-sm text-amber-700">{reconnectError}</p>}
+          <button type="button" onClick={() => setView('launch')} className="mt-5 text-sm text-blue-700 underline">
+            Change database connection settings
+          </button>
         </div>
       </div>
     );

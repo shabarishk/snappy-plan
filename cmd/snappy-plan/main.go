@@ -34,7 +34,16 @@ func runLaunchServer(getenv func(string) string, listen func(string, http.Handle
 		err = runtime.activateSavedConfig(ctx)
 	}
 	if err != nil && !os.IsNotExist(err) {
-		log.Printf("Saved PostgreSQL configuration is unavailable; use the Launching page to retry: %v", err)
+		log.Printf("Saved PostgreSQL configuration is unavailable; Snappy Plan will retry the connection: %v", err)
+	}
+	runtime.mu.RLock()
+	hasSavedConfig := runtime.configured
+	databaseReady := runtime.active != nil
+	runtime.mu.RUnlock()
+	if hasSavedConfig && !databaseReady {
+		retryCtx, cancelRetries := context.WithCancel(context.Background())
+		defer cancelRetries()
+		go runtime.retrySavedConfig(retryCtx)
 	}
 	log.Println("Server starting on port 8080...")
 	return listen(":8080", runtime.handler())

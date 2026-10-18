@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthWrapper } from '../src/Auth';
 
@@ -7,6 +7,7 @@ const response = (body: unknown, ok = true) =>
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -73,6 +74,25 @@ describe('AuthWrapper', () => {
 
     await waitFor(() => expect(onAuthenticated).toHaveBeenCalledOnce());
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not show Launch for saved settings and returns to auth when the database reconnects', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ launch_required: false, database_ready: false }))
+      .mockResolvedValueOnce(response({ launch_required: false, database_ready: false }))
+      .mockResolvedValueOnce(response({ launch_required: false, database_ready: true }))
+      .mockResolvedValueOnce(response({ authenticated: false }))
+      .mockResolvedValueOnce(response({ setup_required: false }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AuthWrapper onAuthenticated={vi.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByRole('heading', { name: 'Reconnecting to PostgreSQL' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Launch Snappy Plan' })).toBeNull();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(screen.getByRole('heading', { name: 'Welcome Back' })).toBeTruthy();
   });
 
   it('shows an error instead of falling through to login when status checks fail', async () => {
