@@ -123,6 +123,89 @@ func (api *ApiConfig) handleGetBoards(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (api *ApiConfig) handleUpdateBoardOrder(w http.ResponseWriter, r *http.Request) {
+	session, ok, err := api.authenticatedSession(r)
+	if err != nil {
+		http.Error(w, "Failed to validate session", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	var params struct {
+		BoardIDs []string `json:"board_ids"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&params); err != nil || params.BoardIDs == nil {
+		http.Error(w, "Board IDs are required", http.StatusBadRequest)
+		return
+	}
+	boardIDs := make([]pgtype.UUID, len(params.BoardIDs))
+	requestedIDs := make(map[pgtype.UUID]struct{}, len(params.BoardIDs))
+	for index, value := range params.BoardIDs {
+		if err := boardIDs[index].Scan(value); err != nil {
+			http.Error(w, "Board ID is invalid", http.StatusBadRequest)
+			return
+		}
+		if _, exists := requestedIDs[boardIDs[index]]; exists {
+			http.Error(w, "Board IDs must not contain duplicates", http.StatusBadRequest)
+			return
+		}
+		requestedIDs[boardIDs[index]] = struct{}{}
+	}
+
+	if api.BeginTx == nil {
+		http.Error(w, "Board ordering is unavailable", http.StatusInternalServerError)
+		return
+	}
+	tx, err := api.BeginTx(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to start board ordering", http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback(context.Background())
+	if _, err := tx.Exec(r.Context(), "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", "board-order:"+session.UserID); err != nil {
+		http.Error(w, "Failed to prepare board ordering", http.StatusInternalServerError)
+		return
+	}
+
+	txQueries := dbgen.New(tx)
+	boards, err := txQueries.GetBoardsByOwner(r.Context(), session.UserID)
+	if err != nil {
+		http.Error(w, "Failed to validate board access", http.StatusInternalServerError)
+		return
+	}
+	if len(boards) != len(boardIDs) {
+		http.Error(w, "Board order must include all accessible boards", http.StatusBadRequest)
+		return
+	}
+	for _, board := range boards {
+		if _, exists := requestedIDs[board.ID]; !exists {
+			http.Error(w, "Board order contains an inaccessible board", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if err := txQueries.DeleteUserBoardOrder(r.Context(), session.UserID); err != nil {
+		http.Error(w, "Failed to replace board order", http.StatusInternalServerError)
+		return
+	}
+	for position, boardID := range boardIDs {
+		if err := txQueries.InsertUserBoardOrder(r.Context(), dbgen.InsertUserBoardOrderParams{
+			UserID: session.UserID, BoardID: boardID, Position: int32(position),
+		}); err != nil {
+			http.Error(w, "Failed to save board order", http.StatusInternalServerError)
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		http.Error(w, "Failed to save board order", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (api *ApiConfig) handleDeleteBoard(w http.ResponseWriter, r *http.Request) {
 	session, ok, err := api.authenticatedSession(r)
 	if err != nil {

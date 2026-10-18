@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DndContext, DragOverlay, closestCorners, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core';
-import { deleteBoard as persistDeleteBoard, getBoards, getInitiative, getInitiatives, getProfile, getTaskAssignees, getTasks, logout, moveTask as persistMoveTask } from './api';
+import { deleteBoard as persistDeleteBoard, getBoards, getInitiative, getInitiatives, getProfile, getTaskAssignees, getTasks, logout, moveTask as persistMoveTask, updateBoardOrder as persistBoardOrder } from './api';
 import type { Board, Initiative, TaskAssignee, UserProfile } from './api';
 import type { ColumnId, Task } from './taskModel';
 import type { AppPage } from './navigation';
@@ -28,6 +28,7 @@ type TaskGroup = {
   id: string;
   title: string;
   tasks: Task[];
+  boardId?: string;
 };
 
 const COMPLETED_TASK_RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -72,6 +73,8 @@ export function AuthenticatedBoard({
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [moveError, setMoveError] = useState('');
+  const [boardOrderError, setBoardOrderError] = useState('');
+  const [isSavingBoardOrder, setIsSavingBoardOrder] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [backlogTaskNotification, setBacklogTaskNotification] = useState<string | null>(null);
@@ -305,6 +308,29 @@ export function AuthenticatedBoard({
     void persistTaskMove(task, 'todo');
   };
 
+  const moveBoard = async (boardId: string, direction: -1 | 1) => {
+    if (isSavingBoardOrder) return;
+    const currentIndex = boards.findIndex((board) => board.id === boardId);
+    const nextIndex = currentIndex + direction;
+    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= boards.length) return;
+
+    const previousBoards = boards;
+    const reorderedBoards = [...boards];
+    [reorderedBoards[currentIndex], reorderedBoards[nextIndex]] =
+      [reorderedBoards[nextIndex], reorderedBoards[currentIndex]];
+    setBoards(reorderedBoards);
+    setBoardOrderError('');
+    setIsSavingBoardOrder(true);
+    try {
+      await persistBoardOrder(reorderedBoards.map((board) => board.id));
+    } catch (err) {
+      setBoards(previousBoards);
+      setBoardOrderError(err instanceof Error ? err.message : 'Failed to save board order');
+    } finally {
+      setIsSavingBoardOrder(false);
+    }
+  };
+
   const initiativesByBoardId = useMemo(() => {
     const byBoard: Record<string, Initiative[]> = {};
     for (const task of tasks) {
@@ -319,20 +345,45 @@ export function AuthenticatedBoard({
     return byBoard;
   }, [selectedBoardId, taskInitiatives, tasks]);
 
-  const filteredTasks = useMemo(() => tasks.filter((task) => {
-    if (currentPage === 'board' && task.state === 'Complete' && task.completedAt) {
-      const completedAt = Date.parse(task.completedAt);
-      if (Number.isFinite(completedAt) && completedAt + COMPLETED_TASK_RETENTION_MS <= currentTime) return false;
+  const filteredTasks = useMemo(() => {
+    const newestCompletedTaskIds = new Set<string>();
+    if (currentPage === 'board') {
+      const completedTasksByBoard = new Map<string, Task[]>();
+      for (const task of tasks) {
+        if (task.state !== 'Complete') continue;
+        const boardId = task.boardId ?? selectedBoardId;
+        const boardTasks = completedTasksByBoard.get(boardId) ?? [];
+        boardTasks.push(task);
+        completedTasksByBoard.set(boardId, boardTasks);
+      }
+      for (const boardTasks of completedTasksByBoard.values()) {
+        boardTasks.sort((first, second) => {
+          const firstTimestamp = first.completedAt ? Date.parse(first.completedAt) : Number.NEGATIVE_INFINITY;
+          const secondTimestamp = second.completedAt ? Date.parse(second.completedAt) : Number.NEGATIVE_INFINITY;
+          const firstCompletedAt = Number.isFinite(firstTimestamp) ? firstTimestamp : Number.NEGATIVE_INFINITY;
+          const secondCompletedAt = Number.isFinite(secondTimestamp) ? secondTimestamp : Number.NEGATIVE_INFINITY;
+          return secondCompletedAt - firstCompletedAt;
+        });
+        for (const task of boardTasks.slice(0, 5)) newestCompletedTaskIds.add(task.id);
+      }
     }
-    const belongsToBoard = !boardFilterId || (task.boardId ?? selectedBoardId) === boardFilterId;
-    const belongsToInitiative = !initiativeFilterId
-      || (taskInitiatives[task.id] ?? []).some((initiative) => initiative.id === initiativeFilterId);
-    const belongsToAssignee = assigneeFilterId === 'all'
-      || (assigneeFilterId === 'unassigned'
-        ? !task.assignedToId
-        : task.assignedToId === assigneeFilterId.slice('assignee:'.length));
-    return belongsToBoard && belongsToInitiative && belongsToAssignee;
-  }), [assigneeFilterId, boardFilterId, currentPage, currentTime, initiativeFilterId, selectedBoardId, taskInitiatives, tasks]);
+
+    return tasks.filter((task) => {
+      if (currentPage === 'board' && task.state === 'Complete' && !newestCompletedTaskIds.has(task.id)) return false;
+      if (currentPage === 'board' && task.state === 'Complete' && task.completedAt) {
+        const completedAt = Date.parse(task.completedAt);
+        if (Number.isFinite(completedAt) && completedAt + COMPLETED_TASK_RETENTION_MS <= currentTime) return false;
+      }
+      const belongsToBoard = !boardFilterId || (task.boardId ?? selectedBoardId) === boardFilterId;
+      const belongsToInitiative = !initiativeFilterId
+        || (taskInitiatives[task.id] ?? []).some((initiative) => initiative.id === initiativeFilterId);
+      const belongsToAssignee = assigneeFilterId === 'all'
+        || (assigneeFilterId === 'unassigned'
+          ? !task.assignedToId
+          : task.assignedToId === assigneeFilterId.slice('assignee:'.length));
+      return belongsToBoard && belongsToInitiative && belongsToAssignee;
+    });
+  }, [assigneeFilterId, boardFilterId, currentPage, currentTime, initiativeFilterId, selectedBoardId, taskInitiatives, tasks]);
 
   const taskGroups = useMemo<TaskGroup[]>(() => {
     if (groupBy === 'board') {
@@ -340,6 +391,7 @@ export function AuthenticatedBoard({
         id: `board-${board.id}`,
         title: board.title,
         tasks: filteredTasks.filter((task) => (task.boardId ?? selectedBoardId) === board.id),
+        boardId: board.id,
       }));
     }
 
@@ -815,7 +867,7 @@ export function AuthenticatedBoard({
               </button>
             </nav>
           </div>
-          {(loadError || moveError) && <p role="alert" className="mb-3 rounded bg-red-100 p-3 text-sm text-red-700">{loadError || moveError}</p>}
+          {(loadError || moveError || boardOrderError) && <p role="alert" className="mb-3 rounded bg-red-100 p-3 text-sm text-red-700">{loadError || moveError || boardOrderError}</p>}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
             <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
@@ -928,7 +980,37 @@ export function AuthenticatedBoard({
                   <section key={group.id} aria-label={`${group.title} tasks`} className="space-y-2">
                     <header className="flex items-center justify-between gap-3">
                       <h2 className="text-lg font-semibold text-gray-800">{group.title}</h2>
-                      <span className="text-xs text-gray-500">{groupTasks.length} tasks</span>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-gray-500">{groupTasks.length} tasks</span>
+                        {currentPage === 'board' && groupBy === 'board' && !boardFilterId && group.boardId && (
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              aria-label={`Move ${group.title} up`}
+                              title="Move board up"
+                              disabled={isSavingBoardOrder || boards[0]?.id === group.boardId}
+                              onClick={() => {
+                                if (group.boardId) void moveBoard(group.boardId, -1);
+                              }}
+                              className="rounded px-2 py-1 text-sm text-gray-600 hover:bg-gray-200 disabled:opacity-40"
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Move ${group.title} down`}
+                              title="Move board down"
+                              disabled={isSavingBoardOrder || boards[boards.length - 1]?.id === group.boardId}
+                              onClick={() => {
+                                if (group.boardId) void moveBoard(group.boardId, 1);
+                              }}
+                              className="rounded px-2 py-1 text-sm text-gray-600 hover:bg-gray-200 disabled:opacity-40"
+                            >
+                              ↓
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </header>
                     <div className={`grid items-start gap-4 ${currentPage === 'backlog' ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-3'}`}>
                       {visibleColumns.map((column) => (

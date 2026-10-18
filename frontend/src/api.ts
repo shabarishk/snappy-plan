@@ -170,6 +170,16 @@ export const getBoards = async (): Promise<Board[]> => {
   return res.json();
 };
 
+export const updateBoardOrder = async (boardIds: string[]): Promise<void> => {
+  const res = await fetch('/api/boards/order', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ board_ids: boardIds }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+};
+
 export const deleteBoard = async (boardId: string): Promise<void> => {
   const res = await fetch(`/api/boards/${encodeURIComponent(boardId)}`, {
     method: 'DELETE',

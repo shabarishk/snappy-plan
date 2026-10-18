@@ -222,6 +222,46 @@ func TestCreateTaskEndpoint(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects To Do tasks when the lane is full", func(t *testing.T) {
+		ownerID := "owner1"
+		db := &fakeDB{
+			session:        dbgen.Session{Token: "token", UserID: ownerID},
+			board:          dbgen.Board{ID: newUUID(2), OwnerID: ownerID},
+			stateTaskCount: 5,
+		}
+		tx := &fakeTx{fakeDB: db}
+		handler := newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false)
+
+		response := send(handler, http.MethodPost, "/api/tasks",
+			`{"title":"Full lane","state":"ToDo"}`, &http.Cookie{Name: "snappy_session", Value: "token"})
+		if response.Code != http.StatusConflict || len(db.taskArgs) != 0 {
+			t.Fatalf("status = %d, task args = %#v, want conflict without creating task: %s",
+				response.Code, db.taskArgs, response.Body.String())
+		}
+	})
+
+	t.Run("reports lane capacity query failures", func(t *testing.T) {
+		ownerID := "owner1"
+		db := &fakeDB{
+			session:           dbgen.Session{Token: "token", UserID: ownerID},
+			board:             dbgen.Board{ID: newUUID(2), OwnerID: ownerID},
+			stateTaskCountErr: errors.New("capacity query failed"),
+		}
+		tx := &fakeTx{fakeDB: db}
+		handler := newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false)
+
+		response := send(handler, http.MethodPost, "/api/tasks",
+			`{"title":"Task","state":"ToDo"}`, &http.Cookie{Name: "snappy_session", Value: "token"})
+		if response.Code != http.StatusInternalServerError || len(db.taskArgs) != 0 {
+			t.Fatalf("status = %d, task args = %#v, want capacity error without creating task: %s",
+				response.Code, db.taskArgs, response.Body.String())
+		}
+	})
+
 	t.Run("creates task on the selected owned board", func(t *testing.T) {
 		ownerID := "owner1"
 		boardID := newUUID(4)
@@ -344,6 +384,28 @@ func TestMoveTaskEndpoint(t *testing.T) {
 		}
 		if movedTask.State != "InProgress" || movedTask.ColumnID != destinationColumnID {
 			t.Fatalf("moved task = %#v", movedTask)
+		}
+	})
+
+	t.Run("rejects moving into a full lane", func(t *testing.T) {
+		taskID := newUUID(2)
+		db := &fakeDB{
+			session:        dbgen.Session{Token: "token", UserID: "owner1"},
+			board:          dbgen.Board{ID: newUUID(4), OwnerID: "owner1"},
+			column:         dbgen.Column{ID: newUUID(3), BoardID: newUUID(4), Title: "To Do"},
+			task:           dbgen.Task{ID: taskID, State: "Backlog"},
+			stateTaskCount: 5,
+		}
+		tx := &fakeTx{fakeDB: db}
+		handler := newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false)
+
+		response := send(handler, http.MethodPatch, "/api/tasks/"+taskID.String(),
+			`{"state":"ToDo"}`, cookie)
+		if response.Code != http.StatusConflict || len(db.moveTaskArgs) != 0 {
+			t.Fatalf("status = %d, move args = %#v, want conflict without moving task: %s",
+				response.Code, db.moveTaskArgs, response.Body.String())
 		}
 	})
 
@@ -595,6 +657,25 @@ func TestUpdateTaskEndpoint(t *testing.T) {
 		}
 		if len(db.updateTaskArgs) != 9 || db.updateTaskArgs[0] != columnID {
 			t.Fatalf("task update args = %#v, want destination lane %v", db.updateTaskArgs, columnID)
+		}
+	})
+
+	t.Run("rejects editing a task into a full lane", func(t *testing.T) {
+		db := &fakeDB{
+			session:        dbgen.Session{Token: "token", UserID: ownerID},
+			board:          dbgen.Board{ID: newUUID(4), OwnerID: ownerID},
+			column:         dbgen.Column{ID: newUUID(6), BoardID: newUUID(4), Title: "In Progress"},
+			stateTaskCount: 5,
+		}
+		tx := &fakeTx{fakeDB: db}
+		handler := newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false)
+		requestBody := `{"title":"Updated","description":"","priority":"Low","state":"InProgress"}`
+		response := send(handler, http.MethodPut, "/api/tasks/"+taskID.String(), requestBody, cookie)
+		if response.Code != http.StatusConflict || len(db.updateTaskArgs) != 0 {
+			t.Fatalf("status = %d, update args = %#v, want conflict without updating task: %s",
+				response.Code, db.updateTaskArgs, response.Body.String())
 		}
 	})
 

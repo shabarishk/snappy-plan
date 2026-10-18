@@ -13,6 +13,7 @@ sql:
       - "migrations/000009_add_profile_picture.up.sql"
       - "migrations/000010_add_preferred_name.up.sql"
       - "migrations/000011_personal_boards.up.sql"
+      - "migrations/000012_create_user_board_order.up.sql"
     queries: "queries/"
     gen:
       go:

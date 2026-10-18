@@ -153,6 +153,113 @@ func TestGetBoardsEndpoint(t *testing.T) {
 	})
 }
 
+func TestUpdateBoardOrderEndpoint(t *testing.T) {
+	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
+	t.Run("requires authentication", func(t *testing.T) {
+		response := send(newHandler(&fakeDB{}, nil, false), http.MethodPut,
+			"/api/boards/order", `{"board_ids":[]}`, nil)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
+		}
+	})
+
+	boardID1, boardID2 := newUUID(1), newUUID(2)
+	t.Run("persists the requested order for all accessible boards", func(t *testing.T) {
+		db := &fakeDB{
+			session: dbgen.Session{Token: "token", UserID: "owner7"},
+			boards: []dbgen.Board{
+				{ID: boardID1, Title: "First", OwnerID: "owner7"},
+				{ID: boardID2, Title: "Second", OwnerID: "owner7"},
+			},
+		}
+		tx := &fakeTx{fakeDB: db}
+		handler := newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false)
+
+		response := send(handler, http.MethodPut, "/api/boards/order",
+			`{"board_ids":["`+boardID2.String()+`","`+boardID1.String()+`"]}`, cookie)
+		if response.Code != http.StatusNoContent || !tx.committed {
+			t.Fatalf("status = %d, committed = %t, want no content and committed transaction: %s",
+				response.Code, tx.committed, response.Body.String())
+		}
+		if len(db.boardOrderDeleteArgs) != 1 || db.boardOrderDeleteArgs[0] != "owner7" {
+			t.Fatalf("board order delete args = %#v", db.boardOrderDeleteArgs)
+		}
+		if len(db.boardOrderInsertArgs) != 2 {
+			t.Fatalf("board order inserts = %#v", db.boardOrderInsertArgs)
+		}
+		if db.boardOrderInsertArgs[0][0] != "owner7" || db.boardOrderInsertArgs[0][1] != boardID2 ||
+			db.boardOrderInsertArgs[0][2] != int32(0) ||
+			db.boardOrderInsertArgs[1][1] != boardID1 || db.boardOrderInsertArgs[1][2] != int32(1) {
+			t.Fatalf("board order insert args = %#v", db.boardOrderInsertArgs)
+		}
+	})
+
+	for _, test := range []struct {
+		name string
+		body string
+	}{
+		{name: "invalid JSON", body: `{`},
+		{name: "missing board IDs", body: `{}`},
+		{name: "invalid board ID", body: `{"board_ids":["invalid"]}`},
+		{name: "duplicate board ID", body: `{"board_ids":["` + boardID1.String() + `","` + boardID1.String() + `"]}`},
+		{name: "incomplete board order", body: `{"board_ids":["` + boardID1.String() + `"]}`},
+		{name: "inaccessible board", body: `{"board_ids":["` + boardID1.String() + `","` + newUUID(3).String() + `"]}`},
+	} {
+		t.Run("rejects "+test.name, func(t *testing.T) {
+			db := &fakeDB{
+				session: dbgen.Session{Token: "token", UserID: "owner7"},
+				boards: []dbgen.Board{
+					{ID: boardID1, Title: "First", OwnerID: "owner7"},
+					{ID: boardID2, Title: "Second", OwnerID: "owner7"},
+				},
+			}
+			response := send(newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+				return &fakeTx{fakeDB: db}, nil
+			}, false), http.MethodPut, "/api/boards/order", test.body, cookie)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusBadRequest, response.Body.String())
+			}
+			if len(db.boardOrderInsertArgs) != 0 {
+				t.Fatalf("invalid order was persisted: %#v", db.boardOrderInsertArgs)
+			}
+		})
+	}
+
+	t.Run("reports board-order persistence failures", func(t *testing.T) {
+		for _, test := range []struct {
+			name           string
+			boardsErr      error
+			deleteOrderErr error
+			insertOrderErr error
+		}{
+			{name: "board access query", boardsErr: errors.New("board query failed")},
+			{name: "delete existing order", deleteOrderErr: errors.New("delete failed")},
+			{name: "insert new order", insertOrderErr: errors.New("insert failed")},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				db := &fakeDB{
+					session:             dbgen.Session{Token: "token", UserID: "owner7"},
+					boards:              []dbgen.Board{{ID: boardID1, Title: "First", OwnerID: "owner7"}},
+					boardsErr:           test.boardsErr,
+					boardOrderDeleteErr: test.deleteOrderErr,
+					boardOrderInsertErr: test.insertOrderErr,
+				}
+				tx := &fakeTx{fakeDB: db}
+				response := send(newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+					return tx, nil
+				}, false), http.MethodPut, "/api/boards/order",
+					`{"board_ids":["`+boardID1.String()+`"]}`, cookie)
+				if response.Code != http.StatusInternalServerError || tx.committed {
+					t.Fatalf("status = %d, committed = %t, want internal error and rollback: %s",
+						response.Code, tx.committed, response.Body.String())
+				}
+			})
+		}
+	})
+}
+
 func TestDeleteBoardEndpoint(t *testing.T) {
 	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
 	t.Run("requires authentication", func(t *testing.T) {

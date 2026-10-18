@@ -73,6 +73,39 @@ describe('Tasks', () => {
       'undated-low',
     ]);
   });
+
+  it('only displays the five most recently completed tasks on each board', async () => {
+    const currentTime = Date.now();
+    const completedTasks: Task[] = Array.from({ length: 6 }, (_, index) => ({
+      id: `completed-${index + 1}`,
+      boardId: 'board-1',
+      columnId: 'complete',
+      state: 'Complete',
+      priority: 'Medium',
+      title: `Completed task ${index + 1}`,
+      completedAt: new Date(currentTime - (6 - index) * 60_000).toISOString(),
+    }));
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
+      if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
+      if (url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
+      if (url === '/api/initiatives') return { ok: true, json: async () => [] };
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    }));
+    const setTasks = vi.fn();
+
+    render(<AuthenticatedBoard tasks={completedTasks} setTasks={setTasks} />);
+
+    expect(await screen.findByText('Completed task 6')).toBeTruthy();
+    expect(screen.queryByText('Completed task 1')).toBeNull();
+    for (let index = 2; index <= 5; index += 1) {
+      expect(screen.getByText(`Completed task ${index}`)).toBeTruthy();
+    }
+  });
   
   it('moves backlog tasks between lanes and displays their priority and completion time', async () => {
       vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
