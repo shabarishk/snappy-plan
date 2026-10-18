@@ -14,6 +14,49 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const taskStateLimit = int64(5)
+
+func lockTaskBoard(ctx context.Context, tx SetupTransaction, boardID pgtype.UUID) error {
+	_, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", boardID.String())
+	return err
+}
+
+func taskStateHasCapacity(ctx context.Context, tx SetupTransaction, boardID pgtype.UUID, state string, excludedTaskID pgtype.UUID) (bool, error) {
+	var taskCount int64
+	err := tx.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM tasks AS task
+		JOIN columns AS task_column ON task_column.id = task.column_id
+		WHERE task_column.board_id = $1
+		  AND task.state = $2
+		  AND ($3::UUID IS NULL OR task.id <> $3)
+	`, boardID, state, excludedTaskID).Scan(&taskCount)
+	if err != nil {
+		return false, err
+	}
+	return taskCount < taskStateLimit, nil
+}
+
+func enforceTaskStateCapacity(w http.ResponseWriter, r *http.Request, tx SetupTransaction, boardID pgtype.UUID, state string, excludedTaskID pgtype.UUID) bool {
+	if state != "ToDo" && state != "InProgress" {
+		return true
+	}
+	if err := lockTaskBoard(r.Context(), tx, boardID); err != nil {
+		http.Error(w, "Failed to prepare task lane capacity", http.StatusInternalServerError)
+		return false
+	}
+	hasCapacity, err := taskStateHasCapacity(r.Context(), tx, boardID, state, excludedTaskID)
+	if err != nil {
+		http.Error(w, "Failed to check task lane capacity", http.StatusInternalServerError)
+		return false
+	}
+	if !hasCapacity {
+		http.Error(w, "To Do and In Progress lanes can contain at most 5 tasks", http.StatusConflict)
+		return false
+	}
+	return true
+}
+
 func (api *ApiConfig) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	session, ok, err := api.authenticatedSession(r)
 	if err != nil {
@@ -198,6 +241,10 @@ func (api *ApiConfig) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if params.State == "ToDo" && !enforceTaskStateCapacity(w, r, tx, board.ID, params.State, pgtype.UUID{}) {
+		return
+	}
+
 	columnTitle := "Backlog"
 	columnPosition := int32(0)
 	if params.State == "ToDo" {
@@ -314,6 +361,9 @@ func (api *ApiConfig) handleMoveTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.Error(w, "Failed to load task", http.StatusInternalServerError)
+		return
+	}
+	if !enforceTaskStateCapacity(w, r, tx, board.ID, params.State, taskID) {
 		return
 	}
 	column, err := txQueries.GetColumnByBoardAndTitle(r.Context(), dbgen.GetColumnByBoardAndTitleParams{
@@ -492,6 +542,9 @@ func (api *ApiConfig) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Failed to load destination board", http.StatusInternalServerError)
 			return
 		}
+	}
+	if !enforceTaskStateCapacity(w, r, tx, destinationBoard.ID, params.State, taskID) {
+		return
 	}
 	column, err := txQueries.GetColumnByBoardAndTitle(r.Context(), dbgen.GetColumnByBoardAndTitleParams{
 		BoardID: destinationBoard.ID, Title: columnTitle,

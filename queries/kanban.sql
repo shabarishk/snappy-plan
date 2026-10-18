@@ -168,27 +168,54 @@ ORDER BY CASE task.priority
 END, task.created_at ASC;
 
 -- name: MoveDueBacklogTasksToTodo :exec
+WITH locked_boards AS MATERIALIZED (
+    SELECT board.id,
+           pg_advisory_xact_lock(hashtextextended(board.id::TEXT, 0))
+    FROM boards AS board
+    WHERE (
+        board.owner_id = sqlc.arg(owner_id) OR EXISTS (
+            SELECT 1 FROM board_members
+            WHERE board_id = board.id AND user_id = sqlc.arg(owner_id)
+        )
+    )
+      AND (
+          sqlc.narg(board_id)::UUID IS NULL OR board.id = sqlc.narg(board_id)
+      )
+    ORDER BY board.id
+), due_tasks AS (
+    SELECT task.id,
+           todo.id AS todo_column_id,
+           ROW_NUMBER() OVER (
+               PARTITION BY board.id
+               ORDER BY task.complete_by ASC, task.created_at ASC, task.id ASC
+           ) AS due_rank,
+           GREATEST(5 - (
+               SELECT COUNT(*)::INT
+               FROM tasks AS todo_task
+               JOIN columns AS todo_task_column ON todo_task_column.id = todo_task.column_id
+               WHERE todo_task_column.board_id = board.id
+                 AND todo_task.state = 'ToDo'
+           ), 0) AS available_slots
+    FROM tasks AS task
+    JOIN columns AS backlog ON backlog.id = task.column_id
+    JOIN boards AS board ON board.id = backlog.board_id
+    JOIN locked_boards ON locked_boards.id = board.id
+    JOIN columns AS todo ON todo.board_id = board.id
+    WHERE task.state = 'Backlog'
+      AND LOWER(TRIM(backlog.title)) = 'backlog'
+      AND LOWER(TRIM(todo.title)) IN ('todo', 'to do', 'to-do')
+      AND task.complete_by < NOW() + INTERVAL '2 days'
+), tasks_to_move AS (
+    SELECT id, todo_column_id
+    FROM due_tasks
+    WHERE due_rank <= available_slots
+)
 UPDATE tasks AS task
-SET column_id = todo.id,
+SET column_id = tasks_to_move.todo_column_id,
     state = 'ToDo',
     updated_at = NOW()
-FROM columns AS backlog
-JOIN boards AS board ON board.id = backlog.board_id
-JOIN columns AS todo ON todo.board_id = board.id
-WHERE task.column_id = backlog.id
-  AND task.state = 'Backlog'
-  AND LOWER(TRIM(backlog.title)) = 'backlog'
-  AND LOWER(TRIM(todo.title)) IN ('todo', 'to do', 'to-do')
-  AND task.complete_by < NOW() + INTERVAL '2 days'
-  AND (
-      board.owner_id = sqlc.arg(owner_id) OR EXISTS (
-          SELECT 1 FROM board_members
-          WHERE board_id = board.id AND user_id = sqlc.arg(owner_id)
-      )
-  )
-  AND (
-      sqlc.narg(board_id)::UUID IS NULL OR board.id = sqlc.narg(board_id)
-  );
+FROM tasks_to_move
+WHERE task.id = tasks_to_move.id;
 
 -- name: GetTasksByColumn :many
 SELECT * FROM tasks

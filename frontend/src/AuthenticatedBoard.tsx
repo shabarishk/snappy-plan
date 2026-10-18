@@ -319,20 +319,45 @@ export function AuthenticatedBoard({
     return byBoard;
   }, [selectedBoardId, taskInitiatives, tasks]);
 
-  const filteredTasks = useMemo(() => tasks.filter((task) => {
-    if (currentPage === 'board' && task.state === 'Complete' && task.completedAt) {
-      const completedAt = Date.parse(task.completedAt);
-      if (Number.isFinite(completedAt) && completedAt + COMPLETED_TASK_RETENTION_MS <= currentTime) return false;
+  const filteredTasks = useMemo(() => {
+    const newestCompletedTaskIds = new Set<string>();
+    if (currentPage === 'board') {
+      const completedTasksByBoard = new Map<string, Task[]>();
+      for (const task of tasks) {
+        if (task.state !== 'Complete') continue;
+        const boardId = task.boardId ?? selectedBoardId;
+        const boardTasks = completedTasksByBoard.get(boardId) ?? [];
+        boardTasks.push(task);
+        completedTasksByBoard.set(boardId, boardTasks);
+      }
+      for (const boardTasks of completedTasksByBoard.values()) {
+        boardTasks.sort((first, second) => {
+          const firstTimestamp = first.completedAt ? Date.parse(first.completedAt) : Number.NEGATIVE_INFINITY;
+          const secondTimestamp = second.completedAt ? Date.parse(second.completedAt) : Number.NEGATIVE_INFINITY;
+          const firstCompletedAt = Number.isFinite(firstTimestamp) ? firstTimestamp : Number.NEGATIVE_INFINITY;
+          const secondCompletedAt = Number.isFinite(secondTimestamp) ? secondTimestamp : Number.NEGATIVE_INFINITY;
+          return secondCompletedAt - firstCompletedAt;
+        });
+        for (const task of boardTasks.slice(0, 5)) newestCompletedTaskIds.add(task.id);
+      }
     }
-    const belongsToBoard = !boardFilterId || (task.boardId ?? selectedBoardId) === boardFilterId;
-    const belongsToInitiative = !initiativeFilterId
-      || (taskInitiatives[task.id] ?? []).some((initiative) => initiative.id === initiativeFilterId);
-    const belongsToAssignee = assigneeFilterId === 'all'
-      || (assigneeFilterId === 'unassigned'
-        ? !task.assignedToId
-        : task.assignedToId === assigneeFilterId.slice('assignee:'.length));
-    return belongsToBoard && belongsToInitiative && belongsToAssignee;
-  }), [assigneeFilterId, boardFilterId, currentPage, currentTime, initiativeFilterId, selectedBoardId, taskInitiatives, tasks]);
+
+    return tasks.filter((task) => {
+      if (currentPage === 'board' && task.state === 'Complete' && !newestCompletedTaskIds.has(task.id)) return false;
+      if (currentPage === 'board' && task.state === 'Complete' && task.completedAt) {
+        const completedAt = Date.parse(task.completedAt);
+        if (Number.isFinite(completedAt) && completedAt + COMPLETED_TASK_RETENTION_MS <= currentTime) return false;
+      }
+      const belongsToBoard = !boardFilterId || (task.boardId ?? selectedBoardId) === boardFilterId;
+      const belongsToInitiative = !initiativeFilterId
+        || (taskInitiatives[task.id] ?? []).some((initiative) => initiative.id === initiativeFilterId);
+      const belongsToAssignee = assigneeFilterId === 'all'
+        || (assigneeFilterId === 'unassigned'
+          ? !task.assignedToId
+          : task.assignedToId === assigneeFilterId.slice('assignee:'.length));
+      return belongsToBoard && belongsToInitiative && belongsToAssignee;
+    });
+  }, [assigneeFilterId, boardFilterId, currentPage, currentTime, initiativeFilterId, selectedBoardId, taskInitiatives, tasks]);
 
   const taskGroups = useMemo<TaskGroup[]>(() => {
     if (groupBy === 'board') {

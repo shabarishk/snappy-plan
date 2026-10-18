@@ -20,6 +20,8 @@ import (
 
 type fakeDB struct {
 	count                    int64
+	stateTaskCount           int64
+	stateTaskCountErr        error
 	countErr                 error
 	user                     dbgen.User
 	userErr                  error
@@ -224,6 +226,8 @@ func (db *fakeDB) Query(_ context.Context, query string, _ ...any) (pgx.Rows, er
 
 func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row {
 	switch {
+	case strings.Contains(query, "SELECT COUNT(*)") && strings.Contains(query, "task_column.board_id"):
+		return fakeRow{values: []any{db.stateTaskCount}, err: db.stateTaskCountErr}
 	case strings.Contains(query, "UPDATE tasks AS task") && strings.Contains(query, "state = CASE"):
 		db.moveTaskArgs = args
 		if db.moveTaskErr != nil {
