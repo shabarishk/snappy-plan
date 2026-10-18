@@ -105,6 +105,68 @@ describe('Boards', () => {
       }));
     });
   
+  it('reorders boards on Home and persists the per-user order', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/boards/order' && options?.method === 'PUT') return { ok: true };
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
+      if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
+      if (url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
+      if (url === '/api/initiatives') return { ok: true, json: async () => [] };
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Board Owner' });
+    const boardTitleOrder = () => screen.getAllByRole('heading', { level: 2 })
+      .map((heading) => heading.textContent)
+      .filter((title) => title === 'Board Owner' || title === 'Project Board');
+    expect(boardTitleOrder()).toEqual(['Board Owner', 'Project Board']);
+    expect((screen.getByRole('button', { name: 'Move Board Owner up' }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Project Board up' }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/boards/order', expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ board_ids: ['board-2', 'board-1'] }),
+      }));
+      expect(boardTitleOrder()).toEqual(['Project Board', 'Board Owner']);
+    });
+  });
+
+  it('restores the Home board order and reports save failures', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/boards/order' && options?.method === 'PUT') {
+        return { ok: false, text: async () => 'Board order save failed' };
+      }
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
+      if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
+      if (url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
+      if (url === '/api/initiatives') return { ok: true, json: async () => [] };
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Board Owner' });
+    fireEvent.click(screen.getByRole('button', { name: 'Move Project Board up' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Board order save failed');
+    const boardTitleOrder = screen.getAllByRole('heading', { level: 2 })
+      .map((heading) => heading.textContent)
+      .filter((title) => title === 'Board Owner' || title === 'Project Board');
+    expect(boardTitleOrder).toEqual(['Board Owner', 'Project Board']);
+  });
+
   it('manages owned and shared boards from the sidebar Boards view', async () => {
       const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
         if (url.endsWith('/members') && options?.method === 'PUT') {

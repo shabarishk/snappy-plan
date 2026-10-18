@@ -41,6 +41,7 @@ func NewHandlerWithSetupToken(db dbgen.DBTX, beginTx func(context.Context) (Setu
 	mux.HandleFunc("GET /api/auth/status", api.handleAuthStatus)
 	mux.HandleFunc("POST /api/boards", api.handleCreateBoard)
 	mux.HandleFunc("GET /api/boards", api.handleGetBoards)
+	mux.HandleFunc("PUT /api/boards/order", api.handleUpdateBoardOrder)
 	mux.HandleFunc("DELETE /api/boards/{boardID}", api.handleDeleteBoard)
 	mux.HandleFunc("GET /api/boards/{boardID}/members", api.handleGetBoardMembers)
 	mux.HandleFunc("PUT /api/boards/{boardID}/members", api.handleUpdateBoardMembers)

@@ -62,12 +62,22 @@ ORDER BY created_at ASC, id ASC
 LIMIT 1;
 
 -- name: GetBoardsByOwner :many
-SELECT * FROM boards
-WHERE owner_id = $1 OR EXISTS (
+SELECT board.* FROM boards AS board
+LEFT JOIN user_board_order AS board_order
+  ON board_order.board_id = board.id AND board_order.user_id = $1
+WHERE board.owner_id = $1 OR EXISTS (
     SELECT 1 FROM board_members
-    WHERE board_id = boards.id AND user_id = $1
+    WHERE board_id = board.id AND user_id = $1
 )
-ORDER BY created_at ASC, id ASC;
+ORDER BY board_order.position ASC NULLS LAST, board.created_at ASC, board.id ASC;
+
+-- name: DeleteUserBoardOrder :exec
+DELETE FROM user_board_order
+WHERE user_id = $1;
+
+-- name: InsertUserBoardOrder :exec
+INSERT INTO user_board_order (user_id, board_id, position)
+VALUES ($1, $2, $3);
 
 -- name: DeleteBoard :execrows
 DELETE FROM boards AS board

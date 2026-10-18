@@ -32,6 +32,7 @@ type fakeDB struct {
 	board                    dbgen.Board
 	destinationBoard         dbgen.Board
 	boards                   []dbgen.Board
+	boardsErr                error
 	boardErr                 error
 	destinationBoardErr      error
 	column                   dbgen.Column
@@ -74,6 +75,10 @@ type fakeDB struct {
 	boardMembersErr          error
 	boardMembersDeleteArgs   []any
 	boardMembersDeleteErr    error
+	boardOrderDeleteErr      error
+	boardOrderDeleteArgs     []any
+	boardOrderInsertErr      error
+	boardOrderInsertArgs     [][]any
 	deleteBoardArgs          []any
 	deleteBoardQuery         string
 	deleteBoardRows          int64
@@ -111,6 +116,14 @@ func (writer *failingResponseWriter) Write([]byte) (int, error) {
 }
 
 func (db *fakeDB) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(query, "DELETE FROM user_board_order") {
+		db.boardOrderDeleteArgs = args
+		return pgconn.CommandTag{}, db.boardOrderDeleteErr
+	}
+	if strings.Contains(query, "INSERT INTO user_board_order") {
+		db.boardOrderInsertArgs = append(db.boardOrderInsertArgs, args)
+		return pgconn.CommandTag{}, db.boardOrderInsertErr
+	}
 	if strings.Contains(query, "UPDATE tasks AS task") && strings.Contains(query, "state = 'ToDo'") {
 		db.moveDueTasksArgs = args
 		return pgconn.CommandTag{}, db.moveDueTasksErr
@@ -171,6 +184,15 @@ func (db *fakeDB) Exec(_ context.Context, query string, args ...any) (pgconn.Com
 
 func (db *fakeDB) Query(_ context.Context, query string, _ ...any) (pgx.Rows, error) {
 	switch {
+	case strings.Contains(query, "FROM boards AS board") && strings.Contains(query, "user_board_order"):
+		if db.boardsErr != nil {
+			return nil, db.boardsErr
+		}
+		rows := make([][]any, len(db.boards))
+		for i, board := range db.boards {
+			rows[i] = []any{board.ID, board.Title, board.OwnerID, board.CreatedAt, board.UpdatedAt, board.IsPersonal}
+		}
+		return &fakeRows{values: rows}, nil
 	case strings.Contains(query, "FROM tasks AS task"):
 		if db.tasksErr != nil {
 			return nil, db.tasksErr
@@ -480,6 +502,10 @@ func (tx *fakeTx) Exec(ctx context.Context, query string, args ...any) (pgconn.C
 		return tx.fakeDB.Exec(ctx, query, args...)
 	}
 	if strings.Contains(query, "INSERT INTO board_members") {
+		return tx.fakeDB.Exec(ctx, query, args...)
+	}
+	if strings.Contains(query, "DELETE FROM user_board_order") ||
+		strings.Contains(query, "INSERT INTO user_board_order") {
 		return tx.fakeDB.Exec(ctx, query, args...)
 	}
 	if strings.Contains(query, "DELETE FROM board_members AS member") {
