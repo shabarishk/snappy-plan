@@ -341,6 +341,52 @@ func TestCreateTaskEndpoint(t *testing.T) {
 			t.Fatalf("task notifications = %#v", db.taskNotifications)
 		}
 	})
+
+	t.Run("rolls back task creation when its notification cannot be saved", func(t *testing.T) {
+		db := &fakeDB{
+			session:               dbgen.Session{Token: "token", UserID: "owner1"},
+			user:                  dbgen.User{ID: "assignee2"},
+			board:                 dbgen.Board{ID: newUUID(2), OwnerID: "owner1"},
+			column:                dbgen.Column{ID: newUUID(3), BoardID: newUUID(2), Title: "Backlog"},
+			notificationInsertErr: errors.New("notification insert failed"),
+		}
+		tx := &fakeTx{fakeDB: db}
+		handler := newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false)
+		response := send(handler, http.MethodPost, "/api/tasks",
+			`{"title":"Notify assignee","assigned_to_id":"assignee2"}`,
+			&http.Cookie{Name: "snappy_session", Value: "token"})
+		if response.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusInternalServerError, response.Body.String())
+		}
+		if tx.committed || !tx.rolledBack {
+			t.Fatalf("notification failure did not roll back task: committed=%v rolledBack=%v",
+				tx.committed, tx.rolledBack)
+		}
+	})
+
+	t.Run("does not notify a user who creates a task for themself", func(t *testing.T) {
+		db := &fakeDB{
+			session: dbgen.Session{Token: "token", UserID: "owner1"},
+			user:    dbgen.User{ID: "owner1"},
+			board:   dbgen.Board{ID: newUUID(2), OwnerID: "owner1"},
+			column:  dbgen.Column{ID: newUUID(3), BoardID: newUUID(2), Title: "Backlog"},
+		}
+		tx := &fakeTx{fakeDB: db}
+		handler := newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
+			return tx, nil
+		}, false)
+		response := send(handler, http.MethodPost, "/api/tasks",
+			`{"title":"My task","assigned_to_id":"owner1"}`,
+			&http.Cookie{Name: "snappy_session", Value: "token"})
+		if response.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusCreated, response.Body.String())
+		}
+		if len(db.taskNotifications) != 0 {
+			t.Fatalf("self-assignment created notifications: %#v", db.taskNotifications)
+		}
+	})
 }
 
 func TestMoveTaskEndpoint(t *testing.T) {
