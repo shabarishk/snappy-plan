@@ -886,6 +886,16 @@ func TestTaskReadEndpoints(t *testing.T) {
 	}{
 		{name: "task query error", db: &fakeDB{session: dbgen.Session{Token: "token", UserID: ownerID}, tasksErr: errors.New("query failed")}, path: "/api/tasks"},
 		{name: "assignee query error", db: &fakeDB{session: dbgen.Session{Token: "token", UserID: ownerID}, assigneesErr: errors.New("query failed")}, path: "/api/users"},
+		{name: "assignee scan error", db: &fakeDB{
+			session:          dbgen.Session{Token: "token", UserID: ownerID},
+			assignees:        []dbgen.GetUsersForAssignmentRow{{ID: ownerID, FullName: "Board Owner"}},
+			assigneesScanErr: errors.New("scan failed"),
+		}, path: "/api/users"},
+		{name: "assignee iteration error", db: &fakeDB{
+			session:          dbgen.Session{Token: "token", UserID: ownerID},
+			assignees:        []dbgen.GetUsersForAssignmentRow{{ID: ownerID, FullName: "Board Owner"}},
+			assigneesRowsErr: errors.New("iteration failed"),
+		}, path: "/api/users"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			response := send(newHandler(test.db, nil, false), http.MethodGet, test.path, "", cookie)

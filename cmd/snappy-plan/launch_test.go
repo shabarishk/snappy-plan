@@ -359,13 +359,32 @@ func TestEnsureApplicationSchema(t *testing.T) {
 	if err := ensureApplicationSchema(context.Background(), begin); err != nil {
 		t.Fatalf("ensureApplicationSchema returned an error: %v", err)
 	}
-	if len(transactions) != 6 {
-		t.Fatalf("schema transaction count = %d, want 6", len(transactions))
+	if len(transactions) != 7 {
+		t.Fatalf("schema transaction count = %d, want 7", len(transactions))
 	}
 	for i, tx := range transactions {
 		if !tx.committed || len(tx.execCalls) == 0 {
 			t.Errorf("transaction %d was not applied and committed: %#v", i, tx)
 		}
+	}
+}
+
+func TestEnsureApplicationSchemaReportsTaskCommentUpgradeFailures(t *testing.T) {
+	var transactions []*startupSchemaTx
+	begin := func(context.Context) (backend.SetupTransaction, error) {
+		tx := &startupSchemaTx{}
+		if len(transactions) == 2 {
+			tx.failContains = "CREATE TABLE IF NOT EXISTS task_comments"
+		}
+		transactions = append(transactions, tx)
+		return tx, nil
+	}
+	err := ensureApplicationSchema(context.Background(), begin)
+	if err == nil || !strings.Contains(err.Error(), "update task comment schema") {
+		t.Fatalf("ensureApplicationSchema error = %v, want task comment schema error", err)
+	}
+	if len(transactions) != 3 || !transactions[2].rolledBack {
+		t.Fatalf("schema transactions = %#v, want task comment schema upgrade rolled back", transactions)
 	}
 }
 

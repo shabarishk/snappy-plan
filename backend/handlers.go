@@ -50,6 +50,8 @@ func NewHandlerWithSetupToken(db dbgen.DBTX, beginTx func(context.Context) (Setu
 	mux.HandleFunc("POST /api/tasks", api.handleCreateTask)
 	mux.HandleFunc("PATCH /api/tasks/{taskID}", api.handleMoveTask)
 	mux.HandleFunc("PUT /api/tasks/{taskID}", api.handleUpdateTask)
+	mux.HandleFunc("GET /api/tasks/{taskID}/comments", api.handleGetTaskComments)
+	mux.HandleFunc("POST /api/tasks/{taskID}/comments", api.handleCreateTaskComment)
 	mux.HandleFunc("GET /api/notifications", api.handleGetNotifications)
 	mux.HandleFunc("PATCH /api/notifications/{notificationID}/read", api.handleMarkNotificationRead)
 	mux.HandleFunc("GET /api/initiatives", api.handleGetInitiatives)

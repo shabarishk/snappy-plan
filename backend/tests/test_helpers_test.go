@@ -38,6 +38,17 @@ type fakeDB struct {
 	notificationRowsErr      error
 	notificationMarkErr      error
 	notificationInsertErr    error
+	taskTitle                string
+	taskTitleQueryErr        error
+	taskCommentInsertErr     error
+	taskCommentQueryErr      error
+	taskCommentScanErr       error
+	taskCommentRowsErr       error
+	taskComments             []fakeTaskComment
+	mentionUsers             []string
+	mentionQueryErr          error
+	mentionScanErr           error
+	mentionRowsErr           error
 	board                    dbgen.Board
 	destinationBoard         dbgen.Board
 	boards                   []dbgen.Board
@@ -59,6 +70,8 @@ type fakeDB struct {
 	updatePasswordErr        error
 	tasksErr                 error
 	assigneesErr             error
+	assigneesScanErr         error
+	assigneesRowsErr         error
 	assignees                []dbgen.GetUsersForAssignmentRow
 	adminUsers               []dbgen.GetUsersForAdminRow
 	adminBoards              []dbgen.GetAllBoardsForAdminRow
@@ -115,6 +128,14 @@ type fakeNotification struct {
 type taskNotification struct {
 	userID  string
 	message string
+}
+
+type fakeTaskComment struct {
+	id        pgtype.UUID
+	taskID    pgtype.UUID
+	authorID  string
+	body      string
+	createdAt time.Time
 }
 
 type failingResponseWriter struct {
@@ -265,6 +286,36 @@ func (db *fakeDB) Query(_ context.Context, query string, args ...any) (pgx.Rows,
 			}
 		}
 		return &fakeRows{values: rows, scanErr: db.notificationScanErr, err: db.notificationRowsErr}, nil
+	case strings.Contains(query, "FROM task_comments AS comment"):
+		if db.taskCommentQueryErr != nil {
+			return nil, db.taskCommentQueryErr
+		}
+		taskID := args[0].(pgtype.UUID)
+		rows := make([][]any, 0, len(db.taskComments))
+		for _, comment := range db.taskComments {
+			if comment.taskID == taskID {
+				rows = append(rows, []any{
+					comment.id.String(), comment.taskID.String(), comment.body,
+					comment.authorID, comment.authorID, comment.createdAt,
+				})
+			}
+		}
+		return &fakeRows{values: rows, scanErr: db.taskCommentScanErr, err: db.taskCommentRowsErr}, nil
+	case strings.Contains(query, "SELECT id FROM users WHERE LOWER(id)"):
+		if db.mentionQueryErr != nil {
+			return nil, db.mentionQueryErr
+		}
+		requested := args[0].([]string)
+		rows := make([][]any, 0, len(db.mentionUsers))
+		for _, userID := range db.mentionUsers {
+			for _, username := range requested {
+				if strings.EqualFold(userID, username) {
+					rows = append(rows, []any{userID})
+					break
+				}
+			}
+		}
+		return &fakeRows{values: rows, scanErr: db.mentionScanErr, err: db.mentionRowsErr}, nil
 	case strings.Contains(query, "FROM boards AS board") && strings.Contains(query, "user_board_order"):
 		if db.boardsErr != nil {
 			return nil, db.boardsErr
@@ -319,9 +370,9 @@ func (db *fakeDB) Query(_ context.Context, query string, args ...any) (pgx.Rows,
 		}
 		rows := make([][]any, len(db.assignees))
 		for i, user := range db.assignees {
-			rows[i] = []any{user.ID, user.FullName}
+			rows[i] = []any{user.ID, user.FullName, user.FullName}
 		}
-		return &fakeRows{values: rows}, nil
+		return &fakeRows{values: rows, scanErr: db.assigneesScanErr, err: db.assigneesRowsErr}, nil
 	default:
 		return nil, errors.New("unexpected query: " + query)
 	}
@@ -329,6 +380,21 @@ func (db *fakeDB) Query(_ context.Context, query string, args ...any) (pgx.Rows,
 
 func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row {
 	switch {
+	case strings.Contains(query, "SELECT title FROM tasks WHERE id"):
+		return fakeRow{values: []any{db.taskTitle}, err: db.taskTitleQueryErr}
+	case strings.Contains(query, "WITH inserted_comment AS"):
+		if db.taskCommentInsertErr != nil {
+			return fakeRow{err: db.taskCommentInsertErr}
+		}
+		comment := fakeTaskComment{
+			id: newUUID(byte(len(db.taskComments) + 50)), taskID: args[0].(pgtype.UUID),
+			authorID: args[1].(string), body: args[2].(string), createdAt: time.Now(),
+		}
+		db.taskComments = append(db.taskComments, comment)
+		return fakeRow{values: []any{
+			comment.id.String(), comment.taskID.String(), comment.body,
+			comment.authorID, comment.authorID, comment.createdAt,
+		}}
 	case strings.Contains(query, "SELECT assigned_to_id, state, title"):
 		return fakeRow{values: []any{db.task.AssignedToID, db.task.State, db.task.Title}}
 	case strings.Contains(query, "SELECT COUNT(*)") && strings.Contains(query, "task_column.board_id"):

@@ -253,6 +253,36 @@ func EnsureTaskSchema(ctx context.Context, beginTx func(context.Context) (SetupT
 	return nil
 }
 
+func EnsureTaskCommentSchema(ctx context.Context, beginTx func(context.Context) (SetupTransaction, error)) error {
+	tx, err := beginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin task comment schema upgrade: %w", err)
+	}
+	defer tx.Rollback(context.Background())
+
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(731942618)); err != nil {
+		return fmt.Errorf("lock task comment schema upgrade: %w", err)
+	}
+	for _, statement := range []string{
+		`CREATE TABLE IF NOT EXISTS task_comments (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+			author_id VARCHAR(32) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			body TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		"CREATE INDEX IF NOT EXISTS idx_task_comments_task_created ON task_comments(task_id, created_at, id)",
+	} {
+		if _, err := tx.Exec(ctx, statement); err != nil {
+			return fmt.Errorf("apply task comment schema upgrade: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit task comment schema upgrade: %w", err)
+	}
+	return nil
+}
+
 func EnsureInitiativeSchema(ctx context.Context, beginTx func(context.Context) (SetupTransaction, error)) error {
 	tx, err := beginTx(ctx)
 	if err != nil {
