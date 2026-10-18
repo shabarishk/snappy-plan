@@ -287,6 +287,9 @@ func ensureApplicationSchema(ctx context.Context, beginTx func(context.Context) 
 	if err := backend.EnsureTaskSchema(ctx, beginTx); err != nil {
 		return fmt.Errorf("update task schema: %w", err)
 	}
+	if err := backend.EnsureTaskCommentSchema(ctx, beginTx); err != nil {
+		return fmt.Errorf("update task comment schema: %w", err)
+	}
 	if err := backend.EnsureInitiativeSchema(ctx, beginTx); err != nil {
 		return fmt.Errorf("update initiative schema: %w", err)
 	}

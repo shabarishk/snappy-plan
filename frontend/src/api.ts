@@ -46,7 +46,33 @@ export interface ApiTask {
 export interface TaskAssignee {
   id: string;
   full_name: string;
+  legal_name?: string;
 }
+
+export interface TaskComment {
+  id: string;
+  task_id: string;
+  body: string;
+  author_username: string;
+  author_name: string;
+  created_at: string;
+}
+
+const isTaskComment = (value: unknown): value is TaskComment =>
+  typeof value === 'object'
+  && value !== null
+  && 'id' in value
+  && typeof value.id === 'string'
+  && 'task_id' in value
+  && typeof value.task_id === 'string'
+  && 'body' in value
+  && typeof value.body === 'string'
+  && 'author_username' in value
+  && typeof value.author_username === 'string'
+  && 'author_name' in value
+  && typeof value.author_name === 'string'
+  && 'created_at' in value
+  && typeof value.created_at === 'string';
 
 export interface UserProfile {
   username: string;
@@ -228,6 +254,29 @@ export const getTaskAssignees = async (): Promise<TaskAssignee[]> => {
   const res = await fetch('/api/users', { credentials: 'same-origin' });
   if (!res.ok) throw new Error('Failed to load users');
   return res.json();
+};
+
+export const getTaskComments = async (taskId: string): Promise<TaskComment[]> => {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/comments`, { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(await res.text());
+  const comments: unknown = await res.json();
+  if (!Array.isArray(comments) || !comments.every(isTaskComment)) {
+    throw new Error('Invalid task comments response');
+  }
+  return comments;
+};
+
+export const createTaskComment = async (taskId: string, body: string): Promise<TaskComment> => {
+  const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ body }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const comment: unknown = await res.json();
+  if (!isTaskComment(comment)) throw new Error('Invalid task comment response');
+  return comment;
 };
 
 export const getProfile = async (): Promise<UserProfile> => {

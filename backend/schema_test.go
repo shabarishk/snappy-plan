@@ -23,6 +23,7 @@ func (tx *schemaTestTx) Exec(_ context.Context, query string, _ ...any) (pgconn.
 	tx.execCalls = append(tx.execCalls, query)
 	isUpgradeStatement := strings.Contains(query, "DO $$") || strings.Contains(query, "INSERT INTO boards") ||
 		strings.Contains(query, "board_members") || strings.Contains(query, "CREATE TABLE IF NOT EXISTS initiatives") ||
+		strings.Contains(query, "CREATE TABLE IF NOT EXISTS task_comments") ||
 		strings.Contains(query, "ADD COLUMN IF NOT EXISTS profile_picture") ||
 		strings.Contains(query, "ADD COLUMN IF NOT EXISTS preferred_name") ||
 		strings.Contains(query, "is_personal")
@@ -139,6 +140,68 @@ func TestEnsureInitiativeSchema(t *testing.T) {
 		})
 		if !errors.Is(err, schemaErr) || tx.committed || !tx.rolledBack {
 			t.Fatalf("error=%v committed=%t rolledBack=%t", err, tx.committed, tx.rolledBack)
+		}
+	})
+}
+
+func TestEnsureTaskCommentSchema(t *testing.T) {
+	t.Run("reports begin errors", func(t *testing.T) {
+		beginErr := errors.New("begin failed")
+		err := EnsureTaskCommentSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return nil, beginErr
+		})
+		if !errors.Is(err, beginErr) {
+			t.Fatalf("EnsureTaskCommentSchema error = %v", err)
+		}
+	})
+
+	t.Run("creates the task comments table and index in a transaction", func(t *testing.T) {
+		tx := &schemaTestTx{}
+		err := EnsureTaskCommentSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if err != nil {
+			t.Fatalf("EnsureTaskCommentSchema returned error: %v", err)
+		}
+		if len(tx.execCalls) != 3 || !strings.Contains(tx.execCalls[0], "pg_advisory_xact_lock") ||
+			!strings.Contains(tx.execCalls[1], "CREATE TABLE IF NOT EXISTS task_comments") ||
+			!strings.Contains(tx.execCalls[2], "idx_task_comments_task_created") ||
+			!tx.committed || tx.rolledBack {
+			t.Fatalf("task comment schema calls=%#v committed=%t rolledBack=%t",
+				tx.execCalls, tx.committed, tx.rolledBack)
+		}
+	})
+
+	t.Run("rolls back when the advisory lock fails", func(t *testing.T) {
+		lockErr := errors.New("lock failed")
+		tx := &schemaTestTx{execErr: lockErr, failExecContains: "pg_advisory_xact_lock"}
+		err := EnsureTaskCommentSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if !errors.Is(err, lockErr) || tx.committed || !tx.rolledBack {
+			t.Fatalf("error=%v committed=%t rolledBack=%t", err, tx.committed, tx.rolledBack)
+		}
+	})
+
+	t.Run("rolls back when schema creation fails", func(t *testing.T) {
+		schemaErr := errors.New("schema failed")
+		tx := &schemaTestTx{execErr: schemaErr}
+		err := EnsureTaskCommentSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if !errors.Is(err, schemaErr) || tx.committed || !tx.rolledBack {
+			t.Fatalf("error=%v committed=%t rolledBack=%t", err, tx.committed, tx.rolledBack)
+		}
+	})
+
+	t.Run("reports commit errors", func(t *testing.T) {
+		commitErr := errors.New("commit failed")
+		tx := &schemaTestTx{commitErr: commitErr}
+		err := EnsureTaskCommentSchema(context.Background(), func(context.Context) (SetupTransaction, error) {
+			return tx, nil
+		})
+		if !errors.Is(err, commitErr) {
+			t.Fatalf("EnsureTaskCommentSchema error = %v", err)
 		}
 	})
 }

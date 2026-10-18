@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { TaskPriority } from './taskPriority';
-import { addTaskToInitiative, createTask as persistTask, getInitiatives, removeTaskFromInitiative, updateTask as persistUpdateTask } from './api';
-import type { ApiTask, Board, Initiative, TaskAssignee } from './api';
+import { addTaskToInitiative, createTask as persistTask, createTaskComment, getInitiatives, getTaskComments, removeTaskFromInitiative, updateTask as persistUpdateTask } from './api';
+import type { ApiTask, Board, Initiative, TaskAssignee, TaskComment } from './api';
 import type { Task, TaskState } from './taskModel';
 import { toBoardTask } from './taskModel';
 
@@ -358,6 +358,16 @@ export function TaskDetailsOverlay({
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [comments, setComments] = useState<TaskComment[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(true);
+  const [commentsError, setCommentsError] = useState('');
+  const [commentDraft, setCommentDraft] = useState('');
+  const [commentSaving, setCommentSaving] = useState(false);
+  const [commentError, setCommentError] = useState('');
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionRange, setMentionRange] = useState<{ start: number; end: number } | null>(null);
+  const [activeMentionIndex, setActiveMentionIndex] = useState(0);
+  const commentInputRef = useRef<HTMLTextAreaElement>(null);
   const initialInitiativeId = linkedInitiatives[0]?.id ?? '';
   const initialInitiativeTitle = linkedInitiatives[0]?.title ?? '';
   const [initiativeSearchDraft, setInitiativeSearchDraft] = useState<string | null>(null);
@@ -366,6 +376,73 @@ export function TaskDetailsOverlay({
   const initiativeId = initiativeIdDraft ?? initialInitiativeId;
   const initiativeChanged = initiativeIdDraft !== null
     && (initiativeIdDraft !== initialInitiativeId || linkedInitiatives.length > 1);
+
+  useEffect(() => {
+    let cancelled = false;
+    getTaskComments(task.id)
+      .then((taskComments) => {
+        if (!cancelled) setComments(taskComments);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setCommentsError(err instanceof Error ? err.message : 'Failed to load comments');
+      })
+      .finally(() => {
+        if (!cancelled) setCommentsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [task.id]);
+
+  const matchingMentionUsers = mentionQuery === null ? [] : assignees.filter((user) =>
+    user.id.toLocaleLowerCase().includes(mentionQuery.toLocaleLowerCase())
+      || user.full_name.toLocaleLowerCase().includes(mentionQuery.toLocaleLowerCase())
+      || user.legal_name?.toLocaleLowerCase().includes(mentionQuery.toLocaleLowerCase())
+  ).slice(0, 8);
+
+  const updateMentionSearch = (value: string, cursor: number) => {
+    const beforeCursor = value.slice(0, cursor);
+    const match = /(^|[^A-Za-z0-9_])@([A-Za-z0-9]*)$/.exec(beforeCursor);
+    if (!match) {
+      setMentionQuery(null);
+      setMentionRange(null);
+      return;
+    }
+    const start = cursor - match[2].length - 1;
+    setMentionQuery(match[2]);
+    setMentionRange({ start, end: cursor });
+    setActiveMentionIndex(0);
+  };
+
+  const insertMention = (user: TaskAssignee) => {
+    if (!mentionRange) return;
+    const input = commentInputRef.current;
+    const value = commentDraft.slice(0, mentionRange.start) + `@${user.id} `
+      + commentDraft.slice(mentionRange.end);
+    const cursor = mentionRange.start + user.id.length + 2;
+    setCommentDraft(value);
+    setMentionQuery(null);
+    setMentionRange(null);
+    window.requestAnimationFrame(() => {
+      input?.focus();
+      input?.setSelectionRange(cursor, cursor);
+    });
+  };
+
+  const handleCommentSubmit = async () => {
+    if (!commentDraft.trim()) return;
+    setCommentSaving(true);
+    setCommentError('');
+    try {
+      const comment = await createTaskComment(task.id, commentDraft);
+      setComments((current) => [...current, comment]);
+      setCommentDraft('');
+      setMentionQuery(null);
+      setMentionRange(null);
+    } catch (err) {
+      setCommentError(err instanceof Error ? err.message : 'Failed to post comment');
+    } finally {
+      setCommentSaving(false);
+    }
+  };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -444,76 +521,170 @@ export function TaskDetailsOverlay({
         role="dialog"
         aria-modal="true"
         aria-labelledby="task-details-title"
-        className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl"
+        className="max-h-[90vh] w-full max-w-6xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-5 flex items-center justify-between">
           <h2 id="task-details-title" className="text-xl font-bold text-gray-800">Task details</h2>
           <button type="button" aria-label="Close task details" onClick={onClose} className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100">×</button>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="edit-task-title" className="mb-1 block text-sm font-medium text-gray-700">Title</label>
-            <input id="edit-task-title" required maxLength={255} value={title} onChange={(event) => setTitle(event.target.value)} className="w-full rounded-lg border border-gray-300 p-2" />
-          </div>
-          <div>
-            <label htmlFor="edit-task-description" className="mb-1 block text-sm font-medium text-gray-700">Description</label>
-            <textarea id="edit-task-description" value={description} onChange={(event) => setDescription(event.target.value)} rows={4} className="w-full rounded-lg border border-gray-300 p-2" />
-          </div>
-          <div>
-            <label htmlFor="edit-task-board" className="mb-1 block text-sm font-medium text-gray-700">Board</label>
-            <select id="edit-task-board" required value={boardId} onChange={(event) => setBoardId(event.target.value)} className="w-full rounded-lg border border-gray-300 p-2">
-              {boards.map((board) => <option key={board.id} value={board.id}>{board.title}</option>)}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="edit-task-assignee" className="mb-1 block text-sm font-medium text-gray-700">Assigned to</label>
-            <select id="edit-task-assignee" value={assignedToId} onChange={(event) => setAssignedToId(event.target.value)} className="w-full rounded-lg border border-gray-300 p-2">
-              <option value="">Unassigned</option>
-              {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.full_name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="task-initiative-search" className="mb-1 block text-sm font-medium text-gray-700">Initiatives</label>
-            <InitiativePicker
-              id="task-initiative-search"
-              value={initiativeSearch}
-              initiatives={availableInitiatives}
-              boardInitiatives={boardInitiatives}
-              onValueChange={(value) => {
-                setInitiativeSearchDraft(value);
-                setInitiativeIdDraft(value.trim() ? null : '');
-              }}
-              onSelect={handleInitiativeSelect}
-              onBlur={handleInitiativeBlur}
-            />
-            {initiatives.length === 0 && <p className="mt-1 text-sm text-gray-500">No initiatives available.</p>}
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div>
-              <label htmlFor="edit-task-priority" className="mb-1 block text-sm font-medium text-gray-700">Priority</label>
-              <select id="edit-task-priority" value={priority} onChange={(event) => setPriority(event.target.value as TaskPriority)} className="w-full rounded-lg border border-gray-300 p-2">
-                <option value="Low">Low</option>
-                <option value="Medium">Medium</option>
-                <option value="High">High</option>
-              </select>
+        <form onSubmit={handleSubmit}>
+          <div className="grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)]">
+            <div className="min-w-0 space-y-6">
+              <div>
+                <label htmlFor="edit-task-title" className="mb-1 block text-sm font-medium text-gray-700">Title</label>
+                <input id="edit-task-title" required maxLength={255} value={title} onChange={(event) => setTitle(event.target.value)} className="w-full rounded-lg border border-gray-300 p-2 text-lg font-semibold" />
+              </div>
+              <div>
+                <label htmlFor="edit-task-description" className="mb-1 block text-sm font-medium text-gray-700">Description</label>
+                <textarea id="edit-task-description" value={description} onChange={(event) => setDescription(event.target.value)} rows={5} className="w-full rounded-lg border border-gray-300 p-2" />
+              </div>
+              <section aria-labelledby="task-comments-heading" className="border-t border-gray-200 pt-5">
+                <h3 id="task-comments-heading" className="mb-4 text-base font-semibold text-gray-800">Comments</h3>
+                {commentsLoading ? (
+                  <p role="status" className="text-sm text-gray-500">Loading comments…</p>
+                ) : commentsError ? (
+                  <p role="status" className="text-sm text-red-700">Failed to load comments: {commentsError}</p>
+                ) : comments.length === 0 ? (
+                  <p className="text-sm text-gray-500">No comments yet.</p>
+                ) : (
+                  <ol className="mb-5 space-y-4">
+                    {comments.map((comment) => (
+                      <li key={comment.id} className="rounded-lg bg-gray-50 p-3">
+                        <div className="mb-2 flex flex-wrap items-baseline gap-x-2">
+                          <span className="text-sm font-semibold text-gray-800">{comment.author_name}</span>
+                          <span className="text-xs text-gray-500">@{comment.author_username}</span>
+                          <time className="ml-auto text-xs text-gray-500" dateTime={comment.created_at}>
+                            {new Date(comment.created_at).toLocaleString()}
+                          </time>
+                        </div>
+                        <p className="whitespace-pre-wrap break-words text-sm text-gray-700">{comment.body}</p>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+                <div className="relative">
+                  <label htmlFor="task-comment-input" className="mb-1 block text-sm font-medium text-gray-700">Add a comment</label>
+                  <textarea
+                    ref={commentInputRef}
+                    id="task-comment-input"
+                    value={commentDraft}
+                    onChange={(event) => {
+                      setCommentDraft(event.target.value);
+                      updateMentionSearch(event.target.value, event.target.selectionStart);
+                    }}
+                    onKeyDown={(event) => {
+                      if (mentionQuery === null || matchingMentionUsers.length === 0) {
+                        if (event.key === 'Escape') setMentionQuery(null);
+                        return;
+                      }
+                      if (event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        setActiveMentionIndex((index) => (index + 1) % matchingMentionUsers.length);
+                      } else if (event.key === 'ArrowUp') {
+                        event.preventDefault();
+                        setActiveMentionIndex((index) => (index + matchingMentionUsers.length - 1) % matchingMentionUsers.length);
+                      } else if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        insertMention(matchingMentionUsers[activeMentionIndex]);
+                      } else if (event.key === 'Escape') {
+                        event.preventDefault();
+                        setMentionQuery(null);
+                        setMentionRange(null);
+                      }
+                    }}
+                    rows={3}
+                    maxLength={5000}
+                    placeholder="Write a comment… Use @ to mention someone."
+                    aria-autocomplete="list"
+                    aria-controls="task-comment-mention-options"
+                    aria-expanded={mentionQuery !== null}
+                    className="w-full rounded-lg border border-gray-300 p-2"
+                  />
+                  {mentionQuery !== null && (
+                    <ul id="task-comment-mention-options" role="listbox" aria-label="Mention users" className="absolute bottom-full z-10 mb-1 max-h-52 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+                      {matchingMentionUsers.length > 0 ? matchingMentionUsers.map((user, index) => (
+                        <li
+                          key={user.id}
+                          role="option"
+                          aria-selected={index === activeMentionIndex}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => insertMention(user)}
+                          className={`cursor-pointer px-3 py-2 text-sm hover:bg-blue-50 ${index === activeMentionIndex ? 'bg-blue-50' : ''}`}
+                        >
+                          <span className="font-medium text-gray-800">{user.legal_name ?? user.full_name}</span>
+                          <span className="ml-2 text-gray-500">@{user.id}</span>
+                        </li>
+                      )) : (
+                        <li className="px-3 py-2 text-sm text-gray-500">No matching users</li>
+                      )}
+                    </ul>
+                  )}
+                </div>
+                {commentError && <p role="alert" className="mt-2 text-sm text-red-700">{commentError}</p>}
+                <div className="mt-3 flex justify-end">
+                  <button type="button" onClick={() => void handleCommentSubmit()} disabled={commentSaving || !commentDraft.trim()} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                    {commentSaving ? 'Posting…' : 'Comment'}
+                  </button>
+                </div>
+              </section>
             </div>
-            <div>
-              <label htmlFor="edit-task-state" className="mb-1 block text-sm font-medium text-gray-700">State</label>
-              <select id="edit-task-state" value={state} onChange={(event) => setState(event.target.value as TaskState)} className="w-full rounded-lg border border-gray-300 p-2">
-                <option value="Backlog">Backlog</option>
-                <option value="ToDo">To Do</option>
-                <option value="InProgress">In Progress</option>
-                <option value="Complete">Complete</option>
-              </select>
-            </div>
-            <div>
-              <label htmlFor="edit-task-complete-by" className="mb-1 block text-sm font-medium text-gray-700">Complete by</label>
-              <input id="edit-task-complete-by" type="datetime-local" value={completeBy} onChange={(event) => setCompleteBy(event.target.value)} className="w-full rounded-lg border border-gray-300 p-2" />
-            </div>
+            <aside aria-label="Task details" className="space-y-4 rounded-lg bg-gray-50 p-4">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500">Details</h3>
+              <div>
+                <label htmlFor="edit-task-board" className="mb-1 block text-sm font-medium text-gray-700">Board</label>
+                <select id="edit-task-board" required value={boardId} onChange={(event) => setBoardId(event.target.value)} className="w-full rounded-lg border border-gray-300 bg-white p-2">
+                  {boards.map((board) => <option key={board.id} value={board.id}>{board.title}</option>)}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="edit-task-priority" className="mb-1 block text-sm font-medium text-gray-700">Priority</label>
+                <select id="edit-task-priority" value={priority} onChange={(event) => setPriority(event.target.value as TaskPriority)} className="w-full rounded-lg border border-gray-300 bg-white p-2">
+                  <option value="Low">Low</option>
+                  <option value="Medium">Medium</option>
+                  <option value="High">High</option>
+                </select>
+              </div>
+              <div>
+                <label htmlFor="edit-task-state" className="mb-1 block text-sm font-medium text-gray-700">State</label>
+                <select id="edit-task-state" value={state} onChange={(event) => setState(event.target.value as TaskState)} className="w-full rounded-lg border border-gray-300 bg-white p-2">
+                  <option value="Backlog">Backlog</option>
+                  <option value="ToDo">To Do</option>
+                  <option value="InProgress">In Progress</option>
+                  <option value="Complete">Complete</option>
+                </select>
+              </div>
+              <div>
+                <label htmlFor="edit-task-assignee" className="mb-1 block text-sm font-medium text-gray-700">Assigned to</label>
+                <select id="edit-task-assignee" value={assignedToId} onChange={(event) => setAssignedToId(event.target.value)} className="w-full rounded-lg border border-gray-300 bg-white p-2">
+                  <option value="">Unassigned</option>
+                  {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.full_name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="task-initiative-search" className="mb-1 block text-sm font-medium text-gray-700">Initiatives</label>
+                <InitiativePicker
+                  id="task-initiative-search"
+                  value={initiativeSearch}
+                  initiatives={availableInitiatives}
+                  boardInitiatives={boardInitiatives}
+                  onValueChange={(value) => {
+                    setInitiativeSearchDraft(value);
+                    setInitiativeIdDraft(value.trim() ? null : '');
+                  }}
+                  onSelect={handleInitiativeSelect}
+                  onBlur={handleInitiativeBlur}
+                />
+                {initiatives.length === 0 && <p className="mt-1 text-sm text-gray-500">No initiatives available.</p>}
+              </div>
+              <div>
+                <label htmlFor="edit-task-complete-by" className="mb-1 block text-sm font-medium text-gray-700">Complete by</label>
+                <input id="edit-task-complete-by" type="datetime-local" value={completeBy} onChange={(event) => setCompleteBy(event.target.value)} className="w-full rounded-lg border border-gray-300 bg-white p-2" />
+              </div>
+            </aside>
           </div>
-          {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-          <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
+          {error && <p role="alert" className="mt-4 text-sm text-red-700">{error}</p>}
+          <div className="mt-6 flex justify-end gap-3 border-t border-gray-100 pt-4">
             <button type="submit" disabled={saving} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
               {saving ? 'Saving…' : 'Save changes'}
             </button>

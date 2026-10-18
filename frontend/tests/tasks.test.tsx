@@ -4,6 +4,7 @@ import App, { AuthenticatedBoard } from '../src/App';
 import type { Task } from '../src/App';
 import type { Initiative } from '../src/api';
 import { Column } from '../src/TaskBoard';
+import { TaskDetailsOverlay } from '../src/TaskOverlays';
 import { sortTasksByCompleteByAndPriority, sortTasksByPriority } from '../src/taskPriority';
 
 import { taskResponse, boardList, mockBoardReads } from './appTestUtils';
@@ -1088,5 +1089,55 @@ describe('Tasks', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Initiative' }));
     expect(screen.getByRole('dialog', { name: 'Create initiative' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Close create initiative form' }));
+  });
+
+  it('loads task comments and lets users select and post a full-name user mention', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/tasks/task-1/comments' && options?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'comment-1',
+            task_id: 'task-1',
+            body: JSON.parse(String(options.body)).body,
+            author_username: 'boardowner',
+            author_name: 'Board Owner',
+            created_at: '2026-10-18T18:00:00Z',
+          }),
+        };
+      }
+      if (url === '/api/tasks/task-1/comments') return { ok: true, json: async () => [] };
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <TaskDetailsOverlay
+        task={{ id: 'task-1', columnId: 'todo', state: 'ToDo', priority: 'Medium', title: 'Task title' }}
+        boards={[{ id: 'board-1', title: 'Board', owner_id: 'boardowner', is_personal: true }]}
+        assignees={[{ id: 'alex', full_name: 'Alex', legal_name: 'Alexander Smith' }]}
+        initiatives={[]}
+        boardInitiatives={[]}
+        linkedInitiatives={[]}
+        selectedBoardId="board-1"
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+        onInitiativesChanged={vi.fn()}
+      />
+    );
+
+    await screen.findByText('No comments yet.');
+    const commentInput = screen.getByLabelText('Add a comment') as HTMLTextAreaElement;
+    fireEvent.change(commentInput, { target: { value: 'Please ask @Alexander' } });
+    fireEvent.click(screen.getByRole('option', { name: /Alexander Smith/ }));
+    expect(commentInput.value).toBe('Please ask @alex ');
+    fireEvent.change(commentInput, { target: { value: 'Please ask @alex to review this' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Comment' }));
+
+    expect(await screen.findByText('Please ask @alex to review this')).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-1/comments', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ body: 'Please ask @alex to review this' }),
+    }));
   });
 });

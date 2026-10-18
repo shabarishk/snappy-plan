@@ -30,13 +30,35 @@ func (api *ApiConfig) handleGetUsersForAssignment(w http.ResponseWriter, r *http
 		return
 	}
 
-	users, err := api.DB.GetUsersForAssignment(r.Context())
+	rows, err := api.DBTX.Query(r.Context(), `
+		SELECT id, COALESCE(NULLIF(preferred_name, ''), full_name) AS full_name,
+		       full_name AS legal_name
+		FROM users
+		ORDER BY full_name ASC, id ASC
+	`)
 	if err != nil {
 		http.Error(w, "Failed to load users", http.StatusInternalServerError)
 		return
 	}
-	if users == nil {
-		users = []dbgen.GetUsersForAssignmentRow{}
+	defer rows.Close()
+
+	type assignmentUser struct {
+		ID        string `json:"id"`
+		FullName  string `json:"full_name"`
+		LegalName string `json:"legal_name"`
+	}
+	users := make([]assignmentUser, 0)
+	for rows.Next() {
+		var user assignmentUser
+		if err := rows.Scan(&user.ID, &user.FullName, &user.LegalName); err != nil {
+			http.Error(w, "Failed to read users", http.StatusInternalServerError)
+			return
+		}
+		users = append(users, user)
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, "Failed to read users", http.StatusInternalServerError)
+		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(users); err != nil {
