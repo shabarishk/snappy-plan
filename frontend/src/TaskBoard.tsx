@@ -36,7 +36,6 @@ function TaskCard({
     >
       <p className="text-gray-800 text-sm font-medium">{task.title}</p>
       <p className="mt-1 text-xs text-gray-500">Priority: {task.priority}</p>
-      {task.description && <p className="mt-1 text-xs text-gray-600">{task.description}</p>}
       {task.completedAt && (
         <p className="mt-2 text-xs text-gray-500">
           Completed <time dateTime={task.completedAt}>{new Date(task.completedAt).toLocaleString()}</time>

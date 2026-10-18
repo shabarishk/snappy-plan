@@ -145,7 +145,7 @@ describe('Tasks', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
       await screen.findByText('Test task');
       expect(screen.getByText('Priority: High')).toBeTruthy();
-      expect(screen.getByText('Task details')).toBeTruthy();
+      expect(screen.queryByText('Task details')).toBeNull();
   
       fireEvent.click(screen.getByRole('button', { name: 'Move to To Do' }));
       expect(setTasks).toHaveBeenCalled();
