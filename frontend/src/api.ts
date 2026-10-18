@@ -57,6 +57,25 @@ export interface UserProfile {
   profile_picture?: string | null;
 }
 
+export interface UserNotification {
+  id: string;
+  message: string;
+  created_at: string;
+  read_at: string | null;
+}
+
+const isUserNotification = (value: unknown): value is UserNotification =>
+  typeof value === 'object'
+  && value !== null
+  && 'id' in value
+  && typeof value.id === 'string'
+  && 'message' in value
+  && typeof value.message === 'string'
+  && 'created_at' in value
+  && typeof value.created_at === 'string'
+  && 'read_at' in value
+  && (typeof value.read_at === 'string' || value.read_at === null);
+
 export interface AdminUser extends UserProfile {
   username: string;
 }
@@ -215,6 +234,24 @@ export const getProfile = async (): Promise<UserProfile> => {
   const res = await fetch('/api/profile', { credentials: 'same-origin' });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
+};
+
+export const getNotifications = async (): Promise<UserNotification[]> => {
+  const res = await fetch('/api/notifications', { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(await res.text());
+  const notifications: unknown = await res.json();
+  if (!Array.isArray(notifications) || !notifications.every(isUserNotification)) {
+    throw new Error('Invalid notifications response');
+  }
+  return notifications.filter(isUserNotification);
+};
+
+export const markNotificationRead = async (notificationId: string): Promise<void> => {
+  const res = await fetch(`/api/notifications/${encodeURIComponent(notificationId)}/read`, {
+    method: 'PATCH',
+    credentials: 'same-origin',
+  });
+  if (!res.ok) throw new Error(await res.text());
 };
 
 export const logout = async (): Promise<void> => {

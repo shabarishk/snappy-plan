@@ -29,8 +29,8 @@ func TestEmbeddedMigrationSequence(t *testing.T) {
 		}
 		versions = append(versions, version)
 	}
-	if len(versions) != 12 {
-		t.Fatalf("migration count = %d, want 12", len(versions))
+	if len(versions) != 13 {
+		t.Fatalf("migration count = %d, want 13", len(versions))
 	}
 	for i, version := range versions {
 		if version != int64(i+1) {

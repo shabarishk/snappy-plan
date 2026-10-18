@@ -336,6 +336,10 @@ func TestCreateTaskEndpoint(t *testing.T) {
 			db.task.Priority != "High" || !db.task.CompleteBy.Time.Equal(due) {
 			t.Fatalf("created task fields = %#v", db.task)
 		}
+		if len(db.taskNotifications) != 1 || db.taskNotifications[0].userID != db.user.ID ||
+			!strings.Contains(db.taskNotifications[0].message, "Plan trip") {
+			t.Fatalf("task notifications = %#v", db.taskNotifications)
+		}
 	})
 }
 
@@ -359,7 +363,10 @@ func TestMoveTaskEndpoint(t *testing.T) {
 			column: dbgen.Column{
 				ID: destinationColumnID, BoardID: newUUID(4), Title: "In Progress", Position: 2,
 			},
-			task: dbgen.Task{ID: taskID, Title: "Persist this move", State: "ToDo", Priority: "Medium"},
+			task: dbgen.Task{
+				ID: taskID, Title: "Persist this move", State: "ToDo", Priority: "Medium",
+				AssignedToID: pgtype.Text{String: "assignee2", Valid: true},
+			},
 		}
 		tx := &fakeTx{fakeDB: db}
 		handler := newHandler(db, func(context.Context) (backend.SetupTransaction, error) {
@@ -373,6 +380,11 @@ func TestMoveTaskEndpoint(t *testing.T) {
 		}
 		if !tx.committed {
 			t.Fatal("task move transaction was not committed")
+		}
+		if len(db.taskNotifications) != 1 || db.taskNotifications[0].userID != "assignee2" ||
+			!strings.Contains(db.taskNotifications[0].message, "ToDo") ||
+			!strings.Contains(db.taskNotifications[0].message, "InProgress") {
+			t.Fatalf("task notifications = %#v", db.taskNotifications)
 		}
 		if len(db.moveTaskArgs) != 3 || db.moveTaskArgs[0] != destinationColumnID ||
 			db.moveTaskArgs[1] != taskID || db.moveTaskArgs[2] != ownerID {
@@ -734,6 +746,10 @@ func TestUpdateTaskEndpoint(t *testing.T) {
 		}
 		if got := args[6].(pgtype.Text); got != (pgtype.Text{String: "assignee2", Valid: true}) {
 			t.Fatalf("assigned user arg = %#v", got)
+		}
+		if len(db.taskNotifications) != 1 || db.taskNotifications[0].userID != "assignee2" ||
+			!strings.Contains(db.taskNotifications[0].message, "assigned to you") {
+			t.Fatalf("task notifications = %#v", db.taskNotifications)
 		}
 		var updated dbgen.Task
 		if err := json.Unmarshal(response.Body.Bytes(), &updated); err != nil {

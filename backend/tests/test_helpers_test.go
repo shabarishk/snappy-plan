@@ -38,6 +38,7 @@ type fakeDB struct {
 	column                   dbgen.Column
 	columnErr                error
 	task                     dbgen.Task
+	taskNotifications        []taskNotification
 	createTaskErr            error
 	createColumnErr          error
 	moveTaskErr              error
@@ -94,6 +95,11 @@ type fakeDB struct {
 	deleteUserErr            error
 }
 
+type taskNotification struct {
+	userID  string
+	message string
+}
+
 type failingResponseWriter struct {
 	header http.Header
 	status int
@@ -116,6 +122,12 @@ func (writer *failingResponseWriter) Write([]byte) (int, error) {
 }
 
 func (db *fakeDB) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(query, "INSERT INTO notifications") {
+		db.taskNotifications = append(db.taskNotifications, taskNotification{
+			userID: args[0].(string), message: args[1].(string),
+		})
+		return pgconn.NewCommandTag("INSERT 0 1"), nil
+	}
 	if strings.Contains(query, "DELETE FROM user_board_order") {
 		db.boardOrderDeleteArgs = args
 		return pgconn.CommandTag{}, db.boardOrderDeleteErr
@@ -248,6 +260,8 @@ func (db *fakeDB) Query(_ context.Context, query string, _ ...any) (pgx.Rows, er
 
 func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row {
 	switch {
+	case strings.Contains(query, "SELECT assigned_to_id, state, title"):
+		return fakeRow{values: []any{db.task.AssignedToID, db.task.State, db.task.Title}}
 	case strings.Contains(query, "SELECT COUNT(*)") && strings.Contains(query, "task_column.board_id"):
 		return fakeRow{values: []any{db.stateTaskCount}, err: db.stateTaskCountErr}
 	case strings.Contains(query, "UPDATE tasks AS task") && strings.Contains(query, "state = CASE"):
@@ -496,6 +510,9 @@ type fakeTx struct {
 func (tx *fakeTx) Exec(ctx context.Context, query string, args ...any) (pgconn.CommandTag, error) {
 	if strings.Contains(query, "pg_advisory_xact_lock") {
 		return pgconn.CommandTag{}, tx.execErr
+	}
+	if strings.Contains(query, "INSERT INTO notifications") {
+		return tx.fakeDB.Exec(ctx, query, args...)
 	}
 	if (strings.Contains(query, "UPDATE boards") && strings.Contains(query, "is_personal = FALSE")) ||
 		strings.Contains(query, "DELETE FROM users") {

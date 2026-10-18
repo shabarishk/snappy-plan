@@ -16,6 +16,7 @@ import { CreateInitiativeOverlay, InitiativeDetailPage, InitiativesPage } from '
 import { TaskSearch } from './TaskSearch';
 import { Column } from './TaskBoard';
 import { TasksPage } from './TasksPage';
+import { NotificationBell } from './NotificationBell';
 
 type SelectedTask = {
   task: Task;
@@ -651,6 +652,7 @@ export function AuthenticatedBoard({
             </div>
           </div>
         )}
+        <NotificationBell />
       </header>
       {currentPage !== 'profile' && currentPage !== 'settings' && isCreateTaskOpen && (
         <CreateTaskOverlay

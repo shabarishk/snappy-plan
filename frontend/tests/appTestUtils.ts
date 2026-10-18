@@ -19,6 +19,7 @@ export const boardList = [
 ];
 
 export const mockBoardReads = () => vi.fn().mockImplementation(async (url: string) => {
+  if (url === '/api/notifications') return { ok: true, json: async () => [] };
   if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
   if (url === '/api/initiatives') return { ok: true, json: async () => [] };
   if (url === '/api/boards') return { ok: true, json: async () => boardList };
