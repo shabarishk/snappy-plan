@@ -29,6 +29,15 @@ type fakeDB struct {
 	deleteTargetUserErr      error
 	session                  dbgen.Session
 	sessionErr               error
+	notifications            []fakeNotification
+	notificationCleanupErr   error
+	notificationCleanupQuery string
+	notificationQueryErr     error
+	notificationQueryUser    string
+	notificationScanErr      error
+	notificationRowsErr      error
+	notificationMarkErr      error
+	notificationInsertErr    error
 	board                    dbgen.Board
 	destinationBoard         dbgen.Board
 	boards                   []dbgen.Board
@@ -38,6 +47,7 @@ type fakeDB struct {
 	column                   dbgen.Column
 	columnErr                error
 	task                     dbgen.Task
+	taskNotifications        []taskNotification
 	createTaskErr            error
 	createColumnErr          error
 	moveTaskErr              error
@@ -94,6 +104,19 @@ type fakeDB struct {
 	deleteUserErr            error
 }
 
+type fakeNotification struct {
+	id        pgtype.UUID
+	userID    string
+	message   string
+	createdAt time.Time
+	readAt    *time.Time
+}
+
+type taskNotification struct {
+	userID  string
+	message string
+}
+
 type failingResponseWriter struct {
 	header http.Header
 	status int
@@ -116,6 +139,48 @@ func (writer *failingResponseWriter) Write([]byte) (int, error) {
 }
 
 func (db *fakeDB) Exec(_ context.Context, query string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(query, "INSERT INTO notifications") {
+		if db.notificationInsertErr != nil {
+			return pgconn.CommandTag{}, db.notificationInsertErr
+		}
+		db.taskNotifications = append(db.taskNotifications, taskNotification{
+			userID: args[0].(string), message: args[1].(string),
+		})
+		return pgconn.NewCommandTag("INSERT 0 1"), nil
+	}
+	if strings.Contains(query, "DELETE FROM notifications") {
+		db.notificationCleanupQuery = query
+		if db.notificationCleanupErr != nil {
+			return pgconn.CommandTag{}, db.notificationCleanupErr
+		}
+		cutoff := time.Now().Add(-24 * time.Hour)
+		remaining := db.notifications[:0]
+		for _, notification := range db.notifications {
+			if notification.readAt == nil || notification.readAt.After(cutoff) {
+				remaining = append(remaining, notification)
+			}
+		}
+		db.notifications = remaining
+		return pgconn.NewCommandTag("DELETE 0"), nil
+	}
+	if strings.Contains(query, "UPDATE notifications") {
+		if db.notificationMarkErr != nil {
+			return pgconn.CommandTag{}, db.notificationMarkErr
+		}
+		id := args[0].(pgtype.UUID)
+		userID := args[1].(string)
+		for index := range db.notifications {
+			notification := &db.notifications[index]
+			if notification.id == id && notification.userID == userID {
+				if notification.readAt == nil {
+					now := time.Now()
+					notification.readAt = &now
+				}
+				return pgconn.NewCommandTag("UPDATE 1"), nil
+			}
+		}
+		return pgconn.NewCommandTag("UPDATE 0"), nil
+	}
 	if strings.Contains(query, "DELETE FROM user_board_order") {
 		db.boardOrderDeleteArgs = args
 		return pgconn.CommandTag{}, db.boardOrderDeleteErr
@@ -182,8 +247,24 @@ func (db *fakeDB) Exec(_ context.Context, query string, args ...any) (pgconn.Com
 	return pgconn.CommandTag{}, nil
 }
 
-func (db *fakeDB) Query(_ context.Context, query string, _ ...any) (pgx.Rows, error) {
+func (db *fakeDB) Query(_ context.Context, query string, args ...any) (pgx.Rows, error) {
 	switch {
+	case strings.Contains(query, "FROM notifications"):
+		if db.notificationQueryErr != nil {
+			return nil, db.notificationQueryErr
+		}
+		rows := make([][]any, 0, len(db.notifications))
+		if len(args) > 0 {
+			db.notificationQueryUser = args[0].(string)
+			for _, notification := range db.notifications {
+				if notification.userID == db.notificationQueryUser {
+					rows = append(rows, []any{
+						notification.id.String(), notification.message, notification.createdAt, notification.readAt,
+					})
+				}
+			}
+		}
+		return &fakeRows{values: rows, scanErr: db.notificationScanErr, err: db.notificationRowsErr}, nil
 	case strings.Contains(query, "FROM boards AS board") && strings.Contains(query, "user_board_order"):
 		if db.boardsErr != nil {
 			return nil, db.boardsErr
@@ -248,6 +329,8 @@ func (db *fakeDB) Query(_ context.Context, query string, _ ...any) (pgx.Rows, er
 
 func (db *fakeDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row {
 	switch {
+	case strings.Contains(query, "SELECT assigned_to_id, state, title"):
+		return fakeRow{values: []any{db.task.AssignedToID, db.task.State, db.task.Title}}
 	case strings.Contains(query, "SELECT COUNT(*)") && strings.Contains(query, "task_column.board_id"):
 		return fakeRow{values: []any{db.stateTaskCount}, err: db.stateTaskCountErr}
 	case strings.Contains(query, "UPDATE tasks AS task") && strings.Contains(query, "state = CASE"):
@@ -433,6 +516,14 @@ func (row fakeRow) Scan(dest ...any) error {
 			*target = value.(pgtype.Text)
 		case *pgtype.Timestamptz:
 			*target = value.(pgtype.Timestamptz)
+		case *time.Time:
+			*target = value.(time.Time)
+		case **time.Time:
+			if value == nil {
+				*target = nil
+			} else {
+				*target = value.(*time.Time)
+			}
 		case *bool:
 			*target = value.(bool)
 		default:
@@ -450,13 +541,15 @@ func taskValues(task dbgen.Task) []any {
 }
 
 type fakeRows struct {
-	values [][]any
-	index  int
+	values  [][]any
+	index   int
+	scanErr error
+	err     error
 }
 
 func (rows *fakeRows) Close() {}
 
-func (rows *fakeRows) Err() error { return nil }
+func (rows *fakeRows) Err() error { return rows.err }
 
 func (*fakeRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
 
@@ -471,6 +564,9 @@ func (rows *fakeRows) Next() bool {
 }
 
 func (rows *fakeRows) Scan(dest ...any) error {
+	if rows.scanErr != nil {
+		return rows.scanErr
+	}
 	if rows.index == 0 || rows.index > len(rows.values) {
 		return errors.New("Scan called without a current row")
 	}
@@ -497,6 +593,9 @@ func (tx *fakeTx) Exec(ctx context.Context, query string, args ...any) (pgconn.C
 	if strings.Contains(query, "pg_advisory_xact_lock") {
 		return pgconn.CommandTag{}, tx.execErr
 	}
+	if strings.Contains(query, "INSERT INTO notifications") {
+		return tx.fakeDB.Exec(ctx, query, args...)
+	}
 	if (strings.Contains(query, "UPDATE boards") && strings.Contains(query, "is_personal = FALSE")) ||
 		strings.Contains(query, "DELETE FROM users") {
 		return tx.fakeDB.Exec(ctx, query, args...)
@@ -509,6 +608,9 @@ func (tx *fakeTx) Exec(ctx context.Context, query string, args ...any) (pgconn.C
 		return tx.fakeDB.Exec(ctx, query, args...)
 	}
 	if strings.Contains(query, "DELETE FROM board_members AS member") {
+		return tx.fakeDB.Exec(ctx, query, args...)
+	}
+	if strings.Contains(query, "notifications") {
 		return tx.fakeDB.Exec(ctx, query, args...)
 	}
 	return pgconn.CommandTag{}, tx.execErr

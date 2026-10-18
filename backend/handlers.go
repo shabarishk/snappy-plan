@@ -22,6 +22,7 @@ var _ SetupTransaction = (pgx.Tx)(nil)
 
 type ApiConfig struct {
 	DB           *dbgen.Queries
+	DBTX         dbgen.DBTX
 	BeginTx      func(context.Context) (SetupTransaction, error)
 	SecureCookie bool
 	SetupToken   string
@@ -32,7 +33,7 @@ func NewHandler(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, 
 }
 
 func NewHandlerWithSetupToken(db dbgen.DBTX, beginTx func(context.Context) (SetupTransaction, error), secureCookie bool, setupToken string, frontendFiles fs.FS) http.Handler {
-	api := &ApiConfig{DB: dbgen.New(db), BeginTx: beginTx, SecureCookie: secureCookie, SetupToken: setupToken}
+	api := &ApiConfig{DB: dbgen.New(db), DBTX: db, BeginTx: beginTx, SecureCookie: secureCookie, SetupToken: setupToken}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/setup/status", api.handleSetupStatus)
 	mux.HandleFunc("POST /api/setup", api.handleInitialSetup)
@@ -49,6 +50,8 @@ func NewHandlerWithSetupToken(db dbgen.DBTX, beginTx func(context.Context) (Setu
 	mux.HandleFunc("POST /api/tasks", api.handleCreateTask)
 	mux.HandleFunc("PATCH /api/tasks/{taskID}", api.handleMoveTask)
 	mux.HandleFunc("PUT /api/tasks/{taskID}", api.handleUpdateTask)
+	mux.HandleFunc("GET /api/notifications", api.handleGetNotifications)
+	mux.HandleFunc("PATCH /api/notifications/{notificationID}/read", api.handleMarkNotificationRead)
 	mux.HandleFunc("GET /api/initiatives", api.handleGetInitiatives)
 	mux.HandleFunc("POST /api/initiatives", api.handleCreateInitiative)
 	mux.HandleFunc("GET /api/initiatives/{initiativeID}", api.handleGetInitiative)

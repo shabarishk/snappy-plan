@@ -280,6 +280,13 @@ func (api *ApiConfig) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to create task", http.StatusInternalServerError)
 		return
 	}
+	if assignedToID.Valid {
+		if err := insertTaskNotification(r, tx, assignedToID.String, session.UserID,
+			"A new task, “"+task.Title+"”, was created for you."); err != nil {
+			http.Error(w, "Failed to create task notification", http.StatusInternalServerError)
+			return
+		}
+	}
 	if err := tx.Commit(r.Context()); err != nil {
 		http.Error(w, "Failed to save task", http.StatusInternalServerError)
 		return
@@ -363,6 +370,22 @@ func (api *ApiConfig) handleMoveTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to load task", http.StatusInternalServerError)
 		return
 	}
+	previousAssignedToID := pgtype.Text{}
+	previousState := ""
+	taskTitle := ""
+	if err := tx.QueryRow(r.Context(), `
+		SELECT assigned_to_id, state, title
+		FROM tasks
+		WHERE id = $1
+		FOR UPDATE
+	`, taskID).Scan(&previousAssignedToID, &previousState, &taskTitle); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "Task not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "Failed to load task before moving", http.StatusInternalServerError)
+		return
+	}
 	if !enforceTaskStateCapacity(w, r, tx, board.ID, params.State, taskID) {
 		return
 	}
@@ -394,6 +417,14 @@ func (api *ApiConfig) handleMoveTask(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Failed to move task", http.StatusInternalServerError)
 		return
+	}
+	if previousAssignedToID.Valid && previousAssignedToID.String != session.UserID &&
+		previousState != params.State {
+		if err := insertTaskNotification(r, tx, previousAssignedToID.String, session.UserID,
+			"Your task, “"+taskTitle+"”, moved from "+previousState+" to "+params.State+"."); err != nil {
+			http.Error(w, "Failed to create task notification", http.StatusInternalServerError)
+			return
+		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
 		http.Error(w, "Failed to save task move", http.StatusInternalServerError)
@@ -529,6 +560,22 @@ func (api *ApiConfig) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to load task", http.StatusInternalServerError)
 		return
 	}
+	previousAssignedToID := pgtype.Text{}
+	previousState := ""
+	taskTitle := ""
+	if err := tx.QueryRow(r.Context(), `
+		SELECT assigned_to_id, state, title
+		FROM tasks
+		WHERE id = $1
+		FOR UPDATE
+	`, taskID).Scan(&previousAssignedToID, &previousState, &taskTitle); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "Task not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "Failed to load task before updating", http.StatusInternalServerError)
+		return
+	}
 	destinationBoard := board
 	if params.BoardID != "" {
 		destinationBoard, err = txQueries.GetBoardByIDAndOwner(r.Context(), dbgen.GetBoardByIDAndOwnerParams{
@@ -572,6 +619,22 @@ func (api *ApiConfig) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Failed to update task", http.StatusInternalServerError)
 		return
+	}
+	if assignedToID.Valid && assignedToID.String != session.UserID &&
+		(!previousAssignedToID.Valid || previousAssignedToID.String != assignedToID.String) {
+		if err := insertTaskNotification(r, tx, assignedToID.String, session.UserID,
+			"An existing task, “"+task.Title+"”, was assigned to you."); err != nil {
+			http.Error(w, "Failed to create task notification", http.StatusInternalServerError)
+			return
+		}
+	}
+	if previousAssignedToID.Valid && previousAssignedToID.String != session.UserID &&
+		previousState != params.State {
+		if err := insertTaskNotification(r, tx, previousAssignedToID.String, session.UserID,
+			"Your task, “"+taskTitle+"”, moved from "+previousState+" to "+params.State+"."); err != nil {
+			http.Error(w, "Failed to create task notification", http.StatusInternalServerError)
+			return
+		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
 		http.Error(w, "Failed to save task update", http.StatusInternalServerError)
