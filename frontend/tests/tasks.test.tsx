@@ -666,45 +666,42 @@ describe('Tasks', () => {
       fireEvent.click(screen.getByRole('checkbox', { name: optionName }));
     };
     await waitFor(() => expect((initiativeFilter as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(boardFilter);
     fireEvent.click(initiativeFilter);
-    expect(await screen.findByRole('checkbox', { name: 'Initiative: Launch Initiative' })).toBeTruthy();
     fireEvent.click(assigneeFilter);
+    expect(await screen.findByRole('checkbox', { name: 'Initiative: Launch Initiative' })).toBeTruthy();
     expect(screen.getByRole('checkbox', { name: 'Assignee: Unassigned' })).toBeTruthy();
-
+    for (const allCheckbox of ['Board: All', 'Initiative: All', 'Assignee: All']) {
+      expect((screen.getByRole('checkbox', { name: allCheckbox }) as HTMLInputElement).checked).toBe(true);
+    }
     toggleHomeFilter(boardFilter, 'Board: Project Board');
-    toggleHomeFilter(initiativeFilter, 'Initiative: Launch Initiative');
     expect(screen.queryByText('Second board task')).toBeNull();
-    expect(screen.queryByText('Linked task')).toBeNull();
-    toggleHomeFilter(boardFilter, 'Board: Board Owner');
-    expect(await screen.findByText('Linked task')).toBeTruthy();
-    expect(screen.queryByText('Second board task')).toBeNull();
-    expect(boardFilter.textContent).toContain('Multiple');
-    toggleHomeFilter(assigneeFilter, 'Assignee: Board Owner');
     expect(screen.getByText('Linked task')).toBeTruthy();
-    expect(screen.queryByText('Second board task')).toBeNull();
-    toggleHomeFilter(assigneeFilter, 'Assignee: Unassigned');
-    toggleHomeFilter(assigneeFilter, 'Assignee: Board Owner');
+    toggleHomeFilter(boardFilter, 'Board: Project Board');
+    expect(boardFilter.textContent).toContain('Board: All');
+    expect((screen.getByRole('checkbox', { name: 'Board: All' }) as HTMLInputElement).checked).toBe(true);
+    toggleHomeFilter(initiativeFilter, 'Initiative: Launch Initiative');
     expect(screen.queryByText('Linked task')).toBeNull();
     toggleHomeFilter(initiativeFilter, 'Initiative: Launch Initiative');
+    expect(initiativeFilter.textContent).toContain('Initiative: All');
+    toggleHomeFilter(assigneeFilter, 'Assignee: Unassigned');
+    expect(screen.queryByText('Unlinked backlog task')).toBeNull();
+    toggleHomeFilter(assigneeFilter, 'Assignee: Unassigned');
+    expect(assigneeFilter.textContent).toContain('Assignee: All');
+
     fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
     expect(await screen.findByText('Unlinked backlog task')).toBeTruthy();
-    expect(screen.queryByText('Linked task')).toBeNull();
-    toggleHomeFilter(assigneeFilter, 'Assignee: Unassigned');
-    toggleHomeFilter(initiativeFilter, 'Initiative: Launch Initiative');
     fireEvent.click(screen.getByRole('button', { name: 'Active' }));
 
     fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'assignee' } });
-    expect(boardFilter.textContent).toContain('Multiple');
-    expect(initiativeFilter.textContent).toContain('Launch Initiative');
+    expect(boardFilter.textContent).toContain('Board: All');
+    expect(initiativeFilter.textContent).toContain('Initiative: All');
     expect(assigneeFilter.textContent).toContain('Assignee: All');
     expect(screen.getByLabelText('Filter by board')).toBeTruthy();
     expect(screen.getByLabelText('Filter by initiative')).toBeTruthy();
     expect(screen.getByLabelText('Filter by assignee')).toBeTruthy();
     expect(screen.getByText('Linked task')).toBeTruthy();
-    expect(screen.queryByText('Second board task')).toBeNull();
-    toggleHomeFilter(boardFilter, 'Board: Board Owner');
-    toggleHomeFilter(boardFilter, 'Board: Project Board');
-    toggleHomeFilter(initiativeFilter, 'Initiative: Launch Initiative');
+    expect(screen.getByText('Second board task')).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'initiative' } });
     const initiativeGroups = await screen.findAllByRole('region', { name: /^(Launch Initiative|No Initiative) tasks$/ });
@@ -762,6 +759,16 @@ describe('Tasks', () => {
         created_at: '',
         updated_at: '',
       },
+      {
+        id: 'initiative-3',
+        title: 'Retention Initiative',
+        description: null,
+        complete_by: null,
+        assigned_to_id: null,
+        created_by_id: 'boardowner',
+        created_at: '',
+        updated_at: '',
+      },
     ];
     const firstTask = taskResponse({
       id: 'home-task-1',
@@ -775,21 +782,30 @@ describe('Tasks', () => {
       state: 'ToDo',
       assigned_to_id: 'user-2',
     });
+    const thirdTask = taskResponse({
+      id: 'home-task-3',
+      title: 'Board three task',
+      state: 'ToDo',
+      assigned_to_id: 'user-3',
+    });
     const unassignedTask = taskResponse({
       id: 'home-task-unassigned',
       title: 'Unassigned task',
       state: 'ToDo',
       assigned_to_id: null,
     });
+    const homeBoards = [...boardList, { id: 'board-3', title: 'Roadmap Board', owner_id: 'teammate' }];
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
-      if (url === '/api/boards') return { ok: true, json: async () => boardList };
+      if (url === '/api/boards') return { ok: true, json: async () => homeBoards };
       if (url === '/api/tasks?board_id=board-1') return { ok: true, json: async () => [firstTask, unassignedTask] };
       if (url === '/api/tasks?board_id=board-2') return { ok: true, json: async () => [secondTask] };
+      if (url === '/api/tasks?board_id=board-3') return { ok: true, json: async () => [thirdTask] };
       if (url === '/api/users') return {
         ok: true,
         json: async () => [
           { id: 'user-1', full_name: 'Board Owner' },
           { id: 'user-2', full_name: 'Teammate' },
+          { id: 'user-3', full_name: 'Project Lead' },
         ],
       };
       if (url === '/api/initiatives') return { ok: true, json: async () => initiatives };
@@ -798,6 +814,9 @@ describe('Tasks', () => {
       }
       if (url === '/api/initiatives/initiative-2') {
         return { ok: true, json: async () => ({ initiative: initiatives[1], tasks: [secondTask] }) };
+      }
+      if (url === '/api/initiatives/initiative-3') {
+        return { ok: true, json: async () => ({ initiative: initiatives[2], tasks: [thirdTask] }) };
       }
       if (url === '/api/profile') return {
         ok: true,
@@ -815,52 +834,85 @@ describe('Tasks', () => {
       if (filter.getAttribute('aria-expanded') !== 'true') fireEvent.click(filter);
       fireEvent.click(screen.getByRole('checkbox', { name: optionName }));
     };
+    fireEvent.click(boardFilter);
+    await waitFor(() => expect((initiativeFilter as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(initiativeFilter);
+    fireEvent.click(assigneeFilter);
     expect(boardFilter.textContent).toContain('Board: All');
     expect(initiativeFilter.textContent).toContain('Initiative: All');
     expect(assigneeFilter.textContent).toContain('Assignee: All');
+    expect((screen.getByRole('checkbox', { name: 'Board: All' }) as HTMLInputElement).checked).toBe(true);
+    fireEvent.pointerDown(screen.getByLabelText('Group tasks by'));
+    expect(boardFilter.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('checkbox', { name: 'Board: All' })).toBeNull();
 
+    toggleHomeFilter(boardFilter, 'Board: All');
+    expect(boardFilter.textContent).toContain('Board: None');
+    expect(screen.queryByText('Board one task')).toBeNull();
+    expect(screen.queryByText('Board two task')).toBeNull();
     toggleHomeFilter(boardFilter, 'Board: Board Owner');
+    expect(boardFilter.textContent).toContain('Board: Board Owner');
+    expect(screen.getByText('Board one task')).toBeTruthy();
     toggleHomeFilter(boardFilter, 'Board: Project Board');
     expect(boardFilter.textContent).toContain('Board: Multiple');
     expect(screen.getByText('Board one task')).toBeTruthy();
     expect(screen.getByText('Board two task')).toBeTruthy();
+    expect((screen.getByRole('checkbox', { name: 'Board: All' }) as HTMLInputElement).checked).toBe(false);
     toggleHomeFilter(boardFilter, 'Board: Board Owner');
     expect(boardFilter.textContent).toContain('Board: Project Board');
     expect(screen.queryByText('Board one task')).toBeNull();
+    expect(screen.getByText('Board two task')).toBeTruthy();
     toggleHomeFilter(boardFilter, 'Board: Board Owner');
     expect(boardFilter.textContent).toContain('Board: Multiple');
-    toggleHomeFilter(boardFilter, 'Board: Board Owner');
-    toggleHomeFilter(boardFilter, 'Board: Project Board');
+    toggleHomeFilter(boardFilter, 'Board: Roadmap Board');
     expect(boardFilter.textContent).toContain('Board: All');
+    expect((screen.getByRole('checkbox', { name: 'Board: All' }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByText('Board three task')).toBeTruthy();
+    toggleHomeFilter(boardFilter, 'Board: All');
+    toggleHomeFilter(boardFilter, 'Board: All');
+    expect(boardFilter.textContent).toContain('Board: All');
+    expect(screen.getByText('Board one task')).toBeTruthy();
 
-    await waitFor(() => expect((initiativeFilter as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(initiativeFilter);
     expect(await screen.findByRole('checkbox', { name: 'Initiative: Growth Initiative' })).toBeTruthy();
+    toggleHomeFilter(initiativeFilter, 'Initiative: All');
+    expect(initiativeFilter.textContent).toContain('Initiative: None');
+    expect(screen.queryByText('Board one task')).toBeNull();
     toggleHomeFilter(initiativeFilter, 'Initiative: Launch Initiative');
+    expect(initiativeFilter.textContent).toContain('Initiative: Launch Initiative');
+    expect(screen.getByText('Board one task')).toBeTruthy();
     toggleHomeFilter(initiativeFilter, 'Initiative: Growth Initiative');
     expect(initiativeFilter.textContent).toContain('Initiative: Multiple');
-    expect(screen.getByText('Board one task')).toBeTruthy();
     expect(screen.getByText('Board two task')).toBeTruthy();
-    toggleHomeFilter(initiativeFilter, 'Initiative: Launch Initiative');
-    expect(initiativeFilter.textContent).toContain('Initiative: Growth Initiative');
-    expect(screen.queryByText('Board one task')).toBeNull();
-    toggleHomeFilter(initiativeFilter, 'Initiative: Growth Initiative');
+    expect(screen.queryByText('Board three task')).toBeNull();
+    expect((screen.getByRole('checkbox', { name: 'Initiative: All' }) as HTMLInputElement).checked).toBe(false);
+    toggleHomeFilter(initiativeFilter, 'Initiative: Retention Initiative');
+    expect(initiativeFilter.textContent).toContain('Initiative: All');
+    expect((screen.getByRole('checkbox', { name: 'Initiative: All' }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByText('Board three task')).toBeTruthy();
+    toggleHomeFilter(initiativeFilter, 'Initiative: All');
+    toggleHomeFilter(initiativeFilter, 'Initiative: All');
     expect(initiativeFilter.textContent).toContain('Initiative: All');
 
+    toggleHomeFilter(assigneeFilter, 'Assignee: All');
+    expect(assigneeFilter.textContent).toContain('Assignee: None');
+    expect(screen.queryByText('Board one task')).toBeNull();
     toggleHomeFilter(assigneeFilter, 'Assignee: Board Owner');
+    expect(assigneeFilter.textContent).toContain('Assignee: Board Owner');
+    expect(screen.getByText('Board one task')).toBeTruthy();
     toggleHomeFilter(assigneeFilter, 'Assignee: Teammate');
     expect(assigneeFilter.textContent).toContain('Assignee: Multiple');
-    expect(screen.getByText('Board one task')).toBeTruthy();
     expect(screen.getByText('Board two task')).toBeTruthy();
     expect(screen.queryByText('Unassigned task')).toBeNull();
     toggleHomeFilter(assigneeFilter, 'Assignee: Unassigned');
     expect(assigneeFilter.textContent).toContain('Assignee: Multiple');
     expect(screen.getByText('Unassigned task')).toBeTruthy();
-    toggleHomeFilter(assigneeFilter, 'Assignee: Board Owner');
-    toggleHomeFilter(assigneeFilter, 'Assignee: Teammate');
-    toggleHomeFilter(assigneeFilter, 'Assignee: Unassigned');
+    toggleHomeFilter(assigneeFilter, 'Assignee: Project Lead');
     expect(assigneeFilter.textContent).toContain('Assignee: All');
-    expect(screen.getByText('Unassigned task')).toBeTruthy();
+    expect((screen.getByRole('checkbox', { name: 'Assignee: All' }) as HTMLInputElement).checked).toBe(true);
+    toggleHomeFilter(assigneeFilter, 'Assignee: All');
+    toggleHomeFilter(assigneeFilter, 'Assignee: All');
+    expect(assigneeFilter.textContent).toContain('Assignee: All');
   });
 
   it('lists all board tasks in state order with filters and selectable page sizes', async () => {
