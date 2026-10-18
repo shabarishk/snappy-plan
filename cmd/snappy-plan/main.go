@@ -41,7 +41,9 @@ func runLaunchServer(getenv func(string) string, listen func(string, http.Handle
 	databaseReady := runtime.active != nil
 	runtime.mu.RUnlock()
 	if hasSavedConfig && !databaseReady {
-		go runtime.retrySavedConfig(context.Background())
+		retryCtx, cancelRetries := context.WithCancel(context.Background())
+		defer cancelRetries()
+		go runtime.retrySavedConfig(retryCtx)
 	}
 	log.Println("Server starting on port 8080...")
 	return listen(":8080", runtime.handler())

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"snappy-plan/backend"
 
@@ -226,6 +227,7 @@ func TestActivateSavedConfig(t *testing.T) {
 	}{
 		{name: "missing settings", notExist: true},
 		{name: "invalid JSON", contents: `{`, wantError: "decode saved database settings"},
+		{name: "invalid settings", contents: `{}`, wantError: "validate saved database settings"},
 		{name: "connection failure", contents: validDatabaseSettingsJSON, wantError: "connect to PostgreSQL"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -257,6 +259,74 @@ func TestActivateSavedConfig(t *testing.T) {
 					t.Fatalf("launch status after saved-config connection failure = %v, want configured but unavailable", response)
 				}
 			}
+		})
+	}
+}
+
+func TestRetrySavedConfig(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "database.json")
+	if err := os.WriteFile(configPath, []byte(validDatabaseSettingsJSON), 0600); err != nil {
+		t.Fatalf("write saved settings: %v", err)
+	}
+	runtime := newLaunchRuntime(configPath, strings.Repeat("k", 32), false, fstest.MapFS{
+		"index.html": {Data: []byte("frontend")},
+	})
+	runtime.retryInitialDelay = 5 * time.Millisecond
+	runtime.retryMaxDelay = 8 * time.Millisecond
+	runtime.retryAttemptTimeout = time.Second
+	pingCalls := 0
+	runtime.pingDatabase = func(context.Context, *pgxpool.Pool) error {
+		pingCalls++
+		if pingCalls == 1 {
+			return errors.New("temporarily unavailable")
+		}
+		return nil
+	}
+	runtime.applySchemaMigrations = func(context.Context, *pgxpool.Pool) error { return nil }
+	runtime.ensureSchema = func(context.Context, *pgxpool.Pool) error { return nil }
+	runtime.newAppHandler = func(*pgxpool.Pool) http.Handler { return http.NotFoundHandler() }
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	runtime.retrySavedConfig(ctx)
+
+	if pingCalls != 2 {
+		t.Fatalf("database ping calls = %d, want 2", pingCalls)
+	}
+	status := httptest.NewRecorder()
+	runtime.handler().ServeHTTP(status, httptest.NewRequest(http.MethodGet, "/api/launch/status", nil))
+	var response map[string]bool
+	if err := json.Unmarshal(status.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode launch status: %v", err)
+	}
+	if response["launch_required"] || !response["database_ready"] {
+		t.Fatalf("launch status after reconnect = %v, want configured and ready", response)
+	}
+}
+
+func TestRetrySavedConfigStopsWhenCancelledOrAlreadyConnected(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		cancel    bool
+		connected bool
+	}{
+		{name: "cancelled context", cancel: true},
+		{name: "already connected", connected: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runtime := newLaunchRuntime(filepath.Join(t.TempDir(), "database.json"), "", false, fstest.MapFS{})
+			runtime.retryInitialDelay = time.Millisecond
+			if test.connected {
+				runtime.mu.Lock()
+				runtime.active = http.NotFoundHandler()
+				runtime.mu.Unlock()
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			if test.cancel {
+				cancel()
+			}
+			defer cancel()
+			runtime.retrySavedConfig(ctx)
 		})
 	}
 }
@@ -324,6 +394,27 @@ func TestRunLaunchServer(t *testing.T) {
 	}
 	if listenCalls != 1 {
 		t.Fatalf("listen calls = %d, want 1", listenCalls)
+	}
+
+	invalidConfigPath := filepath.Join(t.TempDir(), "database.json")
+	if err := os.WriteFile(invalidConfigPath, []byte(`{`), 0600); err != nil {
+		t.Fatalf("write invalid saved config: %v", err)
+	}
+	values["SNAPPY_CONFIG_FILE"] = invalidConfigPath
+	if err := runLaunchServer(func(key string) string { return values[key] }, func(string, http.Handler) error {
+		return nil
+	}); err != nil {
+		t.Fatalf("runLaunchServer with invalid saved config returned error: %v", err)
+	}
+
+	unavailableDatabaseConfig := `{"host":"127.0.0.1","port":1,"database":"snappyplan","username":"snappy","password":"secret"}`
+	if err := os.WriteFile(invalidConfigPath, []byte(unavailableDatabaseConfig), 0600); err != nil {
+		t.Fatalf("write unavailable database config: %v", err)
+	}
+	if err := runLaunchServer(func(key string) string { return values[key] }, func(string, http.Handler) error {
+		return nil
+	}); err != nil {
+		t.Fatalf("runLaunchServer with unavailable database returned error: %v", err)
 	}
 
 	listenErr := errors.New("listen failed")

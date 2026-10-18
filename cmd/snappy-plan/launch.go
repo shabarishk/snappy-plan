@@ -71,6 +71,9 @@ type launchRuntime struct {
 	configPath            string
 	setupToken            string
 	secureCookie          bool
+	retryInitialDelay     time.Duration
+	retryMaxDelay         time.Duration
+	retryAttemptTimeout   time.Duration
 	frontend              http.Handler
 	frontendFiles         fs.FS
 	pingDatabase          func(context.Context, *pgxpool.Pool) error
@@ -84,11 +87,14 @@ func newLaunchRuntime(configPath, setupToken string, secureCookie bool, frontend
 		configPath = defaultLaunchConfigPath
 	}
 	runtime := &launchRuntime{
-		configPath:    configPath,
-		setupToken:    setupToken,
-		secureCookie:  secureCookie,
-		frontend:      backend.NewFrontendHandler(frontendFiles),
-		frontendFiles: frontendFiles,
+		configPath:          configPath,
+		setupToken:          setupToken,
+		secureCookie:        secureCookie,
+		retryInitialDelay:   5 * time.Second,
+		retryMaxDelay:       time.Minute,
+		retryAttemptTimeout: 15 * time.Second,
+		frontend:            backend.NewFrontendHandler(frontendFiles),
+		frontendFiles:       frontendFiles,
 	}
 	runtime.pingDatabase = func(ctx context.Context, pool *pgxpool.Pool) error {
 		return pool.Ping(ctx)
@@ -240,7 +246,7 @@ func (runtime *launchRuntime) activateURL(ctx context.Context, databaseURL strin
 }
 
 func (runtime *launchRuntime) retrySavedConfig(ctx context.Context) {
-	delay := 5 * time.Second
+	delay := runtime.retryInitialDelay
 	for {
 		timer := time.NewTimer(delay)
 		select {
@@ -257,7 +263,7 @@ func (runtime *launchRuntime) retrySavedConfig(ctx context.Context) {
 			return
 		}
 
-		attemptCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		attemptCtx, cancel := context.WithTimeout(ctx, runtime.retryAttemptTimeout)
 		err := runtime.activateSavedConfig(attemptCtx)
 		cancel()
 		if err == nil {
@@ -265,10 +271,10 @@ func (runtime *launchRuntime) retrySavedConfig(ctx context.Context) {
 			return
 		}
 		log.Printf("PostgreSQL reconnect using saved configuration failed: %v", err)
-		if delay < time.Minute {
+		if delay < runtime.retryMaxDelay {
 			delay *= 2
-			if delay > time.Minute {
-				delay = time.Minute
+			if delay > runtime.retryMaxDelay {
+				delay = runtime.retryMaxDelay
 			}
 		}
 	}
