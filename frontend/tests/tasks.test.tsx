@@ -270,6 +270,13 @@ describe('Tasks', () => {
           state: 'ToDo',
         })],
       };
+      if (url === '/api/tasks/task-1' && options?.method === 'PUT') {
+        return { ok: true, json: async () => taskResponse({
+          id: 'task-1',
+          title: 'Plan launch work',
+          state: 'ToDo',
+        }) };
+      }
       if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
       if (url === '/api/users') return { ok: true, json: async () => [] };
       if (url === '/api/profile') return {
@@ -297,19 +304,120 @@ describe('Tasks', () => {
     fireEvent.change(initiativeCombo, { target: { value: 'launch' } });
     expect(await within(taskDialog).findByRole('option', { name: 'Launch planning' })).toBeTruthy();
     fireEvent.click(within(taskDialog).getByRole('option', { name: 'Launch planning' }));
-    expect((await within(taskDialog).findByRole('alert')).textContent).toContain('Assignment failed');
-
-    fireEvent.change(initiativeCombo, { target: { value: 'launch' } });
-    fireEvent.click(within(taskDialog).getByRole('option', { name: 'Launch planning' }));
-    await within(taskDialog).findByText('Assigned to: Launch planning');
     expect((initiativeCombo as HTMLInputElement).value).toBe('Launch planning');
+    fireEvent.click(within(taskDialog).getByRole('button', { name: 'Save changes' }));
+    expect((await within(taskDialog).findByRole('alert')).textContent).toContain('Assignment failed');
+    fireEvent.click(within(taskDialog).getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Task details' })).toBeNull());
     expect(fetchMock).toHaveBeenCalledWith('/api/initiatives/initiative-1/tasks', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ task_id: 'task-1' }),
     }));
+  });
 
-    fireEvent.change(initiativeCombo, { target: { value: 'launch' } });
-    expect(within(taskDialog).getByText('No matching initiatives found.')).toBeTruthy();
+  it('restores the assigned initiative when leaving an unselected search', async () => {
+    const initiative = {
+      id: 'initiative-1',
+      title: 'Launch planning',
+      description: null,
+      complete_by: null,
+      assigned_to_id: null,
+      created_by_id: 'boardowner',
+      created_at: '2026-10-01T00:00:00Z',
+      updated_at: '2026-10-01T00:00:00Z',
+    };
+    const linkedTask = taskResponse({ id: 'task-1', title: 'Plan launch work', state: 'ToDo' });
+    const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
+      if (url === '/api/tasks?board_id=board-1') return { ok: true, json: async () => [linkedTask] };
+      if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
+      if (url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
+      if (url === '/api/initiatives') return { ok: true, json: async () => [initiative] };
+      if (url === '/api/initiatives/initiative-1') {
+        return { ok: true, json: async () => ({ initiative, tasks: [linkedTask] }) };
+      }
+      if (url === '/api/tasks/task-1' && options?.method === 'PUT') {
+        return { ok: true, json: async () => linkedTask };
+      }
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByText('Plan launch work'));
+    const taskDialog = screen.getByRole('dialog', { name: 'Task details' });
+    const initiativeCombo = within(taskDialog).getByRole('combobox', { name: 'Initiatives' }) as HTMLInputElement;
+    await waitFor(() => expect(initiativeCombo.value).toBe('Launch planning'));
+    fireEvent.click(initiativeCombo);
+    expect(initiativeCombo.selectionStart).toBe(0);
+    expect(initiativeCombo.selectionEnd).toBe('Launch planning'.length);
+    fireEvent.change(initiativeCombo, { target: { value: 'Other initiative' } });
+    fireEvent.blur(initiativeCombo);
+    expect(initiativeCombo.value).toBe('Launch planning');
+    fireEvent.click(within(taskDialog).getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Task details' })).toBeNull());
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      '/api/initiatives/initiative-1/tasks/task-1',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
+
+  it('unassigns a task from its initiative when the initiative field is cleared', async () => {
+    const initiative = {
+      id: 'initiative-1',
+      title: 'Launch planning',
+      description: null,
+      complete_by: null,
+      assigned_to_id: null,
+      created_by_id: 'boardowner',
+      created_at: '2026-10-01T00:00:00Z',
+      updated_at: '2026-10-01T00:00:00Z',
+    };
+    const linkedTask = taskResponse({ id: 'task-1', title: 'Plan launch work', state: 'ToDo' });
+    const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
+      if (url === '/api/tasks?board_id=board-1') return { ok: true, json: async () => [linkedTask] };
+      if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
+      if (url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
+      if (url === '/api/initiatives') return { ok: true, json: async () => [initiative] };
+      if (url === '/api/initiatives/initiative-1') {
+        return { ok: true, json: async () => ({ initiative, tasks: [linkedTask] }) };
+      }
+      if (url === '/api/tasks/task-1' && options?.method === 'PUT') {
+        return { ok: true, json: async () => linkedTask };
+      }
+      if (url === '/api/initiatives/initiative-1/tasks/task-1' && options?.method === 'DELETE') {
+        return { ok: true, status: 204 };
+      }
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByText('Plan launch work'));
+    const taskDialog = screen.getByRole('dialog', { name: 'Task details' });
+    const initiativeCombo = within(taskDialog).getByRole('combobox', { name: 'Initiatives' }) as HTMLInputElement;
+    await waitFor(() => expect(initiativeCombo.value).toBe('Launch planning'));
+    fireEvent.click(initiativeCombo);
+    fireEvent.change(initiativeCombo, { target: { value: '' } });
+    fireEvent.blur(initiativeCombo);
+    expect(initiativeCombo.value).toBe('');
+    fireEvent.click(within(taskDialog).getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Task details' })).toBeNull());
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/initiatives/initiative-1/tasks/task-1',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
   });
 
   it('moves a task to the selected board from the details overlay', async () => {
@@ -792,7 +900,9 @@ describe('Tasks', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Task' }));
     const createTaskDialog = screen.getByRole('dialog', { name: 'Create task' });
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Plan launch' } });
-    fireEvent.change(await within(createTaskDialog).findByLabelText('Initiative'), { target: { value: 'initiative-1' } });
+    const initiativeCombo = within(createTaskDialog).getByRole('combobox', { name: 'Initiative' });
+    fireEvent.change(initiativeCombo, { target: { value: 'Launch' } });
+    fireEvent.click(await within(createTaskDialog).findByRole('option', { name: 'Launch planning' }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm Task' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Assign Task to me' }));
 
@@ -805,6 +915,77 @@ describe('Tasks', () => {
       method: 'POST',
       body: JSON.stringify({ task_id: 'created-task' }),
     }));
+  });
+
+  it('suggests initiatives linked to the selected board in task pickers', async () => {
+    const boardOneTask = taskResponse({
+      id: 'task-board-one',
+      title: 'Board one task',
+      state: 'ToDo',
+    });
+    const boardTwoTask = taskResponse({
+      id: 'task-board-two',
+      title: 'Board two task',
+      state: 'ToDo',
+    });
+    const initiativeOne = {
+      id: 'initiative-one',
+      title: 'Launch initiative',
+      description: null,
+      complete_by: null,
+      assigned_to_id: null,
+      created_by_id: 'boardowner',
+      created_at: '2026-10-01T00:00:00Z',
+      updated_at: '2026-10-01T00:00:00Z',
+    };
+    const initiativeTwo = {
+      ...initiativeOne,
+      id: 'initiative-two',
+      title: 'Hiring initiative',
+    };
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/boards') return { ok: true, json: async () => boardList };
+      if (url === '/api/tasks?board_id=board-1') return { ok: true, json: async () => [boardOneTask] };
+      if (url === '/api/tasks?board_id=board-2') return { ok: true, json: async () => [boardTwoTask] };
+      if (url === '/api/users') return { ok: true, json: async () => [] };
+      if (url === '/api/profile') return {
+        ok: true,
+        json: async () => ({ username: 'boardowner', full_name: 'Board Owner', email: 'owner@example.com' }),
+      };
+      if (url === '/api/initiatives') return { ok: true, json: async () => [initiativeOne, initiativeTwo] };
+      if (url === '/api/initiatives/initiative-one') {
+        return { ok: true, json: async () => ({ initiative: initiativeOne, tasks: [boardOneTask] }) };
+      }
+      if (url === '/api/initiatives/initiative-two') {
+        return { ok: true, json: async () => ({ initiative: initiativeTwo, tasks: [boardTwoTask] }) };
+      }
+      return { ok: true, json: async () => ({ authenticated: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Board Owner' });
+    fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Task' }));
+    const createDialog = screen.getByRole('dialog', { name: 'Create task' });
+    const createPicker = within(createDialog).getByRole('combobox', { name: 'Initiative' });
+    fireEvent.click(createPicker);
+    expect(await within(createDialog).findByRole('option', { name: 'Launch initiative' })).toBeTruthy();
+    expect(within(createDialog).queryByRole('option', { name: 'Hiring initiative' })).toBeNull();
+
+    fireEvent.change(within(createDialog).getByLabelText('Board'), { target: { value: 'board-2' } });
+    expect(await within(createDialog).findByRole('option', { name: 'Hiring initiative' })).toBeTruthy();
+    expect(within(createDialog).queryByRole('option', { name: 'Launch initiative' })).toBeNull();
+    fireEvent.change(createPicker, { target: { value: 'Launch' } });
+    expect(await within(createDialog).findByRole('option', { name: 'Launch initiative' })).toBeTruthy();
+
+    fireEvent.click(within(createDialog).getByRole('button', { name: 'Close create task form' }));
+    fireEvent.click(await screen.findByText('Board two task'));
+    const detailsDialog = screen.getByRole('dialog', { name: 'Task details' });
+    const detailsPicker = within(detailsDialog).getByRole('combobox', { name: 'Initiatives' });
+    fireEvent.focus(detailsPicker);
+    expect(await within(detailsDialog).findByRole('option', { name: 'Hiring initiative' })).toBeTruthy();
+    expect(within(detailsDialog).queryByRole('option', { name: 'Launch initiative' })).toBeNull();
   });
 
   it('searches tasks across boards and opens their details from non-board pages', async () => {
