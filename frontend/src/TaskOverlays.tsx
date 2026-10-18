@@ -1,15 +1,110 @@
 import { useEffect, useState } from 'react';
 import type { TaskPriority } from './taskPriority';
-import { addTaskToInitiative, createTask as persistTask, getInitiatives, updateTask as persistUpdateTask } from './api';
+import { addTaskToInitiative, createTask as persistTask, getInitiatives, removeTaskFromInitiative, updateTask as persistUpdateTask } from './api';
 import type { ApiTask, Board, Initiative, TaskAssignee } from './api';
 import type { Task, TaskState } from './taskModel';
 import { toBoardTask } from './taskModel';
+
+function InitiativePicker({
+  id,
+  value,
+  initiatives,
+  boardInitiatives,
+  disabled,
+  onValueChange,
+  onSelect,
+  onBlur,
+}: {
+  id: string;
+  value: string;
+  initiatives: Initiative[];
+  boardInitiatives: Initiative[];
+  disabled?: boolean;
+  onValueChange: (value: string) => void;
+  onSelect: (initiative: Initiative) => void;
+  onBlur?: () => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [hasTyped, setHasTyped] = useState(false);
+  const matchingInitiatives = hasTyped && value.trim()
+    ? initiatives.filter((initiative) =>
+      initiative.title.toLocaleLowerCase().includes(value.trim().toLocaleLowerCase()))
+    : boardInitiatives;
+
+  return (
+    <div className="relative">
+      <input
+        id={id}
+        type="search"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={isOpen}
+        aria-controls={`${id}-options`}
+        autoComplete="off"
+        placeholder="Search initiatives…"
+        value={value}
+        onClick={(event) => {
+          event.currentTarget.select();
+          setHasTyped(false);
+          setIsOpen(true);
+        }}
+        onFocus={(event) => {
+          event.currentTarget.select();
+          setHasTyped(false);
+          setIsOpen(true);
+        }}
+        onChange={(event) => {
+          onValueChange(event.target.value);
+          setHasTyped(true);
+          setIsOpen(true);
+        }}
+        onBlur={() => {
+          onBlur?.();
+          setIsOpen(false);
+        }}
+        disabled={disabled}
+        className="w-full rounded-lg border border-gray-300 p-2"
+      />
+      {isOpen && (
+        <ul
+          id={`${id}-options`}
+          role="listbox"
+          aria-label="Matching initiatives"
+          className="absolute left-0 right-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+        >
+          {matchingInitiatives.length === 0 ? (
+            <li className="px-3 py-2 text-sm text-gray-500">
+              {value.trim() ? 'No matching initiatives found.' : 'No initiatives linked to this board.'}
+            </li>
+          ) : matchingInitiatives.map((initiative) => (
+            <li key={initiative.id}>
+              <button
+                type="button"
+                role="option"
+                aria-selected="false"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  onSelect(initiative);
+                  setIsOpen(false);
+                }}
+                className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50"
+              >
+                {initiative.title}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export function CreateTaskOverlay({
   boards,
   selectedBoardId,
   assignees,
   currentUserId,
+  boardInitiatives,
   onClose,
   onCreated,
 }: {
@@ -17,6 +112,7 @@ export function CreateTaskOverlay({
   selectedBoardId: string;
   assignees: TaskAssignee[];
   currentUserId: string;
+  boardInitiatives: Record<string, Initiative[]>;
   onClose: () => void;
   onCreated: (task: Task, boardId: string) => void;
 }) {
@@ -25,6 +121,7 @@ export function CreateTaskOverlay({
   const [boardId, setBoardId] = useState(selectedBoardId);
   const [assignedToId, setAssignedToId] = useState('');
   const [initiativeId, setInitiativeId] = useState('');
+  const [initiativeSearch, setInitiativeSearch] = useState('');
   const [initiatives, setInitiatives] = useState<Initiative[]>([]);
   const [initiativeLoadError, setInitiativeLoadError] = useState('');
   const [createdTask, setCreatedTask] = useState<ApiTask | null>(null);
@@ -140,19 +237,22 @@ export function CreateTaskOverlay({
           </div>
           <div>
             <label htmlFor="task-initiative" className="mb-1 block text-sm font-medium text-gray-700">Initiative</label>
-            <select
+            <InitiativePicker
               id="task-initiative"
-              name="initiative_id"
-              value={initiativeId}
-              onChange={(event) => setInitiativeId(event.target.value)}
-              disabled={Boolean(initiativeLoadError) || initiatives.length === 0}
-              className="w-full rounded-lg border border-gray-300 p-2"
-            >
-              <option value="">No initiative</option>
-              {initiatives.map((initiative) => <option key={initiative.id} value={initiative.id}>{initiative.title}</option>)}
-            </select>
+              value={initiativeSearch}
+              initiatives={initiatives}
+              boardInitiatives={boardInitiatives[boardId] ?? []}
+              disabled={Boolean(initiativeLoadError)}
+              onValueChange={(value) => {
+                setInitiativeSearch(value);
+                setInitiativeId('');
+              }}
+              onSelect={(initiative) => {
+                setInitiativeSearch(initiative.title);
+                setInitiativeId(initiative.id);
+              }}
+            />
             {initiativeLoadError && <p role="alert" className="mt-1 text-sm text-red-700">Failed to load initiatives: {initiativeLoadError}</p>}
-            {!initiativeLoadError && initiatives.length === 0 && <p className="mt-1 text-sm text-gray-500">No initiatives available.</p>}
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
@@ -227,21 +327,23 @@ export function TaskDetailsOverlay({
   boards,
   assignees,
   initiatives,
+  boardInitiatives,
   linkedInitiatives,
   selectedBoardId,
   onClose,
   onSaved,
-  onInitiativeAssigned,
+  onInitiativesChanged,
 }: {
   task: Task;
   boards: Board[];
   assignees: TaskAssignee[];
   initiatives: Initiative[];
+  boardInitiatives: Initiative[];
   linkedInitiatives: Initiative[];
   selectedBoardId: string;
   onClose: () => void;
   onSaved: (task: Task, boardId: string) => void;
-  onInitiativeAssigned: (initiative: Initiative) => void;
+  onInitiativesChanged: (initiatives: Initiative[]) => void;
 }) {
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? '');
@@ -256,16 +358,30 @@ export function TaskDetailsOverlay({
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [initiativeSearch, setInitiativeSearch] = useState('');
-  const [showInitiativeOptions, setShowInitiativeOptions] = useState(false);
-  const [initiativeError, setInitiativeError] = useState('');
-  const [isAssigningInitiative, setIsAssigningInitiative] = useState(false);
+  const initialInitiativeId = linkedInitiatives[0]?.id ?? '';
+  const initialInitiativeTitle = linkedInitiatives[0]?.title ?? '';
+  const [initiativeSearchDraft, setInitiativeSearchDraft] = useState<string | null>(null);
+  const [initiativeIdDraft, setInitiativeIdDraft] = useState<string | null>(null);
+  const initiativeSearch = initiativeSearchDraft ?? initialInitiativeTitle;
+  const initiativeId = initiativeIdDraft ?? initialInitiativeId;
+  const initiativeChanged = initiativeIdDraft !== null
+    && (initiativeIdDraft !== initialInitiativeId || linkedInitiatives.length > 1);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSaving(true);
     setError('');
     try {
+      const hasUnselectedSearch = Boolean(initiativeSearch.trim())
+        && initiativeSearchDraft !== null
+        && initiativeIdDraft === null;
+      const nextInitiativeId = hasUnselectedSearch ? initialInitiativeId : initiativeId;
+      const shouldUpdateInitiative = initiativeChanged && !hasUnselectedSearch;
+      if (hasUnselectedSearch) {
+        setInitiativeIdDraft(null);
+        setInitiativeSearchDraft(null);
+      }
+
       const updated = await persistUpdateTask(task.id, {
         board_id: boardId,
         title,
@@ -275,6 +391,24 @@ export function TaskDetailsOverlay({
         assigned_to_id: assignedToId,
         complete_by: completeBy ? new Date(completeBy).toISOString() : null,
       });
+      if (shouldUpdateInitiative) {
+        const selectedInitiative = nextInitiativeId
+          ? initiatives.find((initiative) => initiative.id === nextInitiativeId)
+            ?? linkedInitiatives.find((initiative) => initiative.id === nextInitiativeId)
+          : undefined;
+        if (nextInitiativeId && !selectedInitiative) {
+          throw new Error('The selected initiative is no longer available.');
+        }
+        if (selectedInitiative && !linkedInitiatives.some((initiative) => initiative.id === selectedInitiative.id)) {
+          await addTaskToInitiative(selectedInitiative.id, task.id);
+        }
+        for (const initiative of linkedInitiatives) {
+          if (initiative.id !== nextInitiativeId) {
+            await removeTaskFromInitiative(initiative.id, task.id);
+          }
+        }
+        onInitiativesChanged(selectedInitiative ? [selectedInitiative] : []);
+      }
       onSaved(toBoardTask(updated), boardId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update task');
@@ -283,25 +417,22 @@ export function TaskDetailsOverlay({
     }
   };
 
-  const matchingInitiatives = initiativeSearch.trim()
-    ? initiatives.filter((initiative) =>
-      !linkedInitiatives.some((linked) => linked.id === initiative.id)
-      && initiative.title.toLocaleLowerCase().includes(initiativeSearch.trim().toLocaleLowerCase()))
-    : [];
+  const availableInitiatives = initiatives.filter((initiative) =>
+    !linkedInitiatives.some((linked) => linked.id === initiative.id));
 
-  const handleAssignInitiative = async (initiative: Initiative) => {
-    setInitiativeError('');
-    setIsAssigningInitiative(true);
-    try {
-      await addTaskToInitiative(initiative.id, task.id);
-      onInitiativeAssigned(initiative);
-      setInitiativeSearch(initiative.title);
-      setShowInitiativeOptions(false);
-    } catch (err) {
-      setInitiativeError(err instanceof Error ? err.message : 'Failed to assign initiative');
-    } finally {
-      setIsAssigningInitiative(false);
+  const handleInitiativeSelect = (initiative: Initiative) => {
+    setInitiativeIdDraft(initiative.id);
+    setInitiativeSearchDraft(initiative.title);
+  };
+
+  const handleInitiativeBlur = () => {
+    if (!initiativeSearch.trim()) {
+      setInitiativeSearchDraft('');
+      return;
     }
+    if (initiativeIdDraft !== null) return;
+    setInitiativeIdDraft(null);
+    setInitiativeSearchDraft(null);
   };
 
   return (
@@ -344,59 +475,19 @@ export function TaskDetailsOverlay({
           </div>
           <div>
             <label htmlFor="task-initiative-search" className="mb-1 block text-sm font-medium text-gray-700">Initiatives</label>
-            <div className="relative">
-              <input
-                id="task-initiative-search"
-                type="search"
-                role="combobox"
-                aria-autocomplete="list"
-                aria-expanded={showInitiativeOptions && Boolean(initiativeSearch.trim())}
-                aria-controls="task-initiative-options"
-                autoComplete="off"
-                placeholder="Search initiatives…"
-                value={initiativeSearch}
-                onFocus={() => setShowInitiativeOptions(true)}
-                onChange={(event) => {
-                  setInitiativeSearch(event.target.value);
-                  setShowInitiativeOptions(true);
-                  setInitiativeError('');
-                }}
-                disabled={isAssigningInitiative}
-                className="w-full rounded-lg border border-gray-300 p-2"
-              />
-              {showInitiativeOptions && initiativeSearch.trim() && (
-                <ul
-                  id="task-initiative-options"
-                  role="listbox"
-                  aria-label="Matching initiatives"
-                  className="absolute left-0 right-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
-                >
-                  {matchingInitiatives.length === 0 ? (
-                    <li className="px-3 py-2 text-sm text-gray-500">No matching initiatives found.</li>
-                  ) : matchingInitiatives.map((initiative) => (
-                    <li key={initiative.id}>
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected="false"
-                        disabled={isAssigningInitiative}
-                        onClick={() => void handleAssignInitiative(initiative)}
-                        className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50 disabled:opacity-50"
-                      >
-                        {initiative.title}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            {linkedInitiatives.length > 0 && (
-              <p className="mt-1 text-sm text-gray-600">
-                Assigned to: {linkedInitiatives.map((initiative) => initiative.title).join(', ')}
-              </p>
-            )}
+            <InitiativePicker
+              id="task-initiative-search"
+              value={initiativeSearch}
+              initiatives={availableInitiatives}
+              boardInitiatives={boardInitiatives}
+              onValueChange={(value) => {
+                setInitiativeSearchDraft(value);
+                setInitiativeIdDraft(value.trim() ? null : '');
+              }}
+              onSelect={handleInitiativeSelect}
+              onBlur={handleInitiativeBlur}
+            />
             {initiatives.length === 0 && <p className="mt-1 text-sm text-gray-500">No initiatives available.</p>}
-            {initiativeError && <p role="alert" className="mt-1 text-sm text-red-700">{initiativeError}</p>}
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>

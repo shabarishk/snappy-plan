@@ -218,7 +218,7 @@ export function AuthenticatedBoard({
   }, [boards, selectedBoardId, setTasks]);
 
   useEffect(() => {
-    if (!needsInitiativeGrouping) return;
+    if (!needsInitiativeGrouping && !isCreateTaskOpen && !selectedTask) return;
     let cancelled = false;
     Promise.all([
       getInitiatives(),
@@ -248,7 +248,7 @@ export function AuthenticatedBoard({
         if (!cancelled) setIsInitiativeGroupingLoading(false);
       });
     return () => { cancelled = true; };
-  }, [initiativeGroupingRefreshToken, initiativeRefreshToken, needsInitiativeGrouping]);
+  }, [initiativeGroupingRefreshToken, initiativeRefreshToken, isCreateTaskOpen, needsInitiativeGrouping, selectedTask]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -304,6 +304,20 @@ export function AuthenticatedBoard({
     ));
     void persistTaskMove(task, 'todo');
   };
+
+  const initiativesByBoardId = useMemo(() => {
+    const byBoard: Record<string, Initiative[]> = {};
+    for (const task of tasks) {
+      const boardId = task.boardId ?? selectedBoardId;
+      for (const initiative of taskInitiatives[task.id] ?? []) {
+        const linked = byBoard[boardId] ?? [];
+        if (!linked.some((item) => item.id === initiative.id)) {
+          byBoard[boardId] = [...linked, initiative];
+        }
+      }
+    }
+    return byBoard;
+  }, [selectedBoardId, taskInitiatives, tasks]);
 
   const filteredTasks = useMemo(() => tasks.filter((task) => {
     if (currentPage === 'board' && task.state === 'Complete' && task.completedAt) {
@@ -592,6 +606,7 @@ export function AuthenticatedBoard({
           selectedBoardId={selectedBoardId}
           assignees={assignees}
           currentUserId={profile?.username ?? ''}
+          boardInitiatives={initiativesByBoardId}
           onClose={() => setIsCreateTaskOpen(false)}
           onCreated={(task, boardId) => {
             if (boardId !== selectedBoardId) setIsLoading(true);
@@ -656,13 +671,14 @@ export function AuthenticatedBoard({
           boards={boards}
           assignees={assignees}
           initiatives={initiatives}
+          boardInitiatives={initiativesByBoardId[selectedTask.boardId] ?? []}
           linkedInitiatives={taskInitiatives[selectedTask.task.id] ?? []}
           selectedBoardId={selectedTask.boardId}
           onClose={() => setSelectedTask(null)}
-          onInitiativeAssigned={(initiative) => {
+          onInitiativesChanged={(updatedInitiatives) => {
             setTaskInitiatives((previous) => ({
               ...previous,
-              [selectedTask.task.id]: [...(previous[selectedTask.task.id] ?? []), initiative],
+              [selectedTask.task.id]: updatedInitiatives,
             }));
           }}
           onSaved={(updatedTask, assignedBoardId) => {
