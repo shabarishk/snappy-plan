@@ -371,7 +371,11 @@ describe('Tasks', () => {
       method: 'PATCH',
       body: JSON.stringify({ state: 'InProgress' }),
     })));
+    await waitFor(() => expect(window.location.pathname).toBe('/'));
+    expect(screen.queryByRole('region', { name: 'Task details' })).toBeNull();
 
+    fireEvent.click(await screen.findByText('Task page sample'));
+    expect(await screen.findByRole('region', { name: 'Task details' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Move task' }));
     expect(screen.getByRole('menuitem', { name: 'Complete' })).toBeTruthy();
     fireEvent.click(screen.getByRole('menuitem', { name: 'To Do' }));
@@ -379,7 +383,10 @@ describe('Tasks', () => {
       method: 'PATCH',
       body: JSON.stringify({ state: 'ToDo' }),
     })));
+    await waitFor(() => expect(window.location.pathname).toBe('/'));
 
+    fireEvent.click(await screen.findByText('Task page sample'));
+    expect(await screen.findByRole('region', { name: 'Task details' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'View assignments' }));
     const assignments = screen.getByRole('dialog', { name: 'Task assignments' });
     expect(within(assignments).getByLabelText('Board')).toBeTruthy();
