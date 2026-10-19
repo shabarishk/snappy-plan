@@ -2,7 +2,7 @@ import { DndContext, DragOverlay, closestCorners, KeyboardSensor, PointerSensor,
 import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import type { Board, Initiative, TaskAssignee } from './api';
 import type { AppPage } from './navigation';
-import type { ColumnType, Task } from './taskModel';
+import type { ColumnType, Task, TaskState } from './taskModel';
 import { BOARD_COLUMNS, COLUMNS } from './taskModel';
 import { Column } from './TaskBoard';
 import { isAllSelected } from './taskFilterUtils';
@@ -34,6 +34,7 @@ type BoardTaskColumnsProps = {
   selectedBoardId: string;
   onMoveBoard: (boardId: string, direction: -1 | 1) => void;
   onMoveBacklogTaskToTodo: (taskId: string) => void;
+  onMoveTaskToState: (task: Task, nextState: TaskState) => void;
   onSelectTask: (task: Task, boardId: string) => void;
   onDragStart: (event: DragStartEvent) => void;
   onDragEnd: (event: DragEndEvent) => void;
@@ -56,6 +57,7 @@ export function BoardTaskColumns({
   selectedBoardId,
   onMoveBoard,
   onMoveBacklogTaskToTodo,
+  onMoveTaskToState,
   onSelectTask,
   onDragStart,
   onDragEnd,
@@ -83,6 +85,8 @@ export function BoardTaskColumns({
     selectedBoardId,
     showBoardName,
     showInitiativeNames,
+    showTaskMoveButton: isMobileLayout,
+    onMoveTaskToState,
   };
 
   return (

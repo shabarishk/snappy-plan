@@ -4,6 +4,23 @@ import type { ApiTask } from './api';
 export // --- Types ---
 type TaskState = 'Backlog' | 'ToDo' | 'InProgress' | 'Complete';
 
+export const TASK_PROGRESSION: TaskState[] = ['Backlog', 'ToDo', 'InProgress', 'Complete'];
+export const TASK_STATE_LABELS: Record<TaskState, string> = {
+  Backlog: 'Backlog',
+  ToDo: 'To Do',
+  InProgress: 'In Progress',
+  Complete: 'Complete',
+};
+
+export function getTaskStateMoves(state: TaskState): { forward?: TaskState; backward?: TaskState } {
+  if (state === 'Complete') return { forward: 'Backlog', backward: 'ToDo' };
+  const stateIndex = TASK_PROGRESSION.indexOf(state);
+  return {
+    forward: TASK_PROGRESSION[stateIndex + 1],
+    backward: stateIndex > 0 ? TASK_PROGRESSION[stateIndex - 1] : undefined,
+  };
+}
+
 export type ColumnId = 'backlog' | 'todo' | 'in-progress' | 'complete';
 
 export type Task = {

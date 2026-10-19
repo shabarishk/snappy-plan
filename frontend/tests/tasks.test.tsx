@@ -870,8 +870,9 @@ describe('Tasks', () => {
     expect(await screen.findByRole('checkbox', { name: 'Initiative: Launch Initiative' })).toBeTruthy();
     expect(screen.getByRole('checkbox', { name: 'Assignee: Unassigned' })).toBeTruthy();
     const linkedBoardCard = screen.getByText('Linked task').closest<HTMLElement>('.task-card')!;
+    expect(within(linkedBoardCard).queryByRole('button', { name: 'Move task for Linked task' })).toBeNull();
     expect(within(linkedBoardCard).getByText('Launch Initiative')).toBeTruthy();
-    expect(linkedBoardCard.children[1].textContent).toBe('Launch Initiative');
+    expect(linkedBoardCard.querySelector('.task-card-details')?.children[1].textContent).toBe('Launch Initiative');
     expect(within(linkedBoardCard).queryByText('Board Owner')).toBeNull();
     const taskCardFooter = linkedBoardCard.lastElementChild as HTMLElement;
     expect(taskCardFooter.className).toContain('justify-end');
@@ -926,7 +927,7 @@ describe('Tasks', () => {
     const linkedInitiativeCard = within(initiativeGroups[0]).getByText('Linked task').closest<HTMLElement>('.task-card')!;
     const linkedBoardName = within(linkedInitiativeCard).getByText('Board Owner');
     expect(linkedBoardName.className).toContain('bg-gray-100');
-    expect(linkedInitiativeCard.children[1].textContent).toBe('Board Owner');
+    expect(linkedInitiativeCard.querySelector('.task-card-details')?.children[1].textContent).toBe('Board Owner');
     const unlinkedInitiativeCard = within(initiativeGroups[1]).getByText('Second board task').closest<HTMLElement>('.task-card')!;
     expect(within(unlinkedInitiativeCard).getByText('Project Board').className).toContain('bg-gray-100');
 
@@ -951,8 +952,24 @@ describe('Tasks', () => {
     const linkedPortraitCard = within(mobileSections).getByText('Linked task').closest<HTMLElement>('.task-card')!;
     expect(within(linkedPortraitCard).getByText('Board Owner').className).toContain('bg-gray-100');
     expect(within(linkedPortraitCard).getByText('Launch Initiative')).toBeTruthy();
-    expect(linkedPortraitCard.children[1].textContent).toBe('Board Owner');
-    expect(linkedPortraitCard.children[2].textContent).toBe('Launch Initiative');
+    const linkedPortraitDetails = linkedPortraitCard.querySelector('.task-card-details')!;
+    expect(linkedPortraitDetails.children[1].textContent).toBe('Board Owner');
+    expect(linkedPortraitDetails.children[2].textContent).toBe('Launch Initiative');
+    const cardMoveButton = within(linkedPortraitCard).getByRole('button', { name: 'Move task for Linked task' });
+    const portraitMainRow = linkedPortraitCard.querySelector('.task-card-main')!;
+    expect(portraitMainRow.children[1]).toBe(cardMoveButton);
+    expect(cardMoveButton.className).toContain('h-10 w-10');
+    fireEvent.click(cardMoveButton);
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['In Progress', 'Backlog']);
+    expect(screen.getByRole('button', { name: 'Close move menu for Linked task' }).className).toContain('backdrop-blur-sm');
+    fireEvent.click(screen.getByRole('button', { name: 'Close move menu for Linked task' }));
+    expect(screen.queryByRole('menu', { name: 'Move task' })).toBeNull();
+    fireEvent.click(cardMoveButton);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'In Progress' }));
+    await waitFor(() => {
+      expect(screen.getByText('Linked task').closest('.board-column')?.querySelector('h3')?.textContent)
+        .toBe('In Progress');
+    });
     act(() => {
       isPortraitLayout = false;
       updateLayout?.(new Event('change') as MediaQueryListEvent);

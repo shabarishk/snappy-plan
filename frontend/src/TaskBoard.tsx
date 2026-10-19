@@ -1,8 +1,12 @@
+import { useEffect, useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import type { TaskAssignee } from './api';
 import { sortTasksByCompleteByAndPriority, sortTasksByPriority } from './taskPriority';
-import type { ColumnType, Task } from './taskModel';
+import { getTaskStateMoves, TASK_STATE_LABELS } from './taskModel';
+import type { ColumnType, Task, TaskState } from './taskModel';
 
 // --- Sub-Components ---
 function PriorityIcon({ priority }: { priority: Task['priority'] }) {
@@ -59,6 +63,8 @@ function TaskCard({
   showBoardName,
   showInitiativeNames,
   assignee,
+  showTaskMoveButton,
+  onMoveTaskToState,
 }: {
   task: Task;
   onMoveToTodo?: (taskId: string) => void;
@@ -70,7 +76,12 @@ function TaskCard({
   showBoardName: boolean;
   showInitiativeNames: boolean;
   assignee?: { name: string; profilePicture?: string | null };
+  showTaskMoveButton?: boolean;
+  onMoveTaskToState?: (task: Task, nextState: TaskState) => void;
 }) {
+  const [isMoveMenuOpen, setIsMoveMenuOpen] = useState(false);
+  const [moveMenuPosition, setMoveMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const moveButtonRef = useRef<HTMLButtonElement>(null);
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: draggableId ?? task.id,
     data: { type: 'Task', task },
@@ -81,8 +92,48 @@ function TaskCard({
     transform: isDragging ? undefined : CSS.Transform.toString(transform),
     opacity: isDragging ? 0 : 1,
   };
+  const taskStateMoves = getTaskStateMoves(task.state);
+  const moveOptions = [
+    {
+      state: taskStateMoves.forward,
+      label: taskStateMoves.forward ? TASK_STATE_LABELS[taskStateMoves.forward] : 'No further step',
+    },
+    {
+      state: taskStateMoves.backward,
+      label: taskStateMoves.backward ? TASK_STATE_LABELS[taskStateMoves.backward] : 'No earlier step',
+    },
+  ];
+  const toggleMoveMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (isMoveMenuOpen) {
+      setIsMoveMenuOpen(false);
+      return;
+    }
+    const buttonBounds = event.currentTarget.getBoundingClientRect();
+    const menuWidth = 224;
+    const menuHeight = 96;
+    const top = buttonBounds.top >= menuHeight + 8
+      ? buttonBounds.top - menuHeight - 8
+      : Math.min(window.innerHeight - menuHeight - 8, buttonBounds.bottom + 8);
+    const left = Math.max(
+      8,
+      Math.min(buttonBounds.right - menuWidth, window.innerWidth - menuWidth - 8)
+    );
+    setMoveMenuPosition({ top: Math.max(8, top), left });
+    setIsMoveMenuOpen(true);
+  };
+
+  useEffect(() => {
+    if (!isMoveMenuOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsMoveMenuOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [isMoveMenuOpen]);
 
   return (
+    <>
     <div
       ref={setNodeRef}
       style={style}
@@ -93,34 +144,54 @@ function TaskCard({
         disableDrag ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing touch-manipulation'
       } transition-shadow`}
     >
-      <p className="text-gray-800 text-sm font-medium">{task.title}</p>
-      {showBoardName && boardName && (
-        <div className="mt-1">
-          <span title={boardName} className="inline-block max-w-full truncate rounded-sm border border-gray-300 bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
-            {boardName}
-          </span>
+      <div className="task-card-main flex items-start justify-between gap-3">
+        <div className="task-card-details min-w-0 flex-1">
+          <p className="text-gray-800 text-sm font-medium">{task.title}</p>
+          {showBoardName && boardName && (
+            <div className="mt-1">
+              <span title={boardName} className="inline-block max-w-full truncate rounded-sm border border-gray-300 bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
+                {boardName}
+              </span>
+            </div>
+          )}
+          {showInitiativeNames && initiativeNames.length > 0 && (
+            <p className="mt-1 text-xs text-gray-500">{initiativeNames.join(', ')}</p>
+          )}
+          {task.completedAt && (
+            <p className="mt-2 text-xs text-gray-500">
+              Completed <time dateTime={task.completedAt}>{new Date(task.completedAt).toLocaleString()}</time>
+            </p>
+          )}
+          {onMoveToTodo && (
+            <button
+              type="button"
+              className="mt-3 rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
+              onClick={(event) => {
+                event.stopPropagation();
+                onMoveToTodo(task.id);
+              }}
+            >
+              Move to To Do
+            </button>
+          )}
         </div>
-      )}
-      {showInitiativeNames && initiativeNames.length > 0 && (
-        <p className="mt-1 text-xs text-gray-500">{initiativeNames.join(', ')}</p>
-      )}
-      {task.completedAt && (
-        <p className="mt-2 text-xs text-gray-500">
-          Completed <time dateTime={task.completedAt}>{new Date(task.completedAt).toLocaleString()}</time>
-        </p>
-      )}
-      {onMoveToTodo && (
-        <button
-          type="button"
-          className="mt-3 rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
-          onClick={(event) => {
-            event.stopPropagation();
-            onMoveToTodo(task.id);
-          }}
-        >
-          Move to To Do
-        </button>
-      )}
+        {showTaskMoveButton && onMoveTaskToState && (
+          <button
+            ref={moveButtonRef}
+            type="button"
+            aria-label={`Move task for ${task.title}`}
+            aria-haspopup="menu"
+            aria-expanded={isMoveMenuOpen}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={toggleMoveMenu}
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-600 shadow-sm hover:bg-gray-50"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+              <path d="M8 18V6m-3 3 3-3 3 3M16 6v12m-3-3 3 3 3-3" />
+            </svg>
+          </button>
+        )}
+      </div>
       <div className="mt-1 flex items-center justify-end gap-2">
         <PriorityIcon priority={task.priority} />
         {assignee && (
@@ -128,6 +199,47 @@ function TaskCard({
         )}
       </div>
     </div>
+    {showTaskMoveButton && onMoveTaskToState && isMoveMenuOpen && moveMenuPosition && createPortal(
+      <>
+        <button
+          type="button"
+          aria-label={`Close move menu for ${task.title}`}
+          className="fixed inset-0 z-[100] border-0 bg-slate-900/10 backdrop-blur-sm"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            setIsMoveMenuOpen(false);
+          }}
+        />
+        <div
+          role="menu"
+          aria-label="Move task"
+          className="fixed z-[101] w-56 rounded-lg border border-gray-200 bg-white p-1 shadow-xl"
+          style={moveMenuPosition}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          {moveOptions.map((option) => (
+            <button
+              key={option.label}
+              type="button"
+              role="menuitem"
+              disabled={!option.state}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                setIsMoveMenuOpen(false);
+                if (option.state) onMoveTaskToState(task, option.state);
+              }}
+              className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </>,
+      document.body
+    )}
+    </>
   );
 }
 
@@ -147,6 +259,8 @@ export function Column({
   showBoardName,
   showInitiativeNames,
   assigneesById,
+  showTaskMoveButton,
+  onMoveTaskToState,
 }: {
   column: ColumnType;
   tasks: Task[];
@@ -163,6 +277,8 @@ export function Column({
   showBoardName?: boolean;
   showInitiativeNames?: boolean;
   assigneesById?: ReadonlyMap<string, TaskAssignee>;
+  showTaskMoveButton?: boolean;
+  onMoveTaskToState?: (task: Task, nextState: TaskState) => void;
 }) {
   const { setNodeRef } = useDroppable({
     id: droppableId ?? column.id,
@@ -197,6 +313,8 @@ export function Column({
                 profilePicture: assigneesById?.get(task.assignedToId)?.profile_picture,
               }
               : undefined}
+            showTaskMoveButton={showTaskMoveButton}
+            onMoveTaskToState={onMoveTaskToState}
           />
         ))}
       </div>

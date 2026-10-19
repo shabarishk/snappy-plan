@@ -5,7 +5,7 @@ import type { Board, Initiative, TaskAssignee, UserProfile } from './api';
 import type { ColumnId, Task, TaskState } from './taskModel';
 import type { AppPage } from './navigation';
 import { initiativeIdFromPath, pageFromPath, pathForPage, taskIdFromPath } from './navigation';
-import { BOARD_COLUMNS, COLUMNS, COLUMN_STATES, moveTaskToColumn, toBoardTask } from './taskModel';
+import { BOARD_COLUMNS, COLUMNS, COLUMN_STATES, getTaskStateMoves, moveTaskToColumn, TASK_STATE_LABELS, toBoardTask } from './taskModel';
 import { CreateTaskOverlay, TaskDetailsOverlay } from './TaskOverlays';
 import { BoardsPage, CreateBoardOverlay } from './BoardComponents';
 import { AdminPage } from './AdminPage';
@@ -24,14 +24,6 @@ import type { FilterOption, FilterSelection } from './taskFilterUtils';
 type SelectedTask = {
   task: Task;
   boardId: string;
-};
-
-const TASK_PROGRESSION: TaskState[] = ['Backlog', 'ToDo', 'InProgress', 'Complete'];
-const TASK_STATE_LABELS: Record<TaskState, string> = {
-  Backlog: 'Backlog',
-  ToDo: 'To Do',
-  InProgress: 'In Progress',
-  Complete: 'Complete',
 };
 
 const MOBILE_LAYOUT_QUERY = '(max-width: 767px), (orientation: portrait) and (max-width: 1024px)';
@@ -585,30 +577,37 @@ export function AuthenticatedBoard({
     }
     : null;
   const isTaskCompleted = taskPageTask?.state === 'Complete';
-  const taskProgressIndex = taskPageTask ? TASK_PROGRESSION.indexOf(taskPageTask.state) : -1;
-  const forwardTaskState = isTaskCompleted
-    ? 'Backlog'
-    : taskProgressIndex >= 0 ? TASK_PROGRESSION[taskProgressIndex + 1] : undefined;
-  const backwardTaskState = isTaskCompleted
-    ? 'ToDo'
-    : taskProgressIndex > 0 ? TASK_PROGRESSION[taskProgressIndex - 1] : undefined;
+  const { forward: forwardTaskState, backward: backwardTaskState } = taskPageTask
+    ? getTaskStateMoves(taskPageTask.state)
+    : {};
 
-  const moveTaskPageState = async (nextState: TaskState) => {
-    if (!taskPageSelection) return;
+  const moveTaskState = async (task: Task, nextState: TaskState): Promise<boolean> => {
     const destination = COLUMNS.find((column) => COLUMN_STATES[column.id] === nextState);
     if (!destination) {
       setMoveError('Unable to determine the task destination.');
-      return;
+      return false;
     }
-    const currentTask = taskPageSelection.task;
-    if (currentTask.columnId === destination.id) return;
-    const movedTask = moveTaskToColumn(currentTask, destination.id);
-    setTasks((previous) => previous.map((task) => task.id === currentTask.id ? movedTask : task));
-    setSelectedTask({ ...taskPageSelection, task: movedTask });
+    if (task.columnId === destination.id) return true;
+    const movedTask = moveTaskToColumn(task, destination.id);
+    setTasks((previous) => previous.map((current) => current.id === task.id ? movedTask : current));
+    setSelectedTask((current) => current?.task.id === task.id
+      ? { ...current, task: movedTask }
+      : currentPage === 'task' && taskPageSelection?.task.id === task.id
+        ? { ...taskPageSelection, task: movedTask }
+        : current);
     setMoveError('');
+    return persistTaskMove(task, destination.id);
+  };
+
+  const moveTaskPageState = async (nextState: TaskState) => {
+    if (!taskPageSelection) return;
     setIsTaskMoveMenuOpen(false);
-    const saved = await persistTaskMove(currentTask, destination.id);
+    const saved = await moveTaskState(taskPageSelection.task, nextState);
     if (saved && isMobileLayout) navigateToPage('board');
+  };
+
+  const moveTaskCardState = (task: Task, nextState: TaskState) => {
+    void moveTaskState(task, nextState);
   };
 
   const profileDisplayName = profile?.preferred_name?.trim() || profile?.full_name || '';
@@ -1321,6 +1320,7 @@ export function AuthenticatedBoard({
             selectedBoardId={selectedBoardId}
             onMoveBoard={(boardId, direction) => void moveBoard(boardId, direction)}
             onMoveBacklogTaskToTodo={moveBacklogTaskToTodo}
+            onMoveTaskToState={moveTaskCardState}
             onSelectTask={handleSelectTask}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
