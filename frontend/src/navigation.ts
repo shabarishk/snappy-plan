@@ -1,7 +1,8 @@
-export type AppPage = 'board' | 'backlog' | 'tasks' | 'boards' | 'initiatives' | 'initiative' | 'profile' | 'settings' | 'admin';
+export type AppPage = 'board' | 'backlog' | 'tasks' | 'task' | 'boards' | 'initiatives' | 'initiative' | 'profile' | 'settings' | 'admin';
 
 export function pageFromPath(pathname: string): AppPage {
   if (pathname === '/admin') return 'admin';
+  if (/^\/tasks\/[^/]+$/.test(pathname)) return 'task';
   if (pathname === '/tasks') return 'tasks';
   if (pathname === '/boards') return 'boards';
   if (pathname === '/initiatives') return 'initiatives';
@@ -11,13 +12,14 @@ export function pageFromPath(pathname: string): AppPage {
   return 'board';
 }
 
-export function pathForPage(page: AppPage, initiativeId?: string, initiativeTitle?: string): string {
+export function pathForPage(page: AppPage, resourceId?: string, initiativeTitle?: string): string {
   if (page === 'admin') return '/admin';
+  if (page === 'task' && resourceId) return `/tasks/${encodeURIComponent(resourceId)}`;
   if (page === 'tasks') return '/tasks';
   if (page === 'boards') return '/boards';
   if (page === 'initiatives') return '/initiatives';
-  if (page === 'initiative' && initiativeId) {
-    if (!initiativeTitle) return `/initiatives/${encodeURIComponent(initiativeId)}`;
+  if (page === 'initiative' && resourceId) {
+    if (!initiativeTitle) return `/initiatives/${encodeURIComponent(resourceId)}`;
     const slug = initiativeTitle.normalize('NFKD')
       .replace(/\p{M}/gu, '')
       .toLowerCase()
@@ -26,7 +28,7 @@ export function pathForPage(page: AppPage, initiativeId?: string, initiativeTitl
       .replace(/^-+|-+$/g, '')
       .slice(0, 64)
       .replace(/-+$/g, '') || 'initiative';
-    return `/initiatives/${encodeURIComponent(slug)}--${encodeURIComponent(initiativeId)}`;
+    return `/initiatives/${encodeURIComponent(slug)}--${encodeURIComponent(resourceId)}`;
   }
   if (page === 'profile') return '/profile';
   if (page === 'settings') return '/settings';
@@ -38,4 +40,15 @@ export function initiativeIdFromPath(pathname: string): string | null {
   const routeSegment = pathname.slice('/initiatives/'.length);
   const separator = routeSegment.lastIndexOf('--');
   return decodeURIComponent(separator < 0 ? routeSegment : routeSegment.slice(separator + 2));
+}
+
+export function taskIdFromPath(pathname: string): string | null {
+  if (pageFromPath(pathname) !== 'task') return null;
+  const routeSegment = pathname.slice('/tasks/'.length);
+  try {
+    return decodeURIComponent(routeSegment);
+  } catch (error) {
+    if (error instanceof URIError) return null;
+    throw error;
+  }
 }

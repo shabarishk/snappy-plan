@@ -3,9 +3,9 @@ import { DndContext, DragOverlay, closestCorners, KeyboardSensor, PointerSensor,
 import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core';
 import { deleteBoard as persistDeleteBoard, getBoards, getInitiative, getInitiatives, getProfile, getTaskAssignees, getTasks, logout, moveTask as persistMoveTask, updateBoardOrder as persistBoardOrder } from './api';
 import type { Board, Initiative, TaskAssignee, UserProfile } from './api';
-import type { ColumnId, Task } from './taskModel';
+import type { ColumnId, Task, TaskState } from './taskModel';
 import type { AppPage } from './navigation';
-import { initiativeIdFromPath, pageFromPath, pathForPage } from './navigation';
+import { initiativeIdFromPath, pageFromPath, pathForPage, taskIdFromPath } from './navigation';
 import { BOARD_COLUMNS, COLUMNS, COLUMN_STATES, moveTaskToColumn, toBoardTask } from './taskModel';
 import { CreateTaskOverlay, TaskDetailsOverlay } from './TaskOverlays';
 import { BoardsPage, CreateBoardOverlay } from './BoardComponents';
@@ -148,6 +148,14 @@ function CheckboxFilter({
   );
 }
 
+const TASK_PROGRESSION: TaskState[] = ['Backlog', 'ToDo', 'InProgress', 'Complete'];
+const TASK_STATE_LABELS: Record<TaskState, string> = {
+  Backlog: 'Backlog',
+  ToDo: 'To Do',
+  InProgress: 'In Progress',
+  Complete: 'Complete',
+};
+
 const MOBILE_LAYOUT_QUERY = '(max-width: 767px), (orientation: portrait) and (max-width: 1024px)';
 
 const COMPLETED_TASK_RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -169,8 +177,10 @@ export function AuthenticatedBoard({
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
   const [expandedMobileFilter, setExpandedMobileFilter] = useState<'board' | 'initiative' | 'assignee' | null>(null);
+  const [isTaskMoveMenuOpen, setIsTaskMoveMenuOpen] = useState(false);
+  const [isTaskAssignmentsOpen, setIsTaskAssignmentsOpen] = useState(false);
   const isTaskPage = currentPage === 'board' || currentPage === 'backlog';
-  const needsInitiativeGrouping = isTaskPage || currentPage === 'tasks';
+  const needsInitiativeGrouping = isTaskPage || currentPage === 'tasks' || currentPage === 'task';
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [selectedTask, setSelectedTask] = useState<SelectedTask | null>(null);
   const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
@@ -189,6 +199,8 @@ export function AuthenticatedBoard({
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const createMenuRef = useRef<HTMLDivElement>(null);
+  const taskMoveMenuRef = useRef<HTMLDivElement>(null);
+  const taskReturnPageRef = useRef<AppPage>('board');
   const [logoutError, setLogoutError] = useState('');
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
@@ -240,10 +252,13 @@ export function AuthenticatedBoard({
     }
     setIsMobileSidebarOpen(false);
     setIsMobileFiltersOpen(false);
+    setIsTaskMoveMenuOpen(false);
+    setIsTaskAssignmentsOpen(false);
     setIsCreateMenuOpen(false);
     setIsCreateTaskOpen(false);
     setIsCreateBoardOpen(false);
     setIsCreateInitiativeOpen(false);
+    if (page !== 'task') setSelectedTask(null);
     if ((page === 'board' || page === 'backlog' || page === 'tasks') && !needsInitiativeGrouping) {
       setIsInitiativeGroupingLoading(true);
       setInitiativeGroupingError('');
@@ -251,6 +266,16 @@ export function AuthenticatedBoard({
     if (page === 'board' || page === 'backlog') setCurrentTime(Date.now());
     setCurrentPage(page);
   };
+
+  const handleSelectTask = (task: Task, boardId: string) => {
+    setSelectedTask({ task, boardId });
+    if (isMobileLayout) {
+      taskReturnPageRef.current = currentPage;
+      navigateToPage('task', task.id);
+    }
+  };
+
+  const returnFromTaskPage = () => navigateToPage(taskReturnPageRef.current);
 
   const handleInitiativeTitleChanged = useCallback((title: string) => {
     const initiativeId = initiativeIdFromPath(window.location.pathname);
@@ -264,11 +289,15 @@ export function AuthenticatedBoard({
       const page = pageFromPath(window.location.pathname);
       setCurrentPage(page);
       setIsProfileMenuOpen(false);
+      setIsMobileSidebarOpen(false);
+      setIsMobileFiltersOpen(false);
+      setIsTaskMoveMenuOpen(false);
+      setIsTaskAssignmentsOpen(false);
       setIsCreateTaskOpen(false);
       setIsCreateBoardOpen(false);
       setIsCreateInitiativeOpen(false);
       setIsCreateMenuOpen(false);
-      setSelectedTask(null);
+      if (page !== 'task') setSelectedTask(null);
       if (page === 'board' || page === 'backlog') setCurrentTime(Date.now());
       if ((page === 'board' || page === 'backlog' || page === 'tasks') && !needsInitiativeGrouping) {
         setIsInitiativeGroupingLoading(true);
@@ -327,6 +356,18 @@ export function AuthenticatedBoard({
     document.addEventListener('pointerdown', handlePointerDown);
     return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, [isCreateMenuOpen]);
+
+  useEffect(() => {
+    if (!isTaskMoveMenuOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && !taskMoveMenuRef.current?.contains(event.target)) {
+        setIsTaskMoveMenuOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [isTaskMoveMenuOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -431,6 +472,9 @@ export function AuthenticatedBoard({
           ? task
           : current
       ));
+      setSelectedTask((current) => current?.task.id === task.id && current.task.columnId === destination
+        ? { ...current, task }
+        : current);
       setMoveError(err instanceof Error ? err.message : 'Failed to move task');
     }
   };
@@ -607,6 +651,37 @@ export function AuthenticatedBoard({
   const visibleColumns = currentPage === 'backlog'
     ? COLUMNS.filter((column) => column.id === 'backlog')
     : BOARD_COLUMNS;
+  const taskPageId = currentPage === 'task' ? taskIdFromPath(window.location.pathname) : null;
+  const taskPageTask = taskPageId
+    ? tasks.find((task) => task.id === taskPageId)
+      ?? (selectedTask?.task.id === taskPageId ? selectedTask.task : undefined)
+    : undefined;
+  const taskPageSelection = taskPageTask
+    ? {
+      task: taskPageTask,
+      boardId: taskPageTask.boardId ?? selectedTask?.boardId ?? selectedBoardId,
+    }
+    : null;
+  const taskProgressIndex = taskPageTask ? TASK_PROGRESSION.indexOf(taskPageTask.state) : -1;
+  const forwardTaskState = taskProgressIndex >= 0 ? TASK_PROGRESSION[taskProgressIndex + 1] : undefined;
+  const backwardTaskState = taskProgressIndex > 0 ? TASK_PROGRESSION[taskProgressIndex - 1] : undefined;
+
+  const moveTaskPageState = (nextState: TaskState) => {
+    if (!taskPageSelection) return;
+    const destination = COLUMNS.find((column) => COLUMN_STATES[column.id] === nextState);
+    if (!destination) {
+      setMoveError('Unable to determine the task destination.');
+      return;
+    }
+    const currentTask = taskPageSelection.task;
+    if (currentTask.columnId === destination.id) return;
+    const movedTask = moveTaskToColumn(currentTask, destination.id);
+    setTasks((previous) => previous.map((task) => task.id === currentTask.id ? movedTask : task));
+    setSelectedTask({ ...taskPageSelection, task: movedTask });
+    setMoveError('');
+    setIsTaskMoveMenuOpen(false);
+    void persistTaskMove(currentTask, destination.id);
+  };
 
   const profileDisplayName = profile?.preferred_name?.trim() || profile?.full_name || '';
   const profileInitial = profileDisplayName.charAt(0).toUpperCase()
@@ -813,27 +888,42 @@ export function AuthenticatedBoard({
       </aside>
       <div className="app-content flex min-w-0 flex-1 flex-col">
       <header className={`app-header bg-white p-4 shadow-sm z-10 grid grid-cols-1 gap-2 shrink-0 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] sm:items-center ${isTaskPage ? 'home-header' : ''}`}>
-        <button
-          type="button"
-          aria-label="Open navigation menu"
-          aria-expanded={isMobileSidebarOpen}
-          onClick={() => setIsMobileSidebarOpen(true)}
-          className="mobile-menu-button"
-        >
-          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-6 w-6">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-          </svg>
-        </button>
+        {currentPage === 'task' ? (
+          <button
+            type="button"
+            aria-label="Back to tasks"
+            onClick={returnFromTaskPage}
+            className="mobile-menu-button"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-6 w-6">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m15 18-6-6 6-6M9 12h12" />
+            </svg>
+          </button>
+        ) : (
+          <button
+            type="button"
+            aria-label="Open navigation menu"
+            aria-expanded={isMobileSidebarOpen}
+            onClick={() => setIsMobileSidebarOpen(true)}
+            className="mobile-menu-button"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-6 w-6">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+        )}
         {currentPage !== 'board' && currentPage !== 'backlog' && (
+          currentPage !== 'task' && (
           <h1 className="text-xl font-extrabold tracking-tight text-blue-600 sm:col-start-1 sm:row-start-1">
             {currentPage === 'tasks' ? 'Tasks' : currentPage === 'admin' ? 'Admin' : currentPage === 'settings' ? 'Settings' : currentPage === 'boards' ? 'Boards' : currentPage === 'initiatives' || currentPage === 'initiative' ? 'Initiatives' : 'Profile'}
           </h1>
+          )
         )}
         {currentPage !== 'profile' && currentPage !== 'settings' && (
           <div className="header-search-actions flex w-full min-w-0 max-w-2xl items-center gap-2 justify-self-center sm:col-start-2 sm:row-start-1">
             <TaskSearch
               boards={boards}
-              onSelectTask={(task, boardId) => setSelectedTask({ task, boardId })}
+              onSelectTask={handleSelectTask}
             />
             <div ref={createMenuRef} className="relative shrink-0">
               <button
@@ -949,7 +1039,59 @@ export function AuthenticatedBoard({
           }}
         />
       )}
-      {selectedTask && currentPage !== 'profile' && currentPage !== 'settings' && (
+      {currentPage === 'task' && taskPageSelection && (
+        <div className="task-page-toolbar">
+          <div ref={taskMoveMenuRef} className="relative">
+            <button
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={isTaskMoveMenuOpen}
+              onClick={() => setIsTaskMoveMenuOpen((open) => !open)}
+              className="flex min-h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              Move task
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+                <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+            {isTaskMoveMenuOpen && (
+              <div role="menu" aria-label="Move task" className="absolute left-0 top-full z-30 mt-2 w-56 rounded-lg border border-gray-200 bg-white p-1 shadow-xl">
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!forwardTaskState}
+                  onClick={() => {
+                    if (forwardTaskState) moveTaskPageState(forwardTaskState);
+                  }}
+                  className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                >
+                  {forwardTaskState ? `Forward: ${TASK_STATE_LABELS[forwardTaskState]}` : 'Forward: No further step'}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!backwardTaskState}
+                  onClick={() => {
+                    if (backwardTaskState) moveTaskPageState(backwardTaskState);
+                  }}
+                  className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                >
+                  {backwardTaskState ? `Backward: ${TASK_STATE_LABELS[backwardTaskState]}` : 'Backward: No earlier step'}
+                </button>
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsTaskAssignmentsOpen(true)}
+            className="min-h-10 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+          >
+            View assignments
+          </button>
+          {moveError && <p role="alert" className="task-page-move-error">{moveError}</p>}
+        </div>
+      )}
+      {selectedTask && currentPage !== 'task' && currentPage !== 'profile' && currentPage !== 'settings' && (
         <TaskDetailsOverlay
           key={selectedTask.task.id}
           task={selectedTask.task}
@@ -960,6 +1102,10 @@ export function AuthenticatedBoard({
           linkedInitiatives={taskInitiatives[selectedTask.task.id] ?? []}
           selectedBoardId={selectedTask.boardId}
           onClose={() => setSelectedTask(null)}
+          onExpandToPage={() => {
+            taskReturnPageRef.current = currentPage;
+            navigateToPage('task', selectedTask.task.id);
+          }}
           onInitiativesChanged={(updatedInitiatives) => {
             setTaskInitiatives((previous) => ({
               ...previous,
@@ -977,7 +1123,7 @@ export function AuthenticatedBoard({
       )}
 
       {/* Main content area takes up remaining height */}
-      <main className={`board-main flex-1 p-4 ${(currentPage === 'board' || currentPage === 'backlog') ? 'board-main-grouped' : ''}`}>
+      <main className={`board-main flex-1 p-4 ${isTaskPage ? 'board-main-grouped' : ''} ${currentPage === 'task' ? 'board-main-task-page' : ''}`}>
         {currentPage === 'admin' ? (
           profile?.role === 'admin'
             ? <AdminPage currentUsername={profile.username} />
@@ -996,6 +1142,42 @@ export function AuthenticatedBoard({
               ));
             }} />
             : <p role={loadError ? 'alert' : undefined} className="p-4 text-sm text-gray-600">{loadError || 'Loading profile…'}</p>
+        ) : currentPage === 'task' ? (
+          taskPageSelection ? (
+            <TaskDetailsOverlay
+              key={taskPageSelection.task.id}
+              task={taskPageSelection.task}
+              boards={boards}
+              assignees={assignees}
+              initiatives={initiatives}
+              boardInitiatives={initiativesByBoardId[taskPageSelection.boardId] ?? []}
+              linkedInitiatives={taskInitiatives[taskPageSelection.task.id] ?? []}
+              selectedBoardId={taskPageSelection.boardId}
+              isPage
+              isAssignmentsOpen={isTaskAssignmentsOpen}
+              onCloseAssignments={() => setIsTaskAssignmentsOpen(false)}
+              onClose={returnFromTaskPage}
+              onInitiativesChanged={(updatedInitiatives) => {
+                setTaskInitiatives((previous) => ({
+                  ...previous,
+                  [taskPageSelection.task.id]: updatedInitiatives,
+                }));
+              }}
+              onSaved={(updatedTask, assignedBoardId) => {
+                const savedTask = { ...updatedTask, boardId: assignedBoardId };
+                setTasks((previous) => [
+                  ...previous.filter((task) => task.id !== savedTask.id),
+                  savedTask,
+                ]);
+                setSelectedTask({ task: savedTask, boardId: assignedBoardId });
+                setIsTaskAssignmentsOpen(false);
+              }}
+            />
+          ) : (
+            <p role={loadError ? 'alert' : 'status'} className="p-4 text-sm text-gray-600">
+              {loadError || (isLoading ? 'Loading task…' : 'Task not found.')}
+            </p>
+          )
         ) : currentPage === 'tasks' ? (
           <TasksPage
             tasks={tasks}
@@ -1012,7 +1194,7 @@ export function AuthenticatedBoard({
               setIsInitiativeGroupingLoading(true);
               setInitiativeGroupingRefreshToken((version) => version + 1);
             }}
-            onSelectTask={(task) => setSelectedTask({ task, boardId: task.boardId ?? selectedBoardId })}
+            onSelectTask={(task) => handleSelectTask(task, task.boardId ?? selectedBoardId)}
           />
         ) : currentPage === 'boards' ? (
           profile
@@ -1322,7 +1504,7 @@ export function AuthenticatedBoard({
                     column={column}
                     tasks={filteredTasks.filter((task) => task.columnId === column.id)}
                     onMoveToTodo={currentPage === 'backlog' ? moveBacklogTaskToTodo : undefined}
-                    onSelectTask={(task) => setSelectedTask({ task, boardId: task.boardId ?? selectedBoardId })}
+                    onSelectTask={(task) => handleSelectTask(task, task.boardId ?? selectedBoardId)}
                     droppableId={`mobile:${column.id}`}
                     taskIdPrefix="mobile"
                     sortByCompleteBy={currentPage === 'backlog'}
@@ -1380,7 +1562,7 @@ export function AuthenticatedBoard({
                           column={column}
                           tasks={groupTasks.filter((task) => task.columnId === column.id)}
                           onMoveToTodo={currentPage === 'backlog' ? moveBacklogTaskToTodo : undefined}
-                          onSelectTask={(task) => setSelectedTask({ task, boardId: task.boardId ?? selectedBoardId })}
+                          onSelectTask={(task) => handleSelectTask(task, task.boardId ?? selectedBoardId)}
                           droppableId={`${group.id}:${column.id}`}
                           taskIdPrefix={group.id}
                           hideColumnTitle={currentPage === 'backlog'}
