@@ -32,6 +32,122 @@ type TaskGroup = {
   boardId?: string;
 };
 
+type FilterOption = {
+  value: string;
+  label: string;
+};
+
+type FilterSelection = string[] | null;
+
+function isAllSelected(options: FilterOption[], selectedValues: FilterSelection) {
+  return selectedValues === null
+    || (options.length > 0 && options.every((option) => selectedValues.includes(option.value)));
+}
+
+function toggleFilterOption(
+  options: FilterOption[],
+  selectedValues: FilterSelection,
+  value: string
+): string[] {
+  if (selectedValues === null) {
+    return options.filter((option) => option.value !== value).map((option) => option.value);
+  }
+  return selectedValues.includes(value)
+    ? selectedValues.filter((selected) => selected !== value)
+    : [...selectedValues, value];
+}
+
+function toggleAllFilter(options: FilterOption[], selectedValues: FilterSelection): FilterSelection {
+  return isAllSelected(options, selectedValues) ? [] : null;
+}
+
+function CheckboxFilter({
+  label,
+  ariaLabel,
+  allLabel,
+  options,
+  selectedValues,
+  onToggle,
+  onToggleAll,
+  disabled = false,
+}: {
+  label: string;
+  ariaLabel: string;
+  allLabel: string;
+  options: FilterOption[];
+  selectedValues: FilterSelection;
+  onToggle: (value: string) => void;
+  onToggleAll: () => void;
+  disabled?: boolean;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const filterRef = useRef<HTMLDivElement>(null);
+  const allSelected = isAllSelected(options, selectedValues);
+  const selectedLabel = allSelected
+    ? allLabel
+    : selectedValues?.length === 0
+      ? 'None'
+      : (selectedValues?.length ?? 0) > 1
+      ? 'Multiple'
+      : options.find((option) => option.value === selectedValues?.[0])?.label ?? 'None';
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+    if (event.target instanceof Node && !filterRef.current?.contains(event.target)) {
+      setIsOpen(false);
+    }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [isOpen]);
+
+  return (
+    <div ref={filterRef} className="relative">
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        aria-expanded={isOpen}
+        disabled={disabled}
+        onClick={() => setIsOpen((open) => !open)}
+        className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 disabled:opacity-60"
+      >
+        {label}: {selectedLabel}
+        <span aria-hidden="true">▾</span>
+      </button>
+      {isOpen && (
+        <div className="absolute left-0 top-full z-20 mt-1 max-h-64 min-w-full overflow-y-auto rounded-lg border border-gray-200 bg-white p-2 shadow-lg">
+          <div role="group" aria-label={`${label} options`} className="space-y-1">
+            <label className="flex cursor-pointer items-center gap-2 whitespace-nowrap rounded px-2 py-1 text-sm font-medium text-gray-700 hover:bg-gray-100">
+              <input
+                type="checkbox"
+                aria-label={`${label}: All`}
+                checked={allSelected}
+                onChange={onToggleAll}
+                className="accent-blue-600"
+              />
+              All
+            </label>
+            {options.map((option) => (
+              <label key={option.value} className="flex cursor-pointer items-center gap-2 whitespace-nowrap rounded px-2 py-1 text-sm text-gray-700 hover:bg-gray-100">
+                <input
+                  type="checkbox"
+                  aria-label={`${label}: ${option.label}`}
+                  checked={selectedValues === null || selectedValues.includes(option.value)}
+                  onChange={() => onToggle(option.value)}
+                  className="accent-blue-600"
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const COMPLETED_TASK_RETENTION_MS = 24 * 60 * 60 * 1000;
 const BACKLOG_TASK_NOTIFICATION_MS = 5_000;
 
@@ -53,9 +169,9 @@ export function AuthenticatedBoard({
   const [boards, setBoards] = useState<Board[]>([]);
   const [selectedBoardId, setSelectedBoardId] = useState('');
   const [groupBy, setGroupBy] = useState<TaskGroupBy>('board');
-  const [boardFilterId, setBoardFilterId] = useState('');
-  const [initiativeFilterId, setInitiativeFilterId] = useState('');
-  const [assigneeFilterId, setAssigneeFilterId] = useState('all');
+  const [boardFilterIds, setBoardFilterIds] = useState<FilterSelection>(null);
+  const [initiativeFilterIds, setInitiativeFilterIds] = useState<FilterSelection>(null);
+  const [assigneeFilterIds, setAssigneeFilterIds] = useState<FilterSelection>(null);
   const [initiatives, setInitiatives] = useState<Initiative[]>([]);
   const [taskInitiatives, setTaskInitiatives] = useState<Record<string, Initiative[]>>({});
   const [isInitiativeGroupingLoading, setIsInitiativeGroupingLoading] = useState(needsInitiativeGrouping);
@@ -79,6 +195,21 @@ export function AuthenticatedBoard({
   const [isLoading, setIsLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [backlogTaskNotification, setBacklogTaskNotification] = useState<string | null>(null);
+  const boardFilterOptions = useMemo(
+    () => boards.map((board) => ({ value: board.id, label: board.title })),
+    [boards]
+  );
+  const initiativeFilterOptions = useMemo(
+    () => initiatives.map((initiative) => ({ value: initiative.id, label: initiative.title })),
+    [initiatives]
+  );
+  const assigneeFilterOptions = useMemo(
+    () => [
+      { value: 'unassigned', label: 'Unassigned' },
+      ...assignees.map((assignee) => ({ value: assignee.id, label: assignee.full_name })),
+    ],
+    [assignees]
+  );
 
   const navigateToPage = (page: AppPage, initiativeId?: string, initiativeTitle?: string) => {
     const path = pathForPage(page, initiativeId, initiativeTitle);
@@ -375,20 +506,22 @@ export function AuthenticatedBoard({
         const completedAt = Date.parse(task.completedAt);
         if (Number.isFinite(completedAt) && completedAt + COMPLETED_TASK_RETENTION_MS <= currentTime) return false;
       }
-      const belongsToBoard = !boardFilterId || (task.boardId ?? selectedBoardId) === boardFilterId;
-      const belongsToInitiative = !initiativeFilterId
-        || (taskInitiatives[task.id] ?? []).some((initiative) => initiative.id === initiativeFilterId);
-      const belongsToAssignee = assigneeFilterId === 'all'
-        || (assigneeFilterId === 'unassigned'
-          ? !task.assignedToId
-          : task.assignedToId === assigneeFilterId.slice('assignee:'.length));
+      const belongsToBoard = boardFilterIds === null || boardFilterIds.includes(task.boardId ?? selectedBoardId);
+      const belongsToInitiative = isAllSelected(initiativeFilterOptions, initiativeFilterIds)
+        || (initiativeFilterIds !== null
+          && (taskInitiatives[task.id] ?? []).some((initiative) => initiativeFilterIds.includes(initiative.id)));
+      const belongsToAssignee = isAllSelected(assigneeFilterOptions, assigneeFilterIds)
+        || (assigneeFilterIds !== null
+          && (task.assignedToId
+            ? assigneeFilterIds.includes(task.assignedToId)
+            : assigneeFilterIds.includes('unassigned')));
       return belongsToBoard && belongsToInitiative && belongsToAssignee;
     });
-  }, [assigneeFilterId, boardFilterId, currentPage, currentTime, initiativeFilterId, selectedBoardId, taskInitiatives, tasks]);
+  }, [assigneeFilterIds, assigneeFilterOptions, boardFilterIds, currentPage, currentTime, initiativeFilterIds, initiativeFilterOptions, selectedBoardId, taskInitiatives, tasks]);
 
   const taskGroups = useMemo<TaskGroup[]>(() => {
     if (groupBy === 'board') {
-      return boards.filter((board) => !boardFilterId || board.id === boardFilterId).map((board) => ({
+      return boards.filter((board) => boardFilterIds === null || boardFilterIds.includes(board.id)).map((board) => ({
         id: `board-${board.id}`,
         title: board.title,
         tasks: filteredTasks.filter((task) => (task.boardId ?? selectedBoardId) === board.id),
@@ -446,7 +579,7 @@ export function AuthenticatedBoard({
       grouped.push({ id: 'assignee-none', title: 'No Assignee', tasks: withoutAssignee });
     }
     return grouped;
-  }, [assignees, boardFilterId, boards, filteredTasks, groupBy, initiatives, selectedBoardId, taskInitiatives]);
+  }, [assignees, boardFilterIds, boards, filteredTasks, groupBy, initiatives, selectedBoardId, taskInitiatives]);
   const visibleColumns = currentPage === 'backlog'
     ? COLUMNS.filter((column) => column.id === 'backlog')
     : BOARD_COLUMNS;
@@ -872,48 +1005,46 @@ export function AuthenticatedBoard({
           {(loadError || moveError || boardOrderError) && <p role="alert" className="mb-3 rounded bg-red-100 p-3 text-sm text-red-700">{loadError || moveError || boardOrderError}</p>}
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-              <span>Board</span>
-              <select
-                aria-label="Filter by board"
-                value={boardFilterId}
-                onChange={(event) => setBoardFilterId(event.target.value)}
-                className="rounded-lg border border-gray-300 bg-white px-3 py-2"
-              >
-                <option value="">All boards</option>
-                {boards.map((board) => <option key={board.id} value={board.id}>{board.title}</option>)}
-              </select>
-            </label>
-            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-              <span>Initiative</span>
-              <select
-                aria-label="Filter by initiative"
-                value={initiativeFilterId}
-                onChange={(event) => setInitiativeFilterId(event.target.value)}
-                disabled={isInitiativeGroupingLoading}
-                className="rounded-lg border border-gray-300 bg-white px-3 py-2 disabled:opacity-60"
-              >
-                <option value="">All initiatives</option>
-                {initiatives.map((initiative) => (
-                  <option key={initiative.id} value={initiative.id}>{initiative.title}</option>
-                ))}
-              </select>
-            </label>
-            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-              <span>Assignee</span>
-              <select
-                aria-label="Filter by assignee"
-                value={assigneeFilterId}
-                onChange={(event) => setAssigneeFilterId(event.target.value)}
-                className="rounded-lg border border-gray-300 bg-white px-3 py-2"
-              >
-                <option value="all">All assignees</option>
-                <option value="unassigned">Unassigned</option>
-                {assignees.map((assignee) => (
-                  <option key={assignee.id} value={`assignee:${assignee.id}`}>{assignee.full_name}</option>
-                ))}
-              </select>
-            </label>
+            <CheckboxFilter
+              label="Board"
+              ariaLabel="Filter by board"
+              allLabel="All"
+              options={boardFilterOptions}
+              selectedValues={boardFilterIds}
+              onToggle={(id) => setBoardFilterIds((selected) =>
+                toggleFilterOption(boardFilterOptions, selected, id)
+              )}
+              onToggleAll={() => setBoardFilterIds((selected) =>
+                toggleAllFilter(boardFilterOptions, selected)
+              )}
+            />
+            <CheckboxFilter
+              label="Initiative"
+              ariaLabel="Filter by initiative"
+              allLabel="All"
+              options={initiativeFilterOptions}
+              selectedValues={initiativeFilterIds}
+              onToggle={(id) => setInitiativeFilterIds((selected) =>
+                toggleFilterOption(initiativeFilterOptions, selected, id)
+              )}
+              onToggleAll={() => setInitiativeFilterIds((selected) =>
+                toggleAllFilter(initiativeFilterOptions, selected)
+              )}
+              disabled={isInitiativeGroupingLoading}
+            />
+            <CheckboxFilter
+              label="Assignee"
+              ariaLabel="Filter by assignee"
+              allLabel="All"
+              options={assigneeFilterOptions}
+              selectedValues={assigneeFilterIds}
+              onToggle={(id) => setAssigneeFilterIds((selected) =>
+                toggleFilterOption(assigneeFilterOptions, selected, id)
+              )}
+              onToggleAll={() => setAssigneeFilterIds((selected) =>
+                toggleAllFilter(assigneeFilterOptions, selected)
+              )}
+            />
           </div>
           <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
             <span>Group by:</span>
@@ -929,7 +1060,7 @@ export function AuthenticatedBoard({
             </select>
           </label>
         </div>
-        {initiativeGroupingError && groupBy !== 'initiative' && !initiativeFilterId && (
+        {initiativeGroupingError && groupBy !== 'initiative' && isAllSelected(initiativeFilterOptions, initiativeFilterIds) && (
           <div className="mb-3 flex items-center gap-3 rounded bg-red-100 p-3 text-sm text-red-700">
             <p role="alert">{initiativeGroupingError}</p>
             <button
@@ -947,9 +1078,9 @@ export function AuthenticatedBoard({
         )}
         {isLoading ? (
           <p role="status" className="py-8 text-center text-sm text-gray-500">Loading tasks…</p>
-        ) : isInitiativeGroupingLoading && (groupBy === 'initiative' || Boolean(initiativeFilterId)) ? (
+        ) : isInitiativeGroupingLoading && (groupBy === 'initiative' || !isAllSelected(initiativeFilterOptions, initiativeFilterIds)) ? (
           <p role="status" className="py-8 text-center text-sm text-gray-500">Loading initiative groups…</p>
-        ) : initiativeGroupingError && (groupBy === 'initiative' || Boolean(initiativeFilterId)) ? (
+        ) : initiativeGroupingError && (groupBy === 'initiative' || !isAllSelected(initiativeFilterOptions, initiativeFilterIds)) ? (
           <div className="rounded bg-red-100 p-3 text-sm text-red-700">
             <p role="alert">{initiativeGroupingError}</p>
             <button
@@ -984,7 +1115,7 @@ export function AuthenticatedBoard({
                       <h2 className="text-lg font-semibold text-gray-800">{group.title}</h2>
                       <div className="flex items-center gap-3">
                         <span className="text-xs text-gray-500">{groupTasks.length} tasks</span>
-                        {currentPage === 'board' && groupBy === 'board' && !boardFilterId && group.boardId && (
+                        {currentPage === 'board' && groupBy === 'board' && isAllSelected(boardFilterOptions, boardFilterIds) && group.boardId && (
                           <div className="flex items-center gap-1">
                             <button
                               type="button"
