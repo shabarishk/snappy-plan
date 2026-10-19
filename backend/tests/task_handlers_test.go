@@ -846,12 +846,16 @@ func TestTaskReadEndpoints(t *testing.T) {
 		State:    "Backlog",
 		Priority: "Medium",
 	}
-	assignee := dbgen.GetUsersForAssignmentRow{ID: ownerID, FullName: "Board Owner"}
+	assignee := dbgen.GetUsersForAssignmentRow{
+		ID:             ownerID,
+		FullName:       "Board Owner",
+		ProfilePicture: pgtype.Text{String: "data:image/png;base64,AAAA", Valid: true},
+	}
 	db := &fakeDB{
 		session:                dbgen.Session{Token: "token", UserID: ownerID},
 		tasks:                  []dbgen.Task{task},
 		assignees:              []dbgen.GetUsersForAssignmentRow{assignee},
-		assigneeProfilePicture: pgtype.Text{String: "data:image/png;base64,AAAA", Valid: true},
+		assigneeProfilePicture: assignee.ProfilePicture,
 	}
 	handler := newHandler(db, nil, false)
 	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
