@@ -210,23 +210,23 @@ export function BoardsPage({
   const [managingBoard, setManagingBoard] = useState<Board | null>(null);
 
   return (
-    <section aria-labelledby="boards-title" className="mx-auto flex h-full max-w-3xl flex-col">
-      <header className="mb-6">
+    <section aria-labelledby="boards-title" className="boards-page mx-auto flex h-full w-full max-w-3xl flex-col">
+      <header className="boards-page-header mb-6">
         <h2 id="boards-title" className="text-2xl font-bold text-gray-900">Your boards</h2>
         <p className="mt-1 text-sm text-gray-600">Manage your boards and the boards shared with you.</p>
       </header>
       <ul aria-label="Boards" className="min-h-0 flex-1 overflow-y-auto divide-y divide-gray-200 rounded-xl border border-gray-200 bg-white">
         {boards.length === 0 ? (
-          <li className="px-5 py-8 text-center text-sm text-gray-500">You don't have any boards yet. Create one below to get started.</li>
+          <li className="px-5 py-8 text-center text-sm text-gray-500">You don't have any boards yet. Create one to get started.</li>
         ) : boards.map((board) => {
           const isOwner = board.owner_id === username;
           return (
-            <li key={board.id} className="flex items-center justify-between gap-4 px-5 py-4">
+            <li key={board.id} className="board-list-item flex items-center justify-between gap-4 px-5 py-4">
               <div className="min-w-0">
                 <h3 className="truncate font-semibold text-gray-900">{board.title}</h3>
                 <p className="text-sm text-gray-500">{isOwner ? 'Created by you' : 'Shared with you'}</p>
               </div>
-              <div className="flex shrink-0 items-center gap-2">
+              <div className="board-list-actions flex shrink-0 items-center gap-2">
                 <button type="button" onClick={() => onOpenBoard(board)} className="rounded-lg px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50">
                   Open board
                 </button>
@@ -245,7 +245,7 @@ export function BoardsPage({
           );
         })}
       </ul>
-      <div className="mt-auto border-t border-gray-200 pt-5">
+      <div className="mobile-secondary-create mt-auto border-t border-gray-200 pt-5">
         <button type="button" onClick={onCreateBoard} className="w-full rounded-lg bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700">
           + Create new board
         </button>

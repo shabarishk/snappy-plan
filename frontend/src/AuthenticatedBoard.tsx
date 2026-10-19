@@ -966,13 +966,13 @@ export function AuthenticatedBoard({
           </h1>
           )
         )}
-        {currentPage !== 'profile' && currentPage !== 'settings' && (
+        {(currentPage !== 'profile' && currentPage !== 'settings' || isMobileLayout) && (
           <div className="header-search-actions flex w-full min-w-0 max-w-2xl items-center gap-2 justify-self-center sm:col-start-2 sm:row-start-1">
             <TaskSearch
               boards={boards}
               onSelectTask={handleSelectTask}
             />
-            {!isCreatePage && (
+            {!isCreatePage && (isMobileLayout || currentPage !== 'profile' && currentPage !== 'settings') && (
             <div ref={createMenuRef} className={isMobileLayout ? 'mobile-create-menu' : 'relative shrink-0'}>
               <button
                 type="button"
@@ -1234,6 +1234,7 @@ export function AuthenticatedBoard({
             assignees={assignees}
             taskInitiatives={taskInitiatives}
             isLoading={isLoading}
+            isMobileLayout={isMobileLayout}
             loadError={loadError}
             isInitiativeLoading={isInitiativeGroupingLoading}
             initiativeError={initiativeGroupingError}

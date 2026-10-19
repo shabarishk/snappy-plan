@@ -142,7 +142,8 @@ export function ProfilePage({
 
   return (
     <>
-      <section aria-label="Profile details" className="mx-auto grid w-full max-w-4xl grid-cols-1 gap-6 rounded-xl bg-white p-6 shadow-sm md:grid-cols-[minmax(0,1fr)_16rem]">
+      <section aria-label="Profile details" className="profile-page mx-auto grid w-full max-w-4xl grid-cols-1 gap-5 rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:gap-6 sm:p-6 md:grid-cols-[minmax(0,1fr)_16rem]">
+        <h2 className="profile-page-title hidden text-xl font-bold text-gray-900 md:col-span-2">Profile</h2>
         <form onSubmit={handleSubmit} className="min-w-0 space-y-4">
           <div>
             <span className="mb-1 block text-sm font-medium text-gray-700">Username</span>
@@ -206,8 +207,8 @@ export function ProfilePage({
             )}
           </div>
         </form>
-        <aside aria-label="Profile picture" className="flex flex-col items-center gap-3">
-          <div className="flex aspect-square w-full items-center justify-center rounded-xl border border-gray-200 bg-gray-50">
+        <aside aria-label="Profile picture" className="profile-picture flex flex-col items-center gap-3">
+          <div className="flex aspect-square w-full max-w-56 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 md:max-w-none">
             {profile.profile_picture
               ? <img src={profile.profile_picture} alt="Current profile" className="h-40 w-40 rounded-full object-cover" />
               : <span aria-hidden="true" className="flex h-40 w-40 items-center justify-center rounded-full bg-blue-100 text-5xl font-bold text-blue-700">

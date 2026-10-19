@@ -1098,6 +1098,58 @@ describe('Tasks', () => {
     expect(taskRows()).toHaveLength(16);
   });
 
+  it('uses compact task cards and the mobile filter drawer on portrait screens', async () => {
+    const mobileMediaQuery = {
+      matches: true,
+      media: '(max-width: 767px), (orientation: portrait) and (max-width: 1024px)',
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList;
+    const defaultFetch = mockBoardReads();
+    vi.stubGlobal('matchMedia', vi.fn(() => mobileMediaQuery));
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/tasks?board_id=board-1') {
+        return { ok: true, json: async () => [taskResponse({ id: 'portrait-1', title: 'Portrait task one', state: 'InProgress' })] };
+      }
+      if (url === '/api/tasks?board_id=board-2') {
+        return { ok: true, json: async () => [taskResponse({ id: 'portrait-2', title: 'Portrait task two', board_id: 'board-2' })] };
+      }
+      return defaultFetch(url);
+    }));
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open navigation menu' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
+    expect(await screen.findByRole('list', { name: 'Tasks' })).toBeTruthy();
+    expect(await screen.findByText('Portrait task one')).toBeTruthy();
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.getByRole('searchbox', { name: 'Search tasks' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Notifications' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '+ Create' }).parentElement?.className).toContain('mobile-create-menu');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open filters' }));
+    const filters = screen.getByRole('dialog', { name: 'Task filters' });
+    fireEvent.change(within(filters).getByLabelText('Filter by board'), { target: { value: 'board-2' } });
+    expect(screen.queryByText('Portrait task one')).toBeNull();
+    expect(screen.getByText('Portrait task two')).toBeTruthy();
+    fireEvent.click(within(filters).getByRole('button', { name: 'Close filters' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigation menu' }));
+    fireEvent.click(screen.getByRole('button', { name: 'User menu for boardowner' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Profile' }));
+    expect(window.location.pathname).toBe('/profile');
+    expect(screen.getByRole('searchbox', { name: 'Search tasks' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '+ Create' }).parentElement?.className).toContain('mobile-create-menu');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigation menu' }));
+    fireEvent.click(screen.getByRole('button', { name: 'User menu for boardowner' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));
+    expect(window.location.pathname).toBe('/settings');
+    expect(screen.getByRole('searchbox', { name: 'Search tasks' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '+ Create' }).parentElement?.className).toContain('mobile-create-menu');
+  });
+
   it('hides completed tasks from the home board after 24 hours', async () => {
     const completedTasks = [
       taskResponse({
