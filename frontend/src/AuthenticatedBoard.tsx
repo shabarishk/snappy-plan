@@ -381,11 +381,12 @@ export function AuthenticatedBoard({
     }
   };
 
-  const persistTaskMove = async (task: Task, destination: ColumnId) => {
-    if (task.columnId === destination) return;
+  const persistTaskMove = async (task: Task, destination: ColumnId): Promise<boolean> => {
+    if (task.columnId === destination) return true;
     setMoveError('');
     try {
       await persistMoveTask(task.id, COLUMN_STATES[destination]);
+      return true;
     } catch (err) {
       setTasks((previous) => previous.map((current) =>
         current.id === task.id && current.columnId === destination
@@ -396,6 +397,7 @@ export function AuthenticatedBoard({
         ? { ...current, task }
         : current);
       setMoveError(err instanceof Error ? err.message : 'Failed to move task');
+      return false;
     }
   };
 
@@ -582,11 +584,16 @@ export function AuthenticatedBoard({
       boardId: taskPageTask.boardId ?? selectedTask?.boardId ?? selectedBoardId,
     }
     : null;
+  const isTaskCompleted = taskPageTask?.state === 'Complete';
   const taskProgressIndex = taskPageTask ? TASK_PROGRESSION.indexOf(taskPageTask.state) : -1;
-  const forwardTaskState = taskProgressIndex >= 0 ? TASK_PROGRESSION[taskProgressIndex + 1] : undefined;
-  const backwardTaskState = taskProgressIndex > 0 ? TASK_PROGRESSION[taskProgressIndex - 1] : undefined;
+  const forwardTaskState = isTaskCompleted
+    ? 'Backlog'
+    : taskProgressIndex >= 0 ? TASK_PROGRESSION[taskProgressIndex + 1] : undefined;
+  const backwardTaskState = isTaskCompleted
+    ? 'ToDo'
+    : taskProgressIndex > 0 ? TASK_PROGRESSION[taskProgressIndex - 1] : undefined;
 
-  const moveTaskPageState = (nextState: TaskState) => {
+  const moveTaskPageState = async (nextState: TaskState) => {
     if (!taskPageSelection) return;
     const destination = COLUMNS.find((column) => COLUMN_STATES[column.id] === nextState);
     if (!destination) {
@@ -600,7 +607,8 @@ export function AuthenticatedBoard({
     setSelectedTask({ ...taskPageSelection, task: movedTask });
     setMoveError('');
     setIsTaskMoveMenuOpen(false);
-    void persistTaskMove(currentTask, destination.id);
+    const saved = await persistTaskMove(currentTask, destination.id);
+    if (saved && isMobileLayout) navigateToPage('board');
   };
 
   const profileDisplayName = profile?.preferred_name?.trim() || profile?.full_name || '';
@@ -843,7 +851,9 @@ export function AuthenticatedBoard({
                 >
                   {isMobileLayout
                     ? forwardTaskState ? TASK_STATE_LABELS[forwardTaskState] : 'No further step'
-                    : forwardTaskState ? `Forward: ${TASK_STATE_LABELS[forwardTaskState]}` : 'Forward: No further step'}
+                    : forwardTaskState
+                      ? `${isTaskCompleted ? '' : 'Forward: '}${TASK_STATE_LABELS[forwardTaskState]}`
+                      : 'Forward: No further step'}
                 </button>
                 <button
                   type="button"
@@ -856,7 +866,9 @@ export function AuthenticatedBoard({
                 >
                   {isMobileLayout
                     ? backwardTaskState ? TASK_STATE_LABELS[backwardTaskState] : 'No earlier step'
-                    : backwardTaskState ? `Backward: ${TASK_STATE_LABELS[backwardTaskState]}` : 'Backward: No earlier step'}
+                    : backwardTaskState
+                      ? `${isTaskCompleted ? '' : 'Backward: '}${TASK_STATE_LABELS[backwardTaskState]}`
+                      : 'Backward: No earlier step'}
                 </button>
               </div>
             )}

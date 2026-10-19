@@ -10,7 +10,7 @@ import { sortTasksByCompleteByAndPriority, sortTasksByPriority } from '../src/ta
 
 import { taskResponse, boardList, mockBoardReads } from './appTestUtils';
 
-const taskPageFetch = () => {
+const taskPageFetch = (initialState: Task['state'] = 'ToDo') => {
   const defaultFetch = mockBoardReads();
   return vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
     if (url === '/api/tasks?board_id=board-1') {
@@ -20,7 +20,7 @@ const taskPageFetch = () => {
           id: 'task-1',
           title: 'Task page sample',
           description: 'Task page description',
-          state: 'ToDo',
+          state: initialState,
           assigned_to_id: 'user-1',
         })],
       };
@@ -341,6 +341,64 @@ describe('Tasks', () => {
     expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Task page sample');
   });
 
+  it.each([
+    ['Backlog', 'Backlog'],
+    ['To Do', 'ToDo'],
+  ])('allows a completed task to move to %s', async (optionLabel, state) => {
+    const mobileMediaQuery = {
+      matches: true,
+      media: '(max-width: 767px), (orientation: portrait) and (max-width: 1024px)',
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList;
+    const fetchMock = taskPageFetch('Complete');
+    vi.stubGlobal('matchMedia', vi.fn(() => mobileMediaQuery));
+    vi.stubGlobal('fetch', fetchMock);
+    window.history.replaceState({}, '', '/tasks/task-1');
+    render(<App />);
+
+    expect(await screen.findByRole('region', { name: 'Task details' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Move task' }));
+
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Backlog', 'To Do']);
+    fireEvent.click(screen.getByRole('menuitem', { name: optionLabel }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-1', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ state }),
+    })));
+    await waitFor(() => expect(window.location.pathname).toBe('/'));
+  });
+
+  it('keeps portrait task details open and reports an error when a state change fails', async () => {
+    const mobileMediaQuery = {
+      matches: true,
+      media: '(max-width: 767px), (orientation: portrait) and (max-width: 1024px)',
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList;
+    const fallbackFetch = taskPageFetch('Complete');
+    const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/tasks/task-1' && options?.method === 'PATCH') {
+        return { ok: false, text: async () => 'Unable to move task' };
+      }
+      return fallbackFetch(url, options);
+    });
+    vi.stubGlobal('matchMedia', vi.fn(() => mobileMediaQuery));
+    vi.stubGlobal('fetch', fetchMock);
+    window.history.replaceState({}, '', '/tasks/task-1');
+    render(<App />);
+
+    expect(await screen.findByRole('region', { name: 'Task details' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Move task' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Backlog' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Unable to move task');
+    expect(window.location.pathname).toBe('/tasks/task-1');
+  });
+
   it('opens task pages directly on mobile with progression and assignment actions', async () => {
     const mobileMediaQuery = {
       matches: true,
@@ -371,7 +429,11 @@ describe('Tasks', () => {
       method: 'PATCH',
       body: JSON.stringify({ state: 'InProgress' }),
     })));
+    await waitFor(() => expect(window.location.pathname).toBe('/'));
+    expect(screen.queryByRole('region', { name: 'Task details' })).toBeNull();
 
+    fireEvent.click(await screen.findByText('Task page sample'));
+    expect(await screen.findByRole('region', { name: 'Task details' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Move task' }));
     expect(screen.getByRole('menuitem', { name: 'Complete' })).toBeTruthy();
     fireEvent.click(screen.getByRole('menuitem', { name: 'To Do' }));
@@ -379,7 +441,10 @@ describe('Tasks', () => {
       method: 'PATCH',
       body: JSON.stringify({ state: 'ToDo' }),
     })));
+    await waitFor(() => expect(window.location.pathname).toBe('/'));
 
+    fireEvent.click(await screen.findByText('Task page sample'));
+    expect(await screen.findByRole('region', { name: 'Task details' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'View assignments' }));
     const assignments = screen.getByRole('dialog', { name: 'Task assignments' });
     expect(within(assignments).getByLabelText('Board')).toBeTruthy();
