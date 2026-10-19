@@ -96,17 +96,26 @@ export function CreateInitiativeOverlay({
   users,
   onClose,
   onCreated,
+  isPage = false,
 }: {
   users: TaskAssignee[];
   onClose: () => void;
   onCreated: (initiative: Initiative) => void;
+  isPage?: boolean;
 }) {
   return (
-    <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4">
-      <section role="dialog" aria-modal="true" aria-labelledby="create-initiative-title" className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+    <div className={isPage ? 'creation-page' : 'fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4'}>
+      <section
+        role={isPage ? 'region' : 'dialog'}
+        aria-modal={isPage ? undefined : 'true'}
+        aria-labelledby="create-initiative-title"
+        className={isPage
+          ? 'creation-page-content w-full rounded-xl bg-white p-5 shadow-sm sm:p-6'
+          : 'w-full max-w-lg rounded-xl bg-white p-6 shadow-xl'}
+      >
         <div className="mb-5 flex items-center justify-between">
           <h2 id="create-initiative-title" className="text-xl font-bold text-gray-800">Create initiative</h2>
-          <button type="button" aria-label="Close create initiative form" onClick={onClose} className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100">×</button>
+          <button type="button" aria-label={isPage ? 'Back from create initiative form' : 'Close create initiative form'} onClick={onClose} className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100">{isPage ? 'Back' : '×'}</button>
         </div>
         <InitiativeForm
           users={users}

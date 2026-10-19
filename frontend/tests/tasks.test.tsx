@@ -361,15 +361,17 @@ describe('Tasks', () => {
     expect(screen.getByRole('button', { name: 'Back to tasks' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Move task' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Forward: In Progress' }));
+    expect(screen.getByRole('menuitem', { name: 'In Progress' })).toBeTruthy();
+    expect(screen.queryByRole('menuitem', { name: /Forward|Backward/ })).toBeNull();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'In Progress' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-1', expect.objectContaining({
       method: 'PATCH',
       body: JSON.stringify({ state: 'InProgress' }),
     })));
 
     fireEvent.click(screen.getByRole('button', { name: 'Move task' }));
-    expect(screen.getByRole('menuitem', { name: 'Forward: Complete' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Backward: To Do' }));
+    expect(screen.getByRole('menuitem', { name: 'Complete' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'To Do' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-1', expect.objectContaining({
       method: 'PATCH',
       body: JSON.stringify({ state: 'ToDo' }),

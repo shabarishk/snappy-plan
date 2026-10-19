@@ -107,6 +107,7 @@ export function CreateTaskOverlay({
   boardInitiatives,
   onClose,
   onCreated,
+  isPage = false,
 }: {
   boards: Board[];
   selectedBoardId: string;
@@ -115,6 +116,7 @@ export function CreateTaskOverlay({
   boardInitiatives: Record<string, Initiative[]>;
   onClose: () => void;
   onCreated: (task: Task, boardId: string) => void;
+  isPage?: boolean;
 }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -201,16 +203,18 @@ export function CreateTaskOverlay({
   };
 
   return (
-    <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4">
+    <div className={isPage ? 'creation-page' : 'fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4'}>
       <section
-        role="dialog"
-        aria-modal="true"
+        role={isPage ? 'region' : 'dialog'}
+        aria-modal={isPage ? undefined : 'true'}
         aria-labelledby="create-task-title"
-        className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl"
+        className={isPage
+          ? 'creation-page-content w-full rounded-xl bg-white p-5 shadow-sm sm:p-6'
+          : 'w-full max-w-lg rounded-xl bg-white p-6 shadow-xl'}
       >
         <div className="mb-5 flex items-center justify-between">
           <h2 id="create-task-title" className="text-xl font-bold text-gray-800">Create task</h2>
-          <button type="button" aria-label="Close create task form" onClick={onClose} className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100">×</button>
+          <button type="button" aria-label={isPage ? 'Back from create task form' : 'Close create task form'} onClick={onClose} className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100">{isPage ? 'Back' : '×'}</button>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

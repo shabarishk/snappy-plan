@@ -1,7 +1,10 @@
-export type AppPage = 'board' | 'backlog' | 'tasks' | 'task' | 'boards' | 'initiatives' | 'initiative' | 'profile' | 'settings' | 'admin';
+export type AppPage = 'board' | 'backlog' | 'tasks' | 'task' | 'create-task' | 'create-board' | 'create-initiative' | 'boards' | 'initiatives' | 'initiative' | 'profile' | 'settings' | 'admin';
 
 export function pageFromPath(pathname: string): AppPage {
   if (pathname === '/admin') return 'admin';
+  if (pathname === '/create/task') return 'create-task';
+  if (pathname === '/create/board') return 'create-board';
+  if (pathname === '/create/initiative') return 'create-initiative';
   if (/^\/tasks\/[^/]+$/.test(pathname)) return 'task';
   if (pathname === '/tasks') return 'tasks';
   if (pathname === '/boards') return 'boards';
@@ -14,6 +17,9 @@ export function pageFromPath(pathname: string): AppPage {
 
 export function pathForPage(page: AppPage, resourceId?: string, initiativeTitle?: string): string {
   if (page === 'admin') return '/admin';
+  if (page === 'create-task') return '/create/task';
+  if (page === 'create-board') return '/create/board';
+  if (page === 'create-initiative') return '/create/initiative';
   if (page === 'task' && resourceId) return `/tasks/${encodeURIComponent(resourceId)}`;
   if (page === 'tasks') return '/tasks';
   if (page === 'boards') return '/boards';

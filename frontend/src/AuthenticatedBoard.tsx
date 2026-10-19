@@ -180,6 +180,9 @@ export function AuthenticatedBoard({
   const [isTaskMoveMenuOpen, setIsTaskMoveMenuOpen] = useState(false);
   const [isTaskAssignmentsOpen, setIsTaskAssignmentsOpen] = useState(false);
   const isTaskPage = currentPage === 'board' || currentPage === 'backlog';
+  const isCreatePage = currentPage === 'create-task'
+    || currentPage === 'create-board'
+    || currentPage === 'create-initiative';
   const needsInitiativeGrouping = isTaskPage || currentPage === 'tasks' || currentPage === 'task';
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [selectedTask, setSelectedTask] = useState<SelectedTask | null>(null);
@@ -201,6 +204,7 @@ export function AuthenticatedBoard({
   const createMenuRef = useRef<HTMLDivElement>(null);
   const taskMoveMenuRef = useRef<HTMLDivElement>(null);
   const taskReturnPageRef = useRef<AppPage>('board');
+  const createReturnPageRef = useRef<AppPage>('board');
   const [logoutError, setLogoutError] = useState('');
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
@@ -265,6 +269,49 @@ export function AuthenticatedBoard({
     }
     if (page === 'board' || page === 'backlog') setCurrentTime(Date.now());
     setCurrentPage(page);
+  };
+
+  const openCreateItem = (item: 'task' | 'board' | 'initiative') => {
+    setIsCreateMenuOpen(false);
+    if (isMobileLayout) {
+      createReturnPageRef.current = currentPage;
+      navigateToPage(item === 'task' ? 'create-task' : item === 'board' ? 'create-board' : 'create-initiative');
+      return;
+    }
+    if (item === 'task') setIsCreateTaskOpen(true);
+    if (item === 'board') setIsCreateBoardOpen(true);
+    if (item === 'initiative') setIsCreateInitiativeOpen(true);
+  };
+
+  const returnFromCreatePage = () => navigateToPage(createReturnPageRef.current);
+
+  const handleTaskCreated = (task: Task, boardId: string) => {
+    if (boardId !== selectedBoardId) setIsLoading(true);
+    setSelectedBoardId(boardId);
+    window.localStorage.setItem('snappy-plan-selected-board', boardId);
+    setTasks((previous) => [...previous, { ...task, boardId }]);
+    if (task.columnId === 'backlog' && currentPage === 'board') {
+      setBacklogTaskNotification(task.title);
+    } else {
+      navigateToPage(task.columnId === 'backlog' ? 'backlog' : 'board');
+    }
+    setIsCreateTaskOpen(false);
+  };
+
+  const handleBoardCreated = (board: Board) => {
+    setBoards((current) => [...current, board]);
+    setSelectedBoardId(board.id);
+    window.localStorage.setItem('snappy-plan-selected-board', board.id);
+    setIsLoading(true);
+    setTasks([]);
+    setIsCreateBoardOpen(false);
+    if (currentPage === 'create-board') navigateToPage('board');
+  };
+
+  const handleInitiativeCreated = () => {
+    setInitiativeRefreshToken((version) => version + 1);
+    setIsCreateInitiativeOpen(false);
+    if (currentPage === 'create-initiative') returnFromCreatePage();
   };
 
   const handleSelectTask = (task: Task, boardId: string) => {
@@ -888,11 +935,11 @@ export function AuthenticatedBoard({
       </aside>
       <div className="app-content flex min-w-0 flex-1 flex-col">
       <header className={`app-header bg-white p-4 shadow-sm z-10 grid grid-cols-1 gap-2 shrink-0 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] sm:items-center ${isTaskPage ? 'home-header' : ''}`}>
-        {currentPage === 'task' ? (
+        {currentPage === 'task' || isCreatePage ? (
           <button
             type="button"
-            aria-label="Back to tasks"
-            onClick={returnFromTaskPage}
+            aria-label={currentPage === 'task' ? 'Back to tasks' : 'Back from creation page'}
+            onClick={currentPage === 'task' ? returnFromTaskPage : returnFromCreatePage}
             className="mobile-menu-button"
           >
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-6 w-6">
@@ -915,7 +962,7 @@ export function AuthenticatedBoard({
         {currentPage !== 'board' && currentPage !== 'backlog' && (
           currentPage !== 'task' && (
           <h1 className="text-xl font-extrabold tracking-tight text-blue-600 sm:col-start-1 sm:row-start-1">
-            {currentPage === 'tasks' ? 'Tasks' : currentPage === 'admin' ? 'Admin' : currentPage === 'settings' ? 'Settings' : currentPage === 'boards' ? 'Boards' : currentPage === 'initiatives' || currentPage === 'initiative' ? 'Initiatives' : 'Profile'}
+            {currentPage === 'create-task' ? 'Create task' : currentPage === 'create-board' ? 'Create board' : currentPage === 'create-initiative' ? 'Create initiative' : currentPage === 'tasks' ? 'Tasks' : currentPage === 'admin' ? 'Admin' : currentPage === 'settings' ? 'Settings' : currentPage === 'boards' ? 'Boards' : currentPage === 'initiatives' || currentPage === 'initiative' ? 'Initiatives' : 'Profile'}
           </h1>
           )
         )}
@@ -925,7 +972,8 @@ export function AuthenticatedBoard({
               boards={boards}
               onSelectTask={handleSelectTask}
             />
-            <div ref={createMenuRef} className="relative shrink-0">
+            {!isCreatePage && (
+            <div ref={createMenuRef} className={isMobileLayout ? 'mobile-create-menu' : 'relative shrink-0'}>
               <button
                 type="button"
                 aria-haspopup="menu"
@@ -934,35 +982,26 @@ export function AuthenticatedBoard({
                 onClick={() => setIsCreateMenuOpen((open) => !open)}
                 className="create-menu-button rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
               >
-                <span aria-hidden="true">+</span>
+                <span aria-hidden="true" className="create-menu-plus">+</span>
                 <span className="create-menu-label">Create</span>
               </button>
               {isCreateMenuOpen && (
                 <div role="menu" aria-label="Create" className="absolute right-0 top-full z-30 mt-2 w-48 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
-                  <button type="button" role="menuitem" onClick={() => {
-                    setIsCreateMenuOpen(false);
-                    setIsCreateTaskOpen(true);
-                  }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
+                  <button type="button" role="menuitem" onClick={() => openCreateItem('task')} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
                     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
                       <rect x="3" y="3" width="18" height="18" rx="3" />
                       <path strokeLinecap="round" strokeLinejoin="round" d="m8 12 3 3 5-6" />
                     </svg>
                     Task
                   </button>
-                  <button type="button" role="menuitem" onClick={() => {
-                    setIsCreateMenuOpen(false);
-                    setIsCreateBoardOpen(true);
-                  }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
+                  <button type="button" role="menuitem" onClick={() => openCreateItem('board')} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
                     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
                       <rect x="3" y="4" width="18" height="16" rx="2" />
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 4v16m6-16v16" />
                     </svg>
                     Board
                   </button>
-                  <button type="button" role="menuitem" onClick={() => {
-                    setIsCreateMenuOpen(false);
-                    setIsCreateInitiativeOpen(true);
-                  }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
+                  <button type="button" role="menuitem" onClick={() => openCreateItem('initiative')} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
                     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M13 2 4 14h7l-1 8 10-12h-7l1-8Z" />
                     </svg>
@@ -971,11 +1010,12 @@ export function AuthenticatedBoard({
                 </div>
               )}
             </div>
+            )}
           </div>
         )}
         <NotificationBell />
       </header>
-      {currentPage !== 'profile' && currentPage !== 'settings' && isCreateTaskOpen && (
+      {currentPage !== 'profile' && currentPage !== 'settings' && !isCreatePage && isCreateTaskOpen && (
         <CreateTaskOverlay
           boards={boards}
           selectedBoardId={selectedBoardId}
@@ -983,18 +1023,7 @@ export function AuthenticatedBoard({
           currentUserId={profile?.username ?? ''}
           boardInitiatives={initiativesByBoardId}
           onClose={() => setIsCreateTaskOpen(false)}
-          onCreated={(task, boardId) => {
-            if (boardId !== selectedBoardId) setIsLoading(true);
-            setSelectedBoardId(boardId);
-            window.localStorage.setItem('snappy-plan-selected-board', boardId);
-            setTasks((previous) => [...previous, { ...task, boardId }]);
-            if (task.columnId === 'backlog' && currentPage === 'board') {
-              setBacklogTaskNotification(task.title);
-            } else {
-              navigateToPage(task.columnId === 'backlog' ? 'backlog' : 'board');
-            }
-            setIsCreateTaskOpen(false);
-          }}
+          onCreated={handleTaskCreated}
         />
       )}
       {backlogTaskNotification && (
@@ -1015,28 +1044,18 @@ export function AuthenticatedBoard({
           </button>
         </div>
       )}
-      {currentPage !== 'profile' && currentPage !== 'settings' && isCreateBoardOpen && (
+      {currentPage !== 'profile' && currentPage !== 'settings' && !isCreatePage && isCreateBoardOpen && (
         <CreateBoardOverlay
           users={assignees}
           onClose={() => setIsCreateBoardOpen(false)}
-          onCreated={(board) => {
-            setBoards((current) => [...current, board]);
-            setSelectedBoardId(board.id);
-            window.localStorage.setItem('snappy-plan-selected-board', board.id);
-            setIsLoading(true);
-            setTasks([]);
-            setIsCreateBoardOpen(false);
-          }}
+          onCreated={handleBoardCreated}
         />
       )}
-      {currentPage !== 'profile' && currentPage !== 'settings' && isCreateInitiativeOpen && (
+      {currentPage !== 'profile' && currentPage !== 'settings' && !isCreatePage && isCreateInitiativeOpen && (
         <CreateInitiativeOverlay
           users={assignees}
           onClose={() => setIsCreateInitiativeOpen(false)}
-          onCreated={() => {
-            setInitiativeRefreshToken((version) => version + 1);
-            setIsCreateInitiativeOpen(false);
-          }}
+          onCreated={handleInitiativeCreated}
         />
       )}
       {currentPage === 'task' && taskPageSelection && (
@@ -1065,7 +1084,9 @@ export function AuthenticatedBoard({
                   }}
                   className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
                 >
-                  {forwardTaskState ? `Forward: ${TASK_STATE_LABELS[forwardTaskState]}` : 'Forward: No further step'}
+                  {isMobileLayout
+                    ? forwardTaskState ? TASK_STATE_LABELS[forwardTaskState] : 'No further step'
+                    : forwardTaskState ? `Forward: ${TASK_STATE_LABELS[forwardTaskState]}` : 'Forward: No further step'}
                 </button>
                 <button
                   type="button"
@@ -1076,7 +1097,9 @@ export function AuthenticatedBoard({
                   }}
                   className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
                 >
-                  {backwardTaskState ? `Backward: ${TASK_STATE_LABELS[backwardTaskState]}` : 'Backward: No earlier step'}
+                  {isMobileLayout
+                    ? backwardTaskState ? TASK_STATE_LABELS[backwardTaskState] : 'No earlier step'
+                    : backwardTaskState ? `Backward: ${TASK_STATE_LABELS[backwardTaskState]}` : 'Backward: No earlier step'}
                 </button>
               </div>
             )}
@@ -1124,7 +1147,32 @@ export function AuthenticatedBoard({
 
       {/* Main content area takes up remaining height */}
       <main className={`board-main flex-1 p-4 ${isTaskPage ? 'board-main-grouped' : ''} ${currentPage === 'task' ? 'board-main-task-page' : ''}`}>
-        {currentPage === 'admin' ? (
+        {currentPage === 'create-task' ? (
+          <CreateTaskOverlay
+            boards={boards}
+            selectedBoardId={selectedBoardId}
+            assignees={assignees}
+            currentUserId={profile?.username ?? ''}
+            boardInitiatives={initiativesByBoardId}
+            onClose={returnFromCreatePage}
+            onCreated={handleTaskCreated}
+            isPage
+          />
+        ) : currentPage === 'create-board' ? (
+          <CreateBoardOverlay
+            users={assignees}
+            onClose={returnFromCreatePage}
+            onCreated={handleBoardCreated}
+            isPage
+          />
+        ) : currentPage === 'create-initiative' ? (
+          <CreateInitiativeOverlay
+            users={assignees}
+            onClose={returnFromCreatePage}
+            onCreated={handleInitiativeCreated}
+            isPage
+          />
+        ) : currentPage === 'admin' ? (
           profile?.role === 'admin'
             ? <AdminPage currentUsername={profile.username} />
             : <p role="alert" className="p-4 text-sm text-red-700">Administrator access required.</p>

@@ -110,6 +110,44 @@ describe('Application', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close task filters' }));
     expect(screen.queryByRole('dialog', { name: 'Task filters' })).toBeNull();
   });
+
+  it('keeps a portrait create button fixed and opens a dedicated page for each create option', async () => {
+    const mobileMediaQuery = {
+      matches: true,
+      media: '(max-width: 767px), (orientation: portrait) and (max-width: 1024px)',
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList;
+    window.history.replaceState({}, '', '/');
+    vi.stubGlobal('matchMedia', vi.fn(() => mobileMediaQuery));
+    vi.stubGlobal('fetch', mockBoardReads());
+    render(<App />);
+
+    await screen.findByRole('region', { name: 'Mobile active task sections' });
+    const createButton = screen.getByRole('button', { name: '+ Create' });
+    expect(createButton.parentElement?.className).toContain('mobile-create-menu');
+
+    fireEvent.click(createButton);
+    expect(screen.getByRole('menu', { name: 'Create' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Task' }));
+    expect(window.location.pathname).toBe('/create/task');
+    expect(await screen.findByRole('region', { name: 'Create task' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Create task' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back from create task form' }));
+    expect(window.location.pathname).toBe('/');
+    fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Board' }));
+    expect(window.location.pathname).toBe('/create/board');
+    expect(await screen.findByRole('region', { name: 'Create a new board' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back from create board form' }));
+    fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Initiative' }));
+    expect(window.location.pathname).toBe('/create/initiative');
+    expect(await screen.findByRole('region', { name: 'Create initiative' })).toBeTruthy();
+  });
   
   it('opens the page selected by the current URL and follows browser history', async () => {
       window.history.replaceState({}, '', '/settings');
