@@ -1,6 +1,6 @@
 import { DndContext, DragOverlay, closestCorners, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
-import type { Board, Initiative } from './api';
+import type { Board, Initiative, TaskAssignee } from './api';
 import type { AppPage } from './navigation';
 import type { ColumnType, Task } from './taskModel';
 import { BOARD_COLUMNS, COLUMNS } from './taskModel';
@@ -24,6 +24,7 @@ type BoardTaskColumnsProps = {
   taskGroups: TaskGroup[];
   visibleColumns: ColumnType[];
   boards: Board[];
+  assignees: TaskAssignee[];
   taskInitiatives: Record<string, Initiative[]>;
   boardFilterOptions: FilterOption[];
   boardFilterIds: FilterSelection;
@@ -45,6 +46,7 @@ export function BoardTaskColumns({
   taskGroups,
   visibleColumns,
   boards,
+  assignees,
   taskInitiatives,
   boardFilterOptions,
   boardFilterIds,
@@ -65,6 +67,7 @@ export function BoardTaskColumns({
   const isBacklog = currentPage === 'backlog';
   const moveBacklogTask = isBacklog ? onMoveBacklogTaskToTodo : undefined;
   const boardNamesById = new Map(boards.map((board) => [board.id, board.title]));
+  const assigneeNamesById = new Map(assignees.map((assignee) => [assignee.id, assignee]));
   const initiativeNamesByTaskId = new Map(
     Object.entries(taskInitiatives).map(([taskId, initiatives]) => [
       taskId,
@@ -75,6 +78,7 @@ export function BoardTaskColumns({
   const showInitiativeNames = isMobileLayout || groupBy === 'board';
   const taskCardMetadataProps = {
     boardNamesById,
+    assigneesById: assigneeNamesById,
     initiativeNamesByTaskId,
     selectedBoardId,
     showBoardName,

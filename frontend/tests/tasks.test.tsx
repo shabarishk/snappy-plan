@@ -835,7 +835,14 @@ describe('Tasks', () => {
       if (url === '/api/boards') return { ok: true, json: async () => boardList };
       if (url === '/api/tasks?board_id=board-1') return { ok: true, json: async () => [linkedTask, unlinkedTask] };
       if (url === '/api/tasks?board_id=board-2') return { ok: true, json: async () => [secondBoardTask, secondBoardBacklogTask] };
-      if (url === '/api/users') return { ok: true, json: async () => [{ id: 'user-1', full_name: 'Board Owner' }] };
+      if (url === '/api/users') return {
+        ok: true,
+        json: async () => [{
+          id: 'user-1',
+          full_name: 'Board Owner',
+          profile_picture: 'data:image/png;base64,AAAA',
+        }],
+      };
       if (url === '/api/initiatives') return { ok: true, json: async () => [initiative] };
       if (url === '/api/initiatives/initiative-1') {
         return { ok: true, json: async () => ({ initiative, tasks: [linkedTask] }) };
@@ -866,6 +873,12 @@ describe('Tasks', () => {
     expect(within(linkedBoardCard).getByText('Launch Initiative')).toBeTruthy();
     expect(linkedBoardCard.children[1].textContent).toBe('Launch Initiative');
     expect(within(linkedBoardCard).queryByText('Board Owner')).toBeNull();
+    const taskCardFooter = linkedBoardCard.lastElementChild as HTMLElement;
+    expect(taskCardFooter.className).toContain('justify-end');
+    expect(taskCardFooter.children[0].getAttribute('aria-label')).toBe('Medium priority');
+    const assigneeTile = taskCardFooter.children[1] as HTMLElement;
+    expect(assigneeTile.getAttribute('aria-label')).toBe('Assignee: Board Owner');
+    expect(assigneeTile.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AAAA');
     const unlinkedBoardCard = screen.getByText('Second board task').closest<HTMLElement>('.task-card')!;
     expect(within(unlinkedBoardCard).queryByText('Launch Initiative')).toBeNull();
     for (const allCheckbox of ['Board: All', 'Initiative: All', 'Assignee: All']) {

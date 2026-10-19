@@ -848,9 +848,10 @@ func TestTaskReadEndpoints(t *testing.T) {
 	}
 	assignee := dbgen.GetUsersForAssignmentRow{ID: ownerID, FullName: "Board Owner"}
 	db := &fakeDB{
-		session:   dbgen.Session{Token: "token", UserID: ownerID},
-		tasks:     []dbgen.Task{task},
-		assignees: []dbgen.GetUsersForAssignmentRow{assignee},
+		session:                dbgen.Session{Token: "token", UserID: ownerID},
+		tasks:                  []dbgen.Task{task},
+		assignees:              []dbgen.GetUsersForAssignmentRow{assignee},
+		assigneeProfilePicture: pgtype.Text{String: "data:image/png;base64,AAAA", Valid: true},
 	}
 	handler := newHandler(db, nil, false)
 	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
@@ -877,6 +878,15 @@ func TestTaskReadEndpoints(t *testing.T) {
 	}
 	if len(users) != 1 || users[0] != assignee {
 		t.Fatalf("assignable users = %#v", users)
+	}
+	var assignableUsers []struct {
+		ProfilePicture string `json:"profile_picture"`
+	}
+	if err := json.Unmarshal(usersResponse.Body.Bytes(), &assignableUsers); err != nil {
+		t.Fatalf("decode assignee profile pictures: %v", err)
+	}
+	if len(assignableUsers) != 1 || assignableUsers[0].ProfilePicture != "data:image/png;base64,AAAA" {
+		t.Fatalf("assignee profile pictures = %#v", assignableUsers)
 	}
 
 	for _, test := range []struct {

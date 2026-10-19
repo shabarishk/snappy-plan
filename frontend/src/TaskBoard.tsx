@@ -1,5 +1,6 @@
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
+import type { TaskAssignee } from './api';
 import { sortTasksByCompleteByAndPriority, sortTasksByPriority } from './taskPriority';
 import type { ColumnType, Task } from './taskModel';
 
@@ -26,6 +27,27 @@ function PriorityIcon({ priority }: { priority: Task['priority'] }) {
   );
 }
 
+function AssigneeProfileTile({ name, profilePicture }: { name: string; profilePicture?: string | null }) {
+  const trimmedName = name.trim();
+  const nameParts = trimmedName.split(/\s+/).filter(Boolean);
+  const initials = nameParts.length > 1
+    ? `${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}`
+    : trimmedName.slice(0, 2);
+
+  return (
+    <span
+      role="img"
+      aria-label={`Assignee: ${name}`}
+      title={name}
+      className="inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-full bg-blue-100 text-[10px] font-bold text-blue-700"
+    >
+      {profilePicture
+        ? <img src={profilePicture} alt="" className="h-full w-full object-cover" />
+        : initials.toLocaleUpperCase() || '?'}
+    </span>
+  );
+}
+
 function TaskCard({
   task,
   onMoveToTodo,
@@ -36,6 +58,7 @@ function TaskCard({
   initiativeNames,
   showBoardName,
   showInitiativeNames,
+  assignee,
 }: {
   task: Task;
   onMoveToTodo?: (taskId: string) => void;
@@ -46,6 +69,7 @@ function TaskCard({
   initiativeNames: string[];
   showBoardName: boolean;
   showInitiativeNames: boolean;
+  assignee?: { name: string; profilePicture?: string | null };
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: draggableId ?? task.id,
@@ -97,8 +121,11 @@ function TaskCard({
           Move to To Do
         </button>
       )}
-      <div className="mt-1 flex justify-end">
+      <div className="mt-1 flex items-center justify-end gap-2">
         <PriorityIcon priority={task.priority} />
+        {assignee && (
+          <AssigneeProfileTile name={assignee.name} profilePicture={assignee.profilePicture} />
+        )}
       </div>
     </div>
   );
@@ -119,6 +146,7 @@ export function Column({
   selectedBoardId,
   showBoardName,
   showInitiativeNames,
+  assigneesById,
 }: {
   column: ColumnType;
   tasks: Task[];
@@ -134,6 +162,7 @@ export function Column({
   selectedBoardId?: string;
   showBoardName?: boolean;
   showInitiativeNames?: boolean;
+  assigneesById?: ReadonlyMap<string, TaskAssignee>;
 }) {
   const { setNodeRef } = useDroppable({
     id: droppableId ?? column.id,
@@ -162,6 +191,12 @@ export function Column({
             initiativeNames={initiativeNamesByTaskId?.get(task.id) ?? []}
             showBoardName={showBoardName ?? false}
             showInitiativeNames={showInitiativeNames ?? false}
+            assignee={task.assignedToId
+              ? {
+                name: assigneesById?.get(task.assignedToId)?.full_name ?? task.assignedToId,
+                profilePicture: assigneesById?.get(task.assignedToId)?.profile_picture,
+              }
+              : undefined}
           />
         ))}
       </div>

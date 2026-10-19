@@ -73,6 +73,7 @@ type fakeDB struct {
 	assigneesScanErr         error
 	assigneesRowsErr         error
 	assignees                []dbgen.GetUsersForAssignmentRow
+	assigneeProfilePicture   pgtype.Text
 	adminUsers               []dbgen.GetUsersForAdminRow
 	adminBoards              []dbgen.GetAllBoardsForAdminRow
 	adminBoardsErr           error
@@ -370,7 +371,7 @@ func (db *fakeDB) Query(_ context.Context, query string, args ...any) (pgx.Rows,
 		}
 		rows := make([][]any, len(db.assignees))
 		for i, user := range db.assignees {
-			rows[i] = []any{user.ID, user.FullName, user.FullName}
+			rows[i] = []any{user.ID, user.FullName, user.FullName, db.assigneeProfilePicture}
 		}
 		return &fakeRows{values: rows, scanErr: db.assigneesScanErr, err: db.assigneesRowsErr}, nil
 	default:

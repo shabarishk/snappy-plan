@@ -47,6 +47,7 @@ export interface TaskAssignee {
   id: string;
   full_name: string;
   legal_name?: string;
+  profile_picture?: string | null;
 }
 
 export interface TaskComment {

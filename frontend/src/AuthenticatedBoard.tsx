@@ -1311,6 +1311,7 @@ export function AuthenticatedBoard({
             taskGroups={taskGroups}
             visibleColumns={visibleColumns}
             boards={boards}
+            assignees={assignees}
             taskInitiatives={taskInitiatives}
             boardFilterOptions={boardFilterOptions}
             boardFilterIds={boardFilterIds}

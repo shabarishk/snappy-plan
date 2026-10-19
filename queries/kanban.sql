@@ -439,7 +439,7 @@ WHERE task.id = sqlc.arg(task_id)
 RETURNING task.*;
 
 -- name: GetUsersForAssignment :many
-SELECT id, COALESCE(NULLIF(preferred_name, ''), full_name) AS full_name
+SELECT id, COALESCE(NULLIF(preferred_name, ''), full_name) AS full_name, profile_picture
 FROM users
 ORDER BY full_name ASC, id ASC;
 
