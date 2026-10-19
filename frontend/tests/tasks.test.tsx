@@ -59,6 +59,7 @@ describe('Tasks', () => {
     fireEvent.click(screen.getByText('Standalone task'));
 
     expect(screen.getByRole('heading', { name: 'To Do' })).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'Medium priority' })).toBeTruthy();
     expect(onSelectTask).toHaveBeenCalledWith(task);
   });
 
@@ -80,6 +81,8 @@ describe('Tasks', () => {
     const renderedTaskTitles = Array.from(container.querySelector('.board-column-tasks')!.children)
       .map((card) => card.querySelector('p')?.textContent);
     expect(renderedTaskTitles).toEqual(['Earlier due', 'Later due']);
+    expect(screen.getByRole('img', { name: 'Low priority' })).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'High priority' })).toBeTruthy();
   });
 
   it('orders tasks from highest to lowest priority', () => {
@@ -180,7 +183,7 @@ describe('Tasks', () => {
       const { rerender } = render(<AuthenticatedBoard tasks={tasks} setTasks={setTasks} />);
       fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
       await screen.findByText('Test task');
-      expect(screen.getByText('Priority: High')).toBeTruthy();
+      expect(screen.getByRole('img', { name: 'High priority' })).toBeTruthy();
       expect(screen.queryByText('Task details')).toBeNull();
   
       fireEvent.click(screen.getByRole('button', { name: 'Move to To Do' }));
@@ -776,7 +779,7 @@ describe('Tasks', () => {
           complete_by: new Date('2026-10-20T02:30').toISOString(),
         }),
       }));
-      expect(await screen.findByText('Priority: High')).toBeTruthy();
+      expect(await screen.findByRole('img', { name: 'High priority' })).toBeTruthy();
     });
 
   it('groups cross-board tasks by initiative and assignee with ungrouped tasks last in backlog', async () => {
@@ -1300,7 +1303,7 @@ describe('Tasks', () => {
       fireEvent.click(within(backlogNotification).getByRole('button', { name: 'Show task on board' }));
       expect(screen.getByRole('button', { name: 'Backlog' }).getAttribute('aria-current')).toBe('page');
       expect(await screen.findByText('Review the garden plan')).toBeTruthy();
-      expect(screen.getByText('Priority: Medium')).toBeTruthy();
+      expect(screen.getByRole('img', { name: 'Medium priority' })).toBeTruthy();
       expect(fetchMock).toHaveBeenCalledWith('/api/tasks', expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({

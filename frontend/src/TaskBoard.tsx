@@ -4,6 +4,28 @@ import { sortTasksByCompleteByAndPriority, sortTasksByPriority } from './taskPri
 import type { ColumnType, Task } from './taskModel';
 
 // --- Sub-Components ---
+function PriorityIcon({ priority }: { priority: Task['priority'] }) {
+  const colorClass = priority === 'High'
+    ? 'text-red-600'
+    : priority === 'Medium'
+      ? 'text-yellow-500'
+      : 'text-blue-600';
+
+  return (
+    <span role="img" aria-label={`${priority} priority`} className={`inline-flex ${colorClass}`}>
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+        {priority === 'Medium' ? (
+          <path d="M5 8h14M5 16h14" />
+        ) : priority === 'High' ? (
+          <path d="M12 19V5m-6 6 6-6 6 6" />
+        ) : (
+          <path d="M12 5v14m6-6-6 6-6-6" />
+        )}
+      </svg>
+    </span>
+  );
+}
+
 function TaskCard({
   task,
   onMoveToTodo,
@@ -40,7 +62,6 @@ function TaskCard({
       } transition-shadow`}
     >
       <p className="text-gray-800 text-sm font-medium">{task.title}</p>
-      <p className="mt-1 text-xs text-gray-500">Priority: {task.priority}</p>
       {task.completedAt && (
         <p className="mt-2 text-xs text-gray-500">
           Completed <time dateTime={task.completedAt}>{new Date(task.completedAt).toLocaleString()}</time>
@@ -58,6 +79,9 @@ function TaskCard({
           Move to To Do
         </button>
       )}
+      <div className="mt-1 flex justify-end">
+        <PriorityIcon priority={task.priority} />
+      </div>
     </div>
   );
 }
