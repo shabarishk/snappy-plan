@@ -138,9 +138,9 @@ export function AdminPage({ currentUsername }: { currentUsername: string }) {
   };
 
   return (
-    <section aria-label="Admin" className="mx-auto w-full max-w-7xl">
+    <section aria-label="Admin" className="admin-page mx-auto w-full max-w-7xl">
       <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
-        <nav aria-label="Admin sections" className="rounded-xl bg-white p-2 shadow-sm">
+        <nav aria-label="Admin sections" className="admin-section-nav rounded-xl bg-white p-2 shadow-sm">
           <button
             type="button"
             aria-current={selectedSection === 'users' ? 'page' : undefined}
@@ -158,17 +158,17 @@ export function AdminPage({ currentUsername }: { currentUsername: string }) {
             Board management
           </button>
         </nav>
-        <div className="min-w-0 rounded-xl bg-white p-6 shadow-sm">
+        <div className="admin-content min-w-0 rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6">
       {selectedSection === 'users' ? (
       <section aria-labelledby="user-management-title" className="space-y-4">
-        <div className="flex items-center justify-between gap-4">
+        <div className="admin-section-header flex items-center justify-between gap-4">
           <h2 id="user-management-title" className="text-xl font-bold text-gray-800">User management</h2>
           <button type="button" onClick={() => setIsCreateUserOpen(true)} className="shrink-0 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
             + New user
           </button>
         </div>
 
-        <section aria-labelledby="manage-users-title" className="rounded-xl bg-white p-6 shadow-sm">
+        <section aria-labelledby="manage-users-title" className="rounded-xl bg-white p-4 shadow-sm sm:p-6">
         <h2 id="manage-users-title" className="mb-4 text-lg font-bold text-gray-800">Manage users</h2>
         {error && <p role="alert" className="mb-3 text-sm text-red-700">{error}</p>}
         {success && <p role="status" className="mb-3 text-sm text-green-700">{success}</p>}
@@ -225,7 +225,7 @@ export function AdminPage({ currentUsername }: { currentUsername: string }) {
         </section>
         {isCreateUserOpen && (
           <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4">
-            <section role="dialog" aria-modal="true" aria-labelledby="create-user-title" className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+            <section role="dialog" aria-modal="true" aria-labelledby="create-user-title" className="w-full max-w-lg rounded-xl bg-white p-4 shadow-xl sm:p-6">
               <div className="mb-5 flex items-center justify-between">
                 <h2 id="create-user-title" className="text-xl font-bold text-gray-800">Create user</h2>
                 <button type="button" aria-label="Close create user form" onClick={closeCreateUser} disabled={isSaving} className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100 disabled:opacity-50">×</button>
@@ -302,7 +302,7 @@ export function AdminPage({ currentUsername }: { currentUsername: string }) {
       ) : (
       <section aria-labelledby="manage-boards-title" className="space-y-4">
         <h2 id="manage-boards-title" className="text-xl font-bold text-gray-800">Board management</h2>
-        <section aria-label="All boards" className="rounded-xl bg-white p-6 shadow-sm">
+        <section aria-label="All boards" className="rounded-xl bg-white p-4 shadow-sm sm:p-6">
           <h3 className="mb-4 text-lg font-bold text-gray-800">All boards</h3>
           {boardsError && <p role="alert" className="mb-3 text-sm text-red-700">{boardsError}</p>}
           {isBoardsLoading ? (
@@ -312,7 +312,7 @@ export function AdminPage({ currentUsername }: { currentUsername: string }) {
           ) : (
             <ul className="divide-y divide-gray-100">
               {boards.map((board) => (
-                <li key={board.id} className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                <li key={board.id} className="admin-board-row flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
                   <div className="min-w-0">
                     <p className="font-medium text-gray-800">{board.title}</p>
                     <p className="mt-1 text-sm text-gray-500">Owned by {board.owner_name} ({board.owner_id})</p>

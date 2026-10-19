@@ -107,6 +107,7 @@ export function CreateTaskOverlay({
   boardInitiatives,
   onClose,
   onCreated,
+  isPage = false,
 }: {
   boards: Board[];
   selectedBoardId: string;
@@ -115,6 +116,7 @@ export function CreateTaskOverlay({
   boardInitiatives: Record<string, Initiative[]>;
   onClose: () => void;
   onCreated: (task: Task, boardId: string) => void;
+  isPage?: boolean;
 }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -201,16 +203,18 @@ export function CreateTaskOverlay({
   };
 
   return (
-    <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4">
+    <div className={isPage ? 'creation-page' : 'fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4'}>
       <section
-        role="dialog"
-        aria-modal="true"
+        role={isPage ? 'region' : 'dialog'}
+        aria-modal={isPage ? undefined : 'true'}
         aria-labelledby="create-task-title"
-        className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl"
+        className={isPage
+          ? 'creation-page-content w-full rounded-xl bg-white p-5 shadow-sm sm:p-6'
+          : 'w-full max-w-lg rounded-xl bg-white p-6 shadow-xl'}
       >
         <div className="mb-5 flex items-center justify-between">
           <h2 id="create-task-title" className="text-xl font-bold text-gray-800">Create task</h2>
-          <button type="button" aria-label="Close create task form" onClick={onClose} className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100">×</button>
+          <button type="button" aria-label={isPage ? 'Back from create task form' : 'Close create task form'} onClick={onClose} className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100">{isPage ? 'Back' : '×'}</button>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -333,6 +337,10 @@ export function TaskDetailsOverlay({
   onClose,
   onSaved,
   onInitiativesChanged,
+  isPage = false,
+  onExpandToPage,
+  isAssignmentsOpen = false,
+  onCloseAssignments,
 }: {
   task: Task;
   boards: Board[];
@@ -344,6 +352,10 @@ export function TaskDetailsOverlay({
   onClose: () => void;
   onSaved: (task: Task, boardId: string) => void;
   onInitiativesChanged: (initiatives: Initiative[]) => void;
+  isPage?: boolean;
+  onExpandToPage?: () => void;
+  isAssignmentsOpen?: boolean;
+  onCloseAssignments?: () => void;
 }) {
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? '');
@@ -464,7 +476,7 @@ export function TaskDetailsOverlay({
         title,
         description,
         priority,
-        state,
+        state: isPage ? task.state : state,
         assigned_to_id: assignedToId,
         complete_by: completeBy ? new Date(completeBy).toISOString() : null,
       });
@@ -514,22 +526,41 @@ export function TaskDetailsOverlay({
 
   return (
     <div
-      className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
+      className={isPage ? 'task-details-page' : 'fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4'}
+      onClick={isPage ? undefined : onClose}
     >
       <section
-        role="dialog"
-        aria-modal="true"
+        role={isPage ? 'region' : 'dialog'}
+        aria-modal={isPage ? undefined : 'true'}
         aria-labelledby="task-details-title"
-        className="max-h-[90vh] w-full max-w-6xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl"
+        className={isPage
+          ? 'task-details-page-content w-full rounded-xl bg-white p-4 sm:p-6'
+          : 'max-h-[90vh] w-full max-w-6xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl'}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-5 flex items-center justify-between">
           <h2 id="task-details-title" className="text-xl font-bold text-gray-800">Task details</h2>
-          <button type="button" aria-label="Close task details" onClick={onClose} className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100">×</button>
+          <div className="flex items-center gap-2">
+            {!isPage && onExpandToPage && (
+              <button
+                type="button"
+                aria-label="Open task page"
+                title="Open task page"
+                onClick={onExpandToPage}
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100"
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m13-5v3a2 2 0 0 1-2 2h-3M9 15l6-6m-5 0h5v5" />
+                </svg>
+              </button>
+            )}
+            {!isPage && (
+              <button type="button" aria-label="Close task details" onClick={onClose} className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100">×</button>
+            )}
+          </div>
         </div>
         <form onSubmit={handleSubmit}>
-          <div className="grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)]">
+          <div className={isPage ? 'task-details-page-grid' : 'grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)]'}>
             <div className="min-w-0 space-y-6">
               <div>
                 <label htmlFor="edit-task-title" className="mb-1 block text-sm font-medium text-gray-700">Title</label>
@@ -629,8 +660,31 @@ export function TaskDetailsOverlay({
                 </div>
               </section>
             </div>
-            <aside aria-label="Task details" className="space-y-4 rounded-lg bg-gray-50 p-4">
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500">Details</h3>
+            {isPage && isAssignmentsOpen && (
+              <button
+                type="button"
+                aria-label="Close assignments"
+                className="task-assignment-backdrop"
+                onClick={onCloseAssignments}
+              />
+            )}
+            <aside
+              hidden={isPage && !isAssignmentsOpen}
+              role={isPage ? 'dialog' : undefined}
+              aria-modal={isPage && isAssignmentsOpen ? 'true' : undefined}
+              aria-label={isPage ? 'Task assignments' : 'Task details'}
+              className={isPage ? 'task-assignment-panel' : 'space-y-4 rounded-lg bg-gray-50 p-4'}
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500">{isPage ? 'Assignments' : 'Details'}</h3>
+                {isPage && (
+                  <button type="button" aria-label="Close assignments" onClick={onCloseAssignments} className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m6 6 12 12M18 6 6 18" />
+                    </svg>
+                  </button>
+                )}
+              </div>
               <div>
                 <label htmlFor="edit-task-board" className="mb-1 block text-sm font-medium text-gray-700">Board</label>
                 <select id="edit-task-board" required value={boardId} onChange={(event) => setBoardId(event.target.value)} className="w-full rounded-lg border border-gray-300 bg-white p-2">
@@ -645,7 +699,7 @@ export function TaskDetailsOverlay({
                   <option value="High">High</option>
                 </select>
               </div>
-              <div>
+              {!isPage && <div>
                 <label htmlFor="edit-task-state" className="mb-1 block text-sm font-medium text-gray-700">State</label>
                 <select id="edit-task-state" value={state} onChange={(event) => setState(event.target.value as TaskState)} className="w-full rounded-lg border border-gray-300 bg-white p-2">
                   <option value="Backlog">Backlog</option>
@@ -653,7 +707,7 @@ export function TaskDetailsOverlay({
                   <option value="InProgress">In Progress</option>
                   <option value="Complete">Complete</option>
                 </select>
-              </div>
+              </div>}
               <div>
                 <label htmlFor="edit-task-assignee" className="mb-1 block text-sm font-medium text-gray-700">Assigned to</label>
                 <select id="edit-task-assignee" value={assignedToId} onChange={(event) => setAssignedToId(event.target.value)} className="w-full rounded-lg border border-gray-300 bg-white p-2">

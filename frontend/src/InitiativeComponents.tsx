@@ -96,17 +96,26 @@ export function CreateInitiativeOverlay({
   users,
   onClose,
   onCreated,
+  isPage = false,
 }: {
   users: TaskAssignee[];
   onClose: () => void;
   onCreated: (initiative: Initiative) => void;
+  isPage?: boolean;
 }) {
   return (
-    <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4">
-      <section role="dialog" aria-modal="true" aria-labelledby="create-initiative-title" className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+    <div className={isPage ? 'creation-page' : 'fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4'}>
+      <section
+        role={isPage ? 'region' : 'dialog'}
+        aria-modal={isPage ? undefined : 'true'}
+        aria-labelledby="create-initiative-title"
+        className={isPage
+          ? 'creation-page-content w-full rounded-xl bg-white p-5 shadow-sm sm:p-6'
+          : 'w-full max-w-lg rounded-xl bg-white p-6 shadow-xl'}
+      >
         <div className="mb-5 flex items-center justify-between">
           <h2 id="create-initiative-title" className="text-xl font-bold text-gray-800">Create initiative</h2>
-          <button type="button" aria-label="Close create initiative form" onClick={onClose} className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100">×</button>
+          <button type="button" aria-label={isPage ? 'Back from create initiative form' : 'Close create initiative form'} onClick={onClose} className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100">{isPage ? 'Back' : '×'}</button>
         </div>
         <InitiativeForm
           users={users}
@@ -145,13 +154,13 @@ export function InitiativesPage({
   }, [refreshToken]);
 
   return (
-    <section aria-labelledby="initiatives-title" className="mx-auto flex h-full max-w-3xl flex-col">
-      <header className="mb-6 flex items-start justify-between gap-4">
+    <section aria-labelledby="initiatives-title" className="initiatives-page mx-auto flex h-full w-full max-w-3xl flex-col">
+      <header className="initiatives-page-header mb-6 flex items-start justify-between gap-4">
         <div>
           <h2 id="initiatives-title" className="text-2xl font-bold text-gray-900">Your initiatives</h2>
           <p className="mt-1 text-sm text-gray-600">Group related tasks and track their progress.</p>
         </div>
-        <button type="button" onClick={onCreateInitiative} className="shrink-0 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+        <button type="button" onClick={onCreateInitiative} className="mobile-secondary-create shrink-0 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
           + New initiative
         </button>
       </header>
@@ -276,7 +285,7 @@ export function InitiativeDetailPage({
     : [];
 
   return (
-    <section aria-labelledby="initiative-detail-title" className="mx-auto h-full max-w-4xl overflow-y-auto">
+    <section aria-labelledby="initiative-detail-title" className="initiative-detail-page mx-auto h-full w-full max-w-4xl overflow-y-auto">
       <button type="button" onClick={onBack} className="mb-4 rounded-lg px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50">← All initiatives</button>
       {error && <p role="alert" className="mb-3 rounded bg-red-100 p-3 text-sm text-red-700">{error}</p>}
       {isEditing ? (
@@ -291,7 +300,7 @@ export function InitiativeDetailPage({
           />
         </div>
       ) : (
-        <header className="mb-6 rounded-xl border border-gray-200 bg-white p-5">
+        <header className="initiative-detail-header mb-6 rounded-xl border border-gray-200 bg-white p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 id="initiative-detail-title" className="text-2xl font-bold text-gray-900">{initiative.title}</h2>
@@ -306,7 +315,7 @@ export function InitiativeDetailPage({
         </header>
       )}
       <section aria-labelledby="initiative-tasks-title" className="rounded-xl border border-gray-200 bg-white">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 p-5">
+        <div className="initiative-task-tools flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 p-5">
           <div>
             <h3 id="initiative-tasks-title" className="font-semibold text-gray-900">Tasks</h3>
             <p className="text-sm text-gray-500">{tasks.filter((task) => task.state === 'Complete').length} of {tasks.length} complete</p>
@@ -354,7 +363,7 @@ export function InitiativeDetailPage({
           {tasks.length === 0 ? (
             <li className="px-5 py-8 text-center text-sm text-gray-500">No tasks in this initiative yet. Choose an existing task above to add it.</li>
           ) : tasks.map((task) => (
-            <li key={task.id} className="flex items-center justify-between gap-3 px-5 py-4">
+            <li key={task.id} className="initiative-task-item flex items-center justify-between gap-3 px-5 py-4">
               <div className="min-w-0">
                 <p className="truncate font-medium text-gray-900">{task.title}</p>
                 <p className="text-sm text-gray-500">{task.state} · {task.priority}</p>

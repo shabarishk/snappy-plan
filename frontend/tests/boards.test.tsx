@@ -277,7 +277,7 @@ describe('Boards', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Delete board' }));
       fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
   
-      expect(await screen.findByText("You don't have any boards yet. Create one below to get started.")).toBeTruthy();
+      expect(await screen.findByText("You don't have any boards yet. Create one to get started.")).toBeTruthy();
       expect(window.localStorage.getItem('snappy-plan-selected-board')).toBeNull();
       expect(deleteAttempts).toBe(2);
     });

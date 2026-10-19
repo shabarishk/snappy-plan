@@ -3,9 +3,9 @@ import { DndContext, DragOverlay, closestCorners, KeyboardSensor, PointerSensor,
 import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core';
 import { deleteBoard as persistDeleteBoard, getBoards, getInitiative, getInitiatives, getProfile, getTaskAssignees, getTasks, logout, moveTask as persistMoveTask, updateBoardOrder as persistBoardOrder } from './api';
 import type { Board, Initiative, TaskAssignee, UserProfile } from './api';
-import type { ColumnId, Task } from './taskModel';
+import type { ColumnId, Task, TaskState } from './taskModel';
 import type { AppPage } from './navigation';
-import { initiativeIdFromPath, pageFromPath, pathForPage } from './navigation';
+import { initiativeIdFromPath, pageFromPath, pathForPage, taskIdFromPath } from './navigation';
 import { BOARD_COLUMNS, COLUMNS, COLUMN_STATES, moveTaskToColumn, toBoardTask } from './taskModel';
 import { CreateTaskOverlay, TaskDetailsOverlay } from './TaskOverlays';
 import { BoardsPage, CreateBoardOverlay } from './BoardComponents';
@@ -148,6 +148,16 @@ function CheckboxFilter({
   );
 }
 
+const TASK_PROGRESSION: TaskState[] = ['Backlog', 'ToDo', 'InProgress', 'Complete'];
+const TASK_STATE_LABELS: Record<TaskState, string> = {
+  Backlog: 'Backlog',
+  ToDo: 'To Do',
+  InProgress: 'In Progress',
+  Complete: 'Complete',
+};
+
+const MOBILE_LAYOUT_QUERY = '(max-width: 767px), (orientation: portrait) and (max-width: 1024px)';
+
 const COMPLETED_TASK_RETENTION_MS = 24 * 60 * 60 * 1000;
 const BACKLOG_TASK_NOTIFICATION_MS = 5_000;
 
@@ -161,8 +171,19 @@ export function AuthenticatedBoard({
   onLoggedOut?: () => void;
 }) {
   const [currentPage, setCurrentPage] = useState<AppPage>(() => pageFromPath(window.location.pathname));
+  const [isMobileLayout, setIsMobileLayout] = useState(() =>
+    typeof window.matchMedia === 'function' && window.matchMedia(MOBILE_LAYOUT_QUERY).matches
+  );
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
+  const [expandedMobileFilter, setExpandedMobileFilter] = useState<'board' | 'initiative' | 'assignee' | null>(null);
+  const [isTaskMoveMenuOpen, setIsTaskMoveMenuOpen] = useState(false);
+  const [isTaskAssignmentsOpen, setIsTaskAssignmentsOpen] = useState(false);
   const isTaskPage = currentPage === 'board' || currentPage === 'backlog';
-  const needsInitiativeGrouping = isTaskPage || currentPage === 'tasks';
+  const isCreatePage = currentPage === 'create-task'
+    || currentPage === 'create-board'
+    || currentPage === 'create-initiative';
+  const needsInitiativeGrouping = isTaskPage || currentPage === 'tasks' || currentPage === 'task';
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [selectedTask, setSelectedTask] = useState<SelectedTask | null>(null);
   const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
@@ -181,6 +202,9 @@ export function AuthenticatedBoard({
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const createMenuRef = useRef<HTMLDivElement>(null);
+  const taskMoveMenuRef = useRef<HTMLDivElement>(null);
+  const taskReturnPageRef = useRef<AppPage>('board');
+  const createReturnPageRef = useRef<AppPage>('board');
   const [logoutError, setLogoutError] = useState('');
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
@@ -211,15 +235,34 @@ export function AuthenticatedBoard({
     [assignees]
   );
 
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const mediaQuery = window.matchMedia(MOBILE_LAYOUT_QUERY);
+    const updateLayout = () => {
+      setIsMobileLayout(mediaQuery.matches);
+      if (!mediaQuery.matches) {
+        setIsMobileSidebarOpen(false);
+        setIsMobileFiltersOpen(false);
+      }
+    };
+    mediaQuery.addEventListener('change', updateLayout);
+    return () => mediaQuery.removeEventListener('change', updateLayout);
+  }, []);
+
   const navigateToPage = (page: AppPage, initiativeId?: string, initiativeTitle?: string) => {
     const path = pathForPage(page, initiativeId, initiativeTitle);
     if (window.location.pathname !== path) {
       window.history.pushState({}, '', path);
     }
+    setIsMobileSidebarOpen(false);
+    setIsMobileFiltersOpen(false);
+    setIsTaskMoveMenuOpen(false);
+    setIsTaskAssignmentsOpen(false);
     setIsCreateMenuOpen(false);
     setIsCreateTaskOpen(false);
     setIsCreateBoardOpen(false);
     setIsCreateInitiativeOpen(false);
+    if (page !== 'task') setSelectedTask(null);
     if ((page === 'board' || page === 'backlog' || page === 'tasks') && !needsInitiativeGrouping) {
       setIsInitiativeGroupingLoading(true);
       setInitiativeGroupingError('');
@@ -227,6 +270,59 @@ export function AuthenticatedBoard({
     if (page === 'board' || page === 'backlog') setCurrentTime(Date.now());
     setCurrentPage(page);
   };
+
+  const openCreateItem = (item: 'task' | 'board' | 'initiative') => {
+    setIsCreateMenuOpen(false);
+    if (isMobileLayout) {
+      createReturnPageRef.current = currentPage;
+      navigateToPage(item === 'task' ? 'create-task' : item === 'board' ? 'create-board' : 'create-initiative');
+      return;
+    }
+    if (item === 'task') setIsCreateTaskOpen(true);
+    if (item === 'board') setIsCreateBoardOpen(true);
+    if (item === 'initiative') setIsCreateInitiativeOpen(true);
+  };
+
+  const returnFromCreatePage = () => navigateToPage(createReturnPageRef.current);
+
+  const handleTaskCreated = (task: Task, boardId: string) => {
+    if (boardId !== selectedBoardId) setIsLoading(true);
+    setSelectedBoardId(boardId);
+    window.localStorage.setItem('snappy-plan-selected-board', boardId);
+    setTasks((previous) => [...previous, { ...task, boardId }]);
+    if (task.columnId === 'backlog' && currentPage === 'board') {
+      setBacklogTaskNotification(task.title);
+    } else {
+      navigateToPage(task.columnId === 'backlog' ? 'backlog' : 'board');
+    }
+    setIsCreateTaskOpen(false);
+  };
+
+  const handleBoardCreated = (board: Board) => {
+    setBoards((current) => [...current, board]);
+    setSelectedBoardId(board.id);
+    window.localStorage.setItem('snappy-plan-selected-board', board.id);
+    setIsLoading(true);
+    setTasks([]);
+    setIsCreateBoardOpen(false);
+    if (currentPage === 'create-board') navigateToPage('board');
+  };
+
+  const handleInitiativeCreated = () => {
+    setInitiativeRefreshToken((version) => version + 1);
+    setIsCreateInitiativeOpen(false);
+    if (currentPage === 'create-initiative') returnFromCreatePage();
+  };
+
+  const handleSelectTask = (task: Task, boardId: string) => {
+    setSelectedTask({ task, boardId });
+    if (isMobileLayout) {
+      taskReturnPageRef.current = currentPage;
+      navigateToPage('task', task.id);
+    }
+  };
+
+  const returnFromTaskPage = () => navigateToPage(taskReturnPageRef.current);
 
   const handleInitiativeTitleChanged = useCallback((title: string) => {
     const initiativeId = initiativeIdFromPath(window.location.pathname);
@@ -240,11 +336,15 @@ export function AuthenticatedBoard({
       const page = pageFromPath(window.location.pathname);
       setCurrentPage(page);
       setIsProfileMenuOpen(false);
+      setIsMobileSidebarOpen(false);
+      setIsMobileFiltersOpen(false);
+      setIsTaskMoveMenuOpen(false);
+      setIsTaskAssignmentsOpen(false);
       setIsCreateTaskOpen(false);
       setIsCreateBoardOpen(false);
       setIsCreateInitiativeOpen(false);
       setIsCreateMenuOpen(false);
-      setSelectedTask(null);
+      if (page !== 'task') setSelectedTask(null);
       if (page === 'board' || page === 'backlog') setCurrentTime(Date.now());
       if ((page === 'board' || page === 'backlog' || page === 'tasks') && !needsInitiativeGrouping) {
         setIsInitiativeGroupingLoading(true);
@@ -303,6 +403,18 @@ export function AuthenticatedBoard({
     document.addEventListener('pointerdown', handlePointerDown);
     return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, [isCreateMenuOpen]);
+
+  useEffect(() => {
+    if (!isTaskMoveMenuOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && !taskMoveMenuRef.current?.contains(event.target)) {
+        setIsTaskMoveMenuOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [isTaskMoveMenuOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -407,6 +519,9 @@ export function AuthenticatedBoard({
           ? task
           : current
       ));
+      setSelectedTask((current) => current?.task.id === task.id && current.task.columnId === destination
+        ? { ...current, task }
+        : current);
       setMoveError(err instanceof Error ? err.message : 'Failed to move task');
     }
   };
@@ -583,11 +698,85 @@ export function AuthenticatedBoard({
   const visibleColumns = currentPage === 'backlog'
     ? COLUMNS.filter((column) => column.id === 'backlog')
     : BOARD_COLUMNS;
+  const taskPageId = currentPage === 'task' ? taskIdFromPath(window.location.pathname) : null;
+  const taskPageTask = taskPageId
+    ? tasks.find((task) => task.id === taskPageId)
+      ?? (selectedTask?.task.id === taskPageId ? selectedTask.task : undefined)
+    : undefined;
+  const taskPageSelection = taskPageTask
+    ? {
+      task: taskPageTask,
+      boardId: taskPageTask.boardId ?? selectedTask?.boardId ?? selectedBoardId,
+    }
+    : null;
+  const taskProgressIndex = taskPageTask ? TASK_PROGRESSION.indexOf(taskPageTask.state) : -1;
+  const forwardTaskState = taskProgressIndex >= 0 ? TASK_PROGRESSION[taskProgressIndex + 1] : undefined;
+  const backwardTaskState = taskProgressIndex > 0 ? TASK_PROGRESSION[taskProgressIndex - 1] : undefined;
+
+  const moveTaskPageState = (nextState: TaskState) => {
+    if (!taskPageSelection) return;
+    const destination = COLUMNS.find((column) => COLUMN_STATES[column.id] === nextState);
+    if (!destination) {
+      setMoveError('Unable to determine the task destination.');
+      return;
+    }
+    const currentTask = taskPageSelection.task;
+    if (currentTask.columnId === destination.id) return;
+    const movedTask = moveTaskToColumn(currentTask, destination.id);
+    setTasks((previous) => previous.map((task) => task.id === currentTask.id ? movedTask : task));
+    setSelectedTask({ ...taskPageSelection, task: movedTask });
+    setMoveError('');
+    setIsTaskMoveMenuOpen(false);
+    void persistTaskMove(currentTask, destination.id);
+  };
 
   const profileDisplayName = profile?.preferred_name?.trim() || profile?.full_name || '';
   const profileInitial = profileDisplayName.charAt(0).toUpperCase()
     || profile?.username.charAt(0).toUpperCase()
     || '?';
+  const activeFilterCount = Number(!isAllSelected(boardFilterOptions, boardFilterIds))
+    + Number(!isAllSelected(initiativeFilterOptions, initiativeFilterIds))
+    + Number(!isAllSelected(assigneeFilterOptions, assigneeFilterIds));
+
+  const closeMobileFilters = () => {
+    setIsMobileFiltersOpen(false);
+    setExpandedMobileFilter(null);
+  };
+  const mobileFilterSections: {
+    id: 'board' | 'initiative' | 'assignee';
+    title: string;
+    options: FilterOption[];
+    selectedValues: FilterSelection;
+    onToggle: (value: string) => void;
+    onToggleAll: () => void;
+    disabled?: boolean;
+  }[] = [
+    {
+      id: 'board',
+      title: 'Board',
+      options: boardFilterOptions,
+      selectedValues: boardFilterIds,
+      onToggle: (id) => setBoardFilterIds((selected) => toggleFilterOption(boardFilterOptions, selected, id)),
+      onToggleAll: () => setBoardFilterIds((selected) => toggleAllFilter(boardFilterOptions, selected)),
+    },
+    {
+      id: 'initiative',
+      title: 'Initiative',
+      options: initiativeFilterOptions,
+      selectedValues: initiativeFilterIds,
+      onToggle: (id) => setInitiativeFilterIds((selected) => toggleFilterOption(initiativeFilterOptions, selected, id)),
+      onToggleAll: () => setInitiativeFilterIds((selected) => toggleAllFilter(initiativeFilterOptions, selected)),
+      disabled: isInitiativeGroupingLoading,
+    },
+    {
+      id: 'assignee',
+      title: 'Assignee',
+      options: assigneeFilterOptions,
+      selectedValues: assigneeFilterIds,
+      onToggle: (id) => setAssigneeFilterIds((selected) => toggleFilterOption(assigneeFilterOptions, selected, id)),
+      onToggleAll: () => setAssigneeFilterIds((selected) => toggleAllFilter(assigneeFilterOptions, selected)),
+    },
+  ];
 
   const handleLogout = async () => {
     setLogoutError('');
@@ -603,19 +792,32 @@ export function AuthenticatedBoard({
   };
 
   return (
-    <div className="flex h-screen min-h-0 bg-gray-200 font-sans">
-      <aside aria-label="Sidebar" className="relative z-20 flex w-16 shrink-0 flex-col items-center border-r border-gray-200 bg-white py-4">
+    <div className="app-layout flex h-screen min-h-0 bg-gray-200 font-sans">
+      {isMobileLayout && isMobileSidebarOpen && (
+        <button
+          type="button"
+          aria-label="Close navigation menu"
+          className="mobile-sidebar-backdrop"
+          onClick={() => setIsMobileSidebarOpen(false)}
+        />
+      )}
+      <aside
+        aria-label="Sidebar"
+        aria-hidden={isMobileLayout && !isMobileSidebarOpen}
+        className={`app-sidebar relative z-20 flex w-16 shrink-0 flex-col items-center border-r border-gray-200 bg-white py-4 ${isMobileSidebarOpen ? 'app-sidebar-open' : ''}`}
+      >
         <button
           type="button"
           aria-label="Home"
           title="Home"
           aria-current={currentPage === 'board' || currentPage === 'backlog' ? 'page' : undefined}
           onClick={() => navigateToPage('board')}
-          className={`flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'board' || currentPage === 'backlog' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+          className={`sidebar-navigation-item flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'board' || currentPage === 'backlog' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
         >
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
             <path strokeLinecap="round" strokeLinejoin="round" d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V10Z" />
           </svg>
+          <span className="sidebar-label">Home</span>
         </button>
         <button
           type="button"
@@ -628,12 +830,13 @@ export function AuthenticatedBoard({
             setSelectedTask(null);
             navigateToPage('tasks');
           }}
-          className={`mt-2 flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'tasks' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+          className={`sidebar-navigation-item mt-2 flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'tasks' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
         >
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
             <rect x="3" y="3" width="18" height="18" rx="3" />
             <path strokeLinecap="round" strokeLinejoin="round" d="m8 12 3 3 5-6" />
           </svg>
+          <span className="sidebar-label">Tasks</span>
         </button>
         <button
           type="button"
@@ -646,11 +849,12 @@ export function AuthenticatedBoard({
             setSelectedTask(null);
             navigateToPage('initiatives');
           }}
-          className={`mt-2 flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'initiatives' || currentPage === 'initiative' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+          className={`sidebar-navigation-item mt-2 flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'initiatives' || currentPage === 'initiative' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
         >
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
             <path strokeLinecap="round" strokeLinejoin="round" d="M13 2 4 14h7l-1 8 10-12h-7l1-8Z" />
           </svg>
+          <span className="sidebar-label">Initiatives</span>
         </button>
         <button
           type="button"
@@ -663,12 +867,13 @@ export function AuthenticatedBoard({
             setSelectedTask(null);
             navigateToPage('boards');
           }}
-          className={`mt-2 flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'boards' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+          className={`sidebar-navigation-item mt-2 flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'boards' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
         >
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
             <rect x="3" y="4" width="18" height="16" rx="2" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 4v16m6-16v16" />
           </svg>
+          <span className="sidebar-label">Boards</span>
         </button>
         <div ref={profileMenuRef} className="mt-auto flex flex-col items-center gap-2">
           {profile?.role === 'admin' && (
@@ -683,12 +888,13 @@ export function AuthenticatedBoard({
                 setSelectedTask(null);
                 navigateToPage('admin');
               }}
-              className={`flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'admin' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
+              className={`sidebar-navigation-item flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'admin' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
             >
               <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 3 4.5 6v5.5c0 4.8 3.2 7.8 7.5 9.5 4.3-1.7 7.5-4.7 7.5-9.5V6L12 3Z" />
                 <path strokeLinecap="round" strokeLinejoin="round" d="m9 12 2 2 4-4" />
               </svg>
+              <span className="sidebar-label">Admin</span>
             </button>
           )}
           <button
@@ -698,14 +904,15 @@ export function AuthenticatedBoard({
             aria-expanded={isProfileMenuOpen}
             title={profileDisplayName || 'User profile'}
             onClick={() => setIsProfileMenuOpen((isOpen) => !isOpen)}
-            className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full bg-blue-100 font-bold text-blue-700 hover:bg-blue-200"
+            className="sidebar-user-button flex h-11 w-11 items-center justify-center overflow-hidden rounded-full bg-blue-100 font-bold text-blue-700 hover:bg-blue-200"
           >
             {profile?.profile_picture
               ? <img src={profile.profile_picture} alt="" className="h-full w-full object-cover" />
               : profileInitial}
+            {isMobileLayout && <span className="sidebar-label">{profileDisplayName || profile?.username || 'Account'}</span>}
           </button>
           {isProfileMenuOpen && (
-            <div role="menu" aria-label="User menu" className="absolute bottom-4 left-full ml-2 w-40 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
+            <div role="menu" aria-label="User menu" className="sidebar-user-menu absolute bottom-4 left-full ml-2 w-40 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
               {logoutError && <p role="alert" className="px-3 py-2 text-xs text-red-700">{logoutError}</p>}
               <button type="button" role="menuitem" onClick={() => {
                 setIsProfileMenuOpen(false);
@@ -726,55 +933,75 @@ export function AuthenticatedBoard({
           )}
         </div>
       </aside>
-      <div className="flex min-w-0 flex-1 flex-col">
-      <header className="bg-white p-4 shadow-sm z-10 grid grid-cols-1 gap-2 shrink-0 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] sm:items-center">
-        {currentPage !== 'board' && currentPage !== 'backlog' && (
-          <h1 className="text-xl font-extrabold tracking-tight text-blue-600 sm:col-start-1 sm:row-start-1">
-            {currentPage === 'tasks' ? 'Tasks' : currentPage === 'admin' ? 'Admin' : currentPage === 'settings' ? 'Settings' : currentPage === 'boards' ? 'Boards' : currentPage === 'initiatives' || currentPage === 'initiative' ? 'Initiatives' : 'Profile'}
-          </h1>
+      <div className="app-content flex min-w-0 flex-1 flex-col">
+      <header className={`app-header bg-white p-4 shadow-sm z-10 grid grid-cols-1 gap-2 shrink-0 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] sm:items-center ${isTaskPage ? 'home-header' : ''}`}>
+        {currentPage === 'task' || isCreatePage ? (
+          <button
+            type="button"
+            aria-label={currentPage === 'task' ? 'Back to tasks' : 'Back from creation page'}
+            onClick={currentPage === 'task' ? returnFromTaskPage : returnFromCreatePage}
+            className="mobile-menu-button"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-6 w-6">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m15 18-6-6 6-6M9 12h12" />
+            </svg>
+          </button>
+        ) : (
+          <button
+            type="button"
+            aria-label="Open navigation menu"
+            aria-expanded={isMobileSidebarOpen}
+            onClick={() => setIsMobileSidebarOpen(true)}
+            className="mobile-menu-button"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-6 w-6">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
         )}
-        {currentPage !== 'profile' && currentPage !== 'settings' && (
-          <div className="flex w-full min-w-0 max-w-2xl items-center gap-2 justify-self-center sm:col-start-2 sm:row-start-1">
+        {currentPage !== 'board' && currentPage !== 'backlog' && (
+          currentPage !== 'task' && (
+          <h1 className="text-xl font-extrabold tracking-tight text-blue-600 sm:col-start-1 sm:row-start-1">
+            {currentPage === 'create-task' ? 'Create task' : currentPage === 'create-board' ? 'Create board' : currentPage === 'create-initiative' ? 'Create initiative' : currentPage === 'tasks' ? 'Tasks' : currentPage === 'admin' ? 'Admin' : currentPage === 'settings' ? 'Settings' : currentPage === 'boards' ? 'Boards' : currentPage === 'initiatives' || currentPage === 'initiative' ? 'Initiatives' : 'Profile'}
+          </h1>
+          )
+        )}
+        {(currentPage !== 'profile' && currentPage !== 'settings' || isMobileLayout) && (
+          <div className="header-search-actions flex w-full min-w-0 max-w-2xl items-center gap-2 justify-self-center sm:col-start-2 sm:row-start-1">
             <TaskSearch
               boards={boards}
-              onSelectTask={(task, boardId) => setSelectedTask({ task, boardId })}
+              onSelectTask={handleSelectTask}
             />
-            <div ref={createMenuRef} className="relative shrink-0">
+            {!isCreatePage && (isMobileLayout || currentPage !== 'profile' && currentPage !== 'settings') && (
+            <div ref={createMenuRef} className={isMobileLayout ? 'mobile-create-menu' : 'relative shrink-0'}>
               <button
                 type="button"
                 aria-haspopup="menu"
                 aria-expanded={isCreateMenuOpen}
+                aria-label="+ Create"
                 onClick={() => setIsCreateMenuOpen((open) => !open)}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                className="create-menu-button rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
               >
-                + Create
+                <span aria-hidden="true" className="create-menu-plus">+</span>
+                <span className="create-menu-label">Create</span>
               </button>
               {isCreateMenuOpen && (
                 <div role="menu" aria-label="Create" className="absolute right-0 top-full z-30 mt-2 w-48 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
-                  <button type="button" role="menuitem" onClick={() => {
-                    setIsCreateMenuOpen(false);
-                    setIsCreateTaskOpen(true);
-                  }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
+                  <button type="button" role="menuitem" onClick={() => openCreateItem('task')} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
                     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
                       <rect x="3" y="3" width="18" height="18" rx="3" />
                       <path strokeLinecap="round" strokeLinejoin="round" d="m8 12 3 3 5-6" />
                     </svg>
                     Task
                   </button>
-                  <button type="button" role="menuitem" onClick={() => {
-                    setIsCreateMenuOpen(false);
-                    setIsCreateBoardOpen(true);
-                  }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
+                  <button type="button" role="menuitem" onClick={() => openCreateItem('board')} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
                     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
                       <rect x="3" y="4" width="18" height="16" rx="2" />
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 4v16m6-16v16" />
                     </svg>
                     Board
                   </button>
-                  <button type="button" role="menuitem" onClick={() => {
-                    setIsCreateMenuOpen(false);
-                    setIsCreateInitiativeOpen(true);
-                  }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
+                  <button type="button" role="menuitem" onClick={() => openCreateItem('initiative')} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
                     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M13 2 4 14h7l-1 8 10-12h-7l1-8Z" />
                     </svg>
@@ -783,11 +1010,12 @@ export function AuthenticatedBoard({
                 </div>
               )}
             </div>
+            )}
           </div>
         )}
         <NotificationBell />
       </header>
-      {currentPage !== 'profile' && currentPage !== 'settings' && isCreateTaskOpen && (
+      {currentPage !== 'profile' && currentPage !== 'settings' && !isCreatePage && isCreateTaskOpen && (
         <CreateTaskOverlay
           boards={boards}
           selectedBoardId={selectedBoardId}
@@ -795,18 +1023,7 @@ export function AuthenticatedBoard({
           currentUserId={profile?.username ?? ''}
           boardInitiatives={initiativesByBoardId}
           onClose={() => setIsCreateTaskOpen(false)}
-          onCreated={(task, boardId) => {
-            if (boardId !== selectedBoardId) setIsLoading(true);
-            setSelectedBoardId(boardId);
-            window.localStorage.setItem('snappy-plan-selected-board', boardId);
-            setTasks((previous) => [...previous, { ...task, boardId }]);
-            if (task.columnId === 'backlog' && currentPage === 'board') {
-              setBacklogTaskNotification(task.title);
-            } else {
-              navigateToPage(task.columnId === 'backlog' ? 'backlog' : 'board');
-            }
-            setIsCreateTaskOpen(false);
-          }}
+          onCreated={handleTaskCreated}
         />
       )}
       {backlogTaskNotification && (
@@ -827,31 +1044,77 @@ export function AuthenticatedBoard({
           </button>
         </div>
       )}
-      {currentPage !== 'profile' && currentPage !== 'settings' && isCreateBoardOpen && (
+      {currentPage !== 'profile' && currentPage !== 'settings' && !isCreatePage && isCreateBoardOpen && (
         <CreateBoardOverlay
           users={assignees}
           onClose={() => setIsCreateBoardOpen(false)}
-          onCreated={(board) => {
-            setBoards((current) => [...current, board]);
-            setSelectedBoardId(board.id);
-            window.localStorage.setItem('snappy-plan-selected-board', board.id);
-            setIsLoading(true);
-            setTasks([]);
-            setIsCreateBoardOpen(false);
-          }}
+          onCreated={handleBoardCreated}
         />
       )}
-      {currentPage !== 'profile' && currentPage !== 'settings' && isCreateInitiativeOpen && (
+      {currentPage !== 'profile' && currentPage !== 'settings' && !isCreatePage && isCreateInitiativeOpen && (
         <CreateInitiativeOverlay
           users={assignees}
           onClose={() => setIsCreateInitiativeOpen(false)}
-          onCreated={() => {
-            setInitiativeRefreshToken((version) => version + 1);
-            setIsCreateInitiativeOpen(false);
-          }}
+          onCreated={handleInitiativeCreated}
         />
       )}
-      {selectedTask && currentPage !== 'profile' && currentPage !== 'settings' && (
+      {currentPage === 'task' && taskPageSelection && (
+        <div className="task-page-toolbar">
+          <div ref={taskMoveMenuRef} className="relative">
+            <button
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={isTaskMoveMenuOpen}
+              onClick={() => setIsTaskMoveMenuOpen((open) => !open)}
+              className="flex min-h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              Move task
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+                <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+            {isTaskMoveMenuOpen && (
+              <div role="menu" aria-label="Move task" className="absolute left-0 top-full z-30 mt-2 w-56 rounded-lg border border-gray-200 bg-white p-1 shadow-xl">
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!forwardTaskState}
+                  onClick={() => {
+                    if (forwardTaskState) moveTaskPageState(forwardTaskState);
+                  }}
+                  className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                >
+                  {isMobileLayout
+                    ? forwardTaskState ? TASK_STATE_LABELS[forwardTaskState] : 'No further step'
+                    : forwardTaskState ? `Forward: ${TASK_STATE_LABELS[forwardTaskState]}` : 'Forward: No further step'}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!backwardTaskState}
+                  onClick={() => {
+                    if (backwardTaskState) moveTaskPageState(backwardTaskState);
+                  }}
+                  className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                >
+                  {isMobileLayout
+                    ? backwardTaskState ? TASK_STATE_LABELS[backwardTaskState] : 'No earlier step'
+                    : backwardTaskState ? `Backward: ${TASK_STATE_LABELS[backwardTaskState]}` : 'Backward: No earlier step'}
+                </button>
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsTaskAssignmentsOpen(true)}
+            className="min-h-10 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+          >
+            View assignments
+          </button>
+          {moveError && <p role="alert" className="task-page-move-error">{moveError}</p>}
+        </div>
+      )}
+      {selectedTask && currentPage !== 'task' && currentPage !== 'profile' && currentPage !== 'settings' && (
         <TaskDetailsOverlay
           key={selectedTask.task.id}
           task={selectedTask.task}
@@ -862,6 +1125,10 @@ export function AuthenticatedBoard({
           linkedInitiatives={taskInitiatives[selectedTask.task.id] ?? []}
           selectedBoardId={selectedTask.boardId}
           onClose={() => setSelectedTask(null)}
+          onExpandToPage={() => {
+            taskReturnPageRef.current = currentPage;
+            navigateToPage('task', selectedTask.task.id);
+          }}
           onInitiativesChanged={(updatedInitiatives) => {
             setTaskInitiatives((previous) => ({
               ...previous,
@@ -879,8 +1146,33 @@ export function AuthenticatedBoard({
       )}
 
       {/* Main content area takes up remaining height */}
-      <main className={`board-main flex-1 p-4 ${(currentPage === 'board' || currentPage === 'backlog') ? 'board-main-grouped' : ''}`}>
-        {currentPage === 'admin' ? (
+      <main className={`board-main flex-1 p-4 ${isTaskPage ? 'board-main-grouped' : ''} ${currentPage === 'task' ? 'board-main-task-page' : ''}`}>
+        {currentPage === 'create-task' ? (
+          <CreateTaskOverlay
+            boards={boards}
+            selectedBoardId={selectedBoardId}
+            assignees={assignees}
+            currentUserId={profile?.username ?? ''}
+            boardInitiatives={initiativesByBoardId}
+            onClose={returnFromCreatePage}
+            onCreated={handleTaskCreated}
+            isPage
+          />
+        ) : currentPage === 'create-board' ? (
+          <CreateBoardOverlay
+            users={assignees}
+            onClose={returnFromCreatePage}
+            onCreated={handleBoardCreated}
+            isPage
+          />
+        ) : currentPage === 'create-initiative' ? (
+          <CreateInitiativeOverlay
+            users={assignees}
+            onClose={returnFromCreatePage}
+            onCreated={handleInitiativeCreated}
+            isPage
+          />
+        ) : currentPage === 'admin' ? (
           profile?.role === 'admin'
             ? <AdminPage currentUsername={profile.username} />
             : <p role="alert" className="p-4 text-sm text-red-700">Administrator access required.</p>
@@ -898,6 +1190,42 @@ export function AuthenticatedBoard({
               ));
             }} />
             : <p role={loadError ? 'alert' : undefined} className="p-4 text-sm text-gray-600">{loadError || 'Loading profile…'}</p>
+        ) : currentPage === 'task' ? (
+          taskPageSelection ? (
+            <TaskDetailsOverlay
+              key={taskPageSelection.task.id}
+              task={taskPageSelection.task}
+              boards={boards}
+              assignees={assignees}
+              initiatives={initiatives}
+              boardInitiatives={initiativesByBoardId[taskPageSelection.boardId] ?? []}
+              linkedInitiatives={taskInitiatives[taskPageSelection.task.id] ?? []}
+              selectedBoardId={taskPageSelection.boardId}
+              isPage
+              isAssignmentsOpen={isTaskAssignmentsOpen}
+              onCloseAssignments={() => setIsTaskAssignmentsOpen(false)}
+              onClose={returnFromTaskPage}
+              onInitiativesChanged={(updatedInitiatives) => {
+                setTaskInitiatives((previous) => ({
+                  ...previous,
+                  [taskPageSelection.task.id]: updatedInitiatives,
+                }));
+              }}
+              onSaved={(updatedTask, assignedBoardId) => {
+                const savedTask = { ...updatedTask, boardId: assignedBoardId };
+                setTasks((previous) => [
+                  ...previous.filter((task) => task.id !== savedTask.id),
+                  savedTask,
+                ]);
+                setSelectedTask({ task: savedTask, boardId: assignedBoardId });
+                setIsTaskAssignmentsOpen(false);
+              }}
+            />
+          ) : (
+            <p role={loadError ? 'alert' : 'status'} className="p-4 text-sm text-gray-600">
+              {loadError || (isLoading ? 'Loading task…' : 'Task not found.')}
+            </p>
+          )
         ) : currentPage === 'tasks' ? (
           <TasksPage
             tasks={tasks}
@@ -906,6 +1234,7 @@ export function AuthenticatedBoard({
             assignees={assignees}
             taskInitiatives={taskInitiatives}
             isLoading={isLoading}
+            isMobileLayout={isMobileLayout}
             loadError={loadError}
             isInitiativeLoading={isInitiativeGroupingLoading}
             initiativeError={initiativeGroupingError}
@@ -914,7 +1243,7 @@ export function AuthenticatedBoard({
               setIsInitiativeGroupingLoading(true);
               setInitiativeGroupingRefreshToken((version) => version + 1);
             }}
-            onSelectTask={(task) => setSelectedTask({ task, boardId: task.boardId ?? selectedBoardId })}
+            onSelectTask={(task) => handleSelectTask(task, task.boardId ?? selectedBoardId)}
           />
         ) : currentPage === 'boards' ? (
           profile
@@ -968,8 +1297,8 @@ export function AuthenticatedBoard({
           />
         ) : (
           <>
-          <div className="mb-4 border-b border-gray-200">
-            <nav aria-label="Main navigation" className="flex items-center gap-2">
+          <div className="home-tabs-row mb-4 border-b border-gray-200">
+            <nav aria-label="Main navigation" className="flex min-w-0 flex-1 items-center gap-2">
               <button
                 type="button"
                 aria-current={currentPage === 'board' ? 'page' : undefined}
@@ -1001,65 +1330,175 @@ export function AuthenticatedBoard({
                 )}
               </button>
             </nav>
+            {isMobileLayout && (
+              <button
+                type="button"
+                aria-label="Open filters"
+                aria-haspopup="dialog"
+                aria-expanded={isMobileFiltersOpen}
+                onClick={() => setIsMobileFiltersOpen(true)}
+                className="mobile-filter-trigger relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100"
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M7 12h10m-7 5h4" />
+                  <circle cx="8" cy="7" r="1.5" fill="currentColor" stroke="none" />
+                  <circle cx="15" cy="12" r="1.5" fill="currentColor" stroke="none" />
+                  <circle cx="11" cy="17" r="1.5" fill="currentColor" stroke="none" />
+                </svg>
+                {activeFilterCount > 0 && (
+                  <span aria-label={`${activeFilterCount} active filters`} className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 px-1 text-[0.65rem] font-semibold leading-none text-white">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+            )}
           </div>
           {(loadError || moveError || boardOrderError) && <p role="alert" className="mb-3 rounded bg-red-100 p-3 text-sm text-red-700">{loadError || moveError || boardOrderError}</p>}
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <CheckboxFilter
-              label="Board"
-              ariaLabel="Filter by board"
-              allLabel="All"
-              options={boardFilterOptions}
-              selectedValues={boardFilterIds}
-              onToggle={(id) => setBoardFilterIds((selected) =>
-                toggleFilterOption(boardFilterOptions, selected, id)
-              )}
-              onToggleAll={() => setBoardFilterIds((selected) =>
-                toggleAllFilter(boardFilterOptions, selected)
-              )}
-            />
-            <CheckboxFilter
-              label="Initiative"
-              ariaLabel="Filter by initiative"
-              allLabel="All"
-              options={initiativeFilterOptions}
-              selectedValues={initiativeFilterIds}
-              onToggle={(id) => setInitiativeFilterIds((selected) =>
-                toggleFilterOption(initiativeFilterOptions, selected, id)
-              )}
-              onToggleAll={() => setInitiativeFilterIds((selected) =>
-                toggleAllFilter(initiativeFilterOptions, selected)
-              )}
-              disabled={isInitiativeGroupingLoading}
-            />
-            <CheckboxFilter
-              label="Assignee"
-              ariaLabel="Filter by assignee"
-              allLabel="All"
-              options={assigneeFilterOptions}
-              selectedValues={assigneeFilterIds}
-              onToggle={(id) => setAssigneeFilterIds((selected) =>
-                toggleFilterOption(assigneeFilterOptions, selected, id)
-              )}
-              onToggleAll={() => setAssigneeFilterIds((selected) =>
-                toggleAllFilter(assigneeFilterOptions, selected)
-              )}
-            />
+        {!isMobileLayout && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <CheckboxFilter
+                label="Board"
+                ariaLabel="Filter by board"
+                allLabel="All"
+                options={boardFilterOptions}
+                selectedValues={boardFilterIds}
+                onToggle={(id) => setBoardFilterIds((selected) =>
+                  toggleFilterOption(boardFilterOptions, selected, id)
+                )}
+                onToggleAll={() => setBoardFilterIds((selected) =>
+                  toggleAllFilter(boardFilterOptions, selected)
+                )}
+              />
+              <CheckboxFilter
+                label="Initiative"
+                ariaLabel="Filter by initiative"
+                allLabel="All"
+                options={initiativeFilterOptions}
+                selectedValues={initiativeFilterIds}
+                onToggle={(id) => setInitiativeFilterIds((selected) =>
+                  toggleFilterOption(initiativeFilterOptions, selected, id)
+                )}
+                onToggleAll={() => setInitiativeFilterIds((selected) =>
+                  toggleAllFilter(initiativeFilterOptions, selected)
+                )}
+                disabled={isInitiativeGroupingLoading}
+              />
+              <CheckboxFilter
+                label="Assignee"
+                ariaLabel="Filter by assignee"
+                allLabel="All"
+                options={assigneeFilterOptions}
+                selectedValues={assigneeFilterIds}
+                onToggle={(id) => setAssigneeFilterIds((selected) =>
+                  toggleFilterOption(assigneeFilterOptions, selected, id)
+                )}
+                onToggleAll={() => setAssigneeFilterIds((selected) =>
+                  toggleAllFilter(assigneeFilterOptions, selected)
+                )}
+              />
+            </div>
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <span>Group by:</span>
+              <select
+                aria-label="Group tasks by"
+                value={groupBy}
+                onChange={(event) => setGroupBy(event.target.value as TaskGroupBy)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-2"
+              >
+                <option value="board">Board</option>
+                <option value="initiative">Initiative</option>
+                <option value="assignee">Assignee</option>
+              </select>
+            </label>
           </div>
-          <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-            <span>Group by:</span>
-            <select
-              aria-label="Group tasks by"
-              value={groupBy}
-              onChange={(event) => setGroupBy(event.target.value as TaskGroupBy)}
-              className="rounded-lg border border-gray-300 bg-white px-3 py-2"
-            >
-              <option value="board">Board</option>
-              <option value="initiative">Initiative</option>
-              <option value="assignee">Assignee</option>
-            </select>
-          </label>
-        </div>
+        )}
+        {isMobileLayout && isMobileFiltersOpen && (
+          <>
+            <button
+              type="button"
+              aria-label="Close task filters"
+              className="mobile-filter-backdrop"
+              onClick={closeMobileFilters}
+            />
+            <section role="dialog" aria-modal="true" aria-label="Task filters" className="mobile-filter-panel">
+              <header className="flex items-center justify-between border-b border-gray-200 px-4 py-4">
+                <h2 className="text-lg font-semibold text-gray-900">Filters</h2>
+                <button
+                  type="button"
+                  aria-label="Close filters"
+                  onClick={closeMobileFilters}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100"
+                >
+                  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m6 6 12 12M18 6 6 18" />
+                  </svg>
+                </button>
+              </header>
+              <div className="space-y-3 p-4">
+                {mobileFilterSections.map((section) => (
+                  <section key={section.id} className="rounded-lg border border-gray-200">
+                    <button
+                      type="button"
+                      aria-expanded={expandedMobileFilter === section.id}
+                      aria-controls={`mobile-filter-${section.id}`}
+                      onClick={() => setExpandedMobileFilter((expanded) => expanded === section.id ? null : section.id)}
+                      className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-semibold text-gray-800"
+                    >
+                      {section.title}
+                      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`h-4 w-4 transition-transform ${expandedMobileFilter === section.id ? 'rotate-180' : ''}`}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
+                      </svg>
+                    </button>
+                    {expandedMobileFilter === section.id && (
+                      <div id={`mobile-filter-${section.id}`} className="border-t border-gray-200 p-4">
+                        <div role="group" aria-label={`${section.title} options`} className="space-y-2">
+                          <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-gray-700">
+                            <input
+                              type="checkbox"
+                              aria-label={`${section.title}: All`}
+                              checked={isAllSelected(section.options, section.selectedValues)}
+                              disabled={section.disabled}
+                              onChange={section.onToggleAll}
+                              className="accent-blue-600"
+                            />
+                            All
+                          </label>
+                          {section.options.map((option) => (
+                            <label key={option.value} className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
+                              <input
+                                type="checkbox"
+                                aria-label={`${section.title}: ${option.label}`}
+                                checked={section.selectedValues === null || section.selectedValues.includes(option.value)}
+                                disabled={section.disabled}
+                                onChange={() => section.onToggle(option.value)}
+                                className="accent-blue-600"
+                              />
+                              {option.label}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </section>
+                ))}
+                {activeFilterCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBoardFilterIds(null);
+                      setInitiativeFilterIds(null);
+                      setAssigneeFilterIds(null);
+                    }}
+                    className="w-full rounded-lg px-4 py-2 text-left text-sm font-medium text-blue-700 hover:bg-blue-50"
+                  >
+                    Clear all filters
+                  </button>
+                )}
+              </div>
+            </section>
+          </>
+        )}
         {initiativeGroupingError && groupBy !== 'initiative' && isAllSelected(initiativeFilterOptions, initiativeFilterIds) && (
           <div className="mb-3 flex items-center gap-3 rounded bg-red-100 p-3 text-sm text-red-700">
             <p role="alert">{initiativeGroupingError}</p>
@@ -1102,10 +1541,30 @@ export function AuthenticatedBoard({
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
           >
-            <div role="region" aria-label={currentPage === 'backlog' ? 'Backlog tasks' : 'Kanban board columns'} className="space-y-6 pb-4">
-              {taskGroups.length === 0 ? (
-                <p className="py-8 text-center text-sm text-gray-500">No tasks to display.</p>
-              ) : taskGroups.map((group) => {
+            {isMobileLayout ? (
+              <div
+                role="region"
+                aria-label={currentPage === 'backlog' ? 'Mobile backlog tasks' : 'Mobile active task sections'}
+                className="mobile-task-columns pb-4"
+              >
+                {(currentPage === 'backlog' ? COLUMNS.filter((column) => column.id === 'backlog') : BOARD_COLUMNS).map((column) => (
+                  <Column
+                    key={`mobile-${column.id}`}
+                    column={column}
+                    tasks={filteredTasks.filter((task) => task.columnId === column.id)}
+                    onMoveToTodo={currentPage === 'backlog' ? moveBacklogTaskToTodo : undefined}
+                    onSelectTask={(task) => handleSelectTask(task, task.boardId ?? selectedBoardId)}
+                    droppableId={`mobile:${column.id}`}
+                    taskIdPrefix="mobile"
+                    sortByCompleteBy={currentPage === 'backlog'}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div role="region" aria-label={currentPage === 'backlog' ? 'Backlog tasks' : 'Kanban board columns'} className="space-y-6 pb-4">
+                {taskGroups.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-gray-500">No tasks to display.</p>
+                ) : taskGroups.map((group) => {
                 const groupTasks = currentPage === 'backlog'
                   ? group.tasks.filter((task) => task.columnId === 'backlog')
                   : group.tasks;
@@ -1152,7 +1611,7 @@ export function AuthenticatedBoard({
                           column={column}
                           tasks={groupTasks.filter((task) => task.columnId === column.id)}
                           onMoveToTodo={currentPage === 'backlog' ? moveBacklogTaskToTodo : undefined}
-                          onSelectTask={(task) => setSelectedTask({ task, boardId: task.boardId ?? selectedBoardId })}
+                          onSelectTask={(task) => handleSelectTask(task, task.boardId ?? selectedBoardId)}
                           droppableId={`${group.id}:${column.id}`}
                           taskIdPrefix={group.id}
                           hideColumnTitle={currentPage === 'backlog'}
@@ -1163,7 +1622,8 @@ export function AuthenticatedBoard({
                   </section>
                 );
               })}
-            </div>
+              </div>
+            )}
             <DragOverlay>
               {activeTask ? (
                 <div className="bg-white p-4 rounded-lg shadow-2xl border-2 border-blue-400 rotate-2 opacity-90 cursor-grabbing">

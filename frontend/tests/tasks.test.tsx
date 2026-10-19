@@ -9,6 +9,40 @@ import { sortTasksByCompleteByAndPriority, sortTasksByPriority } from '../src/ta
 
 import { taskResponse, boardList, mockBoardReads } from './appTestUtils';
 
+const taskPageFetch = () => {
+  const defaultFetch = mockBoardReads();
+  return vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+    if (url === '/api/tasks?board_id=board-1') {
+      return {
+        ok: true,
+        json: async () => [taskResponse({
+          id: 'task-1',
+          title: 'Task page sample',
+          description: 'Task page description',
+          state: 'ToDo',
+          assigned_to_id: 'user-1',
+        })],
+      };
+    }
+    if (url.startsWith('/api/tasks?board_id=')) return { ok: true, json: async () => [] };
+    if (url === '/api/tasks/task-1/comments') return { ok: true, json: async () => [] };
+    if (url === '/api/tasks/task-1' && options?.method === 'PATCH') {
+      const body = JSON.parse(String(options.body)) as { state: string };
+      return {
+        ok: true,
+        json: async () => taskResponse({
+          id: 'task-1',
+          title: 'Task page sample',
+          description: 'Task page description',
+          state: body.state,
+          assigned_to_id: 'user-1',
+        }),
+      };
+    }
+    return defaultFetch(url);
+  });
+};
+
 describe('Tasks', () => {
   it('renders a column without grouped drag identifiers', () => {
     const task: Task = {
@@ -281,6 +315,78 @@ describe('Tasks', () => {
         }),
       }));
     });
+
+  it('expands the task details overlay into a dedicated task page', async () => {
+    vi.stubGlobal('fetch', taskPageFetch());
+    render(<App />);
+
+    fireEvent.click(await screen.findByText('Task page sample'));
+    expect(screen.getByRole('dialog', { name: 'Task details' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Open task page' }));
+
+    expect(window.location.pathname).toBe('/tasks/task-1');
+    expect(await screen.findByRole('region', { name: 'Task details' })).toBeTruthy();
+    expect(screen.getByLabelText('Title')).toBeTruthy();
+    expect(screen.getByLabelText('Description')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Comments' })).toBeTruthy();
+  });
+
+  it('loads a task page directly from its URL', async () => {
+    window.history.replaceState({}, '', '/tasks/task-1');
+    vi.stubGlobal('fetch', taskPageFetch());
+    render(<App />);
+
+    expect(await screen.findByRole('region', { name: 'Task details' })).toBeTruthy();
+    expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Task page sample');
+  });
+
+  it('opens task pages directly on mobile with progression and assignment actions', async () => {
+    const mobileMediaQuery = {
+      matches: true,
+      media: '(max-width: 767px), (orientation: portrait) and (max-width: 1024px)',
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList;
+    const fetchMock = taskPageFetch();
+    vi.stubGlobal('matchMedia', vi.fn(() => mobileMediaQuery));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    fireEvent.click(await screen.findByText('Task page sample'));
+    expect(window.location.pathname).toBe('/tasks/task-1');
+    expect(await screen.findByRole('region', { name: 'Task details' })).toBeTruthy();
+    expect(screen.getByRole('searchbox', { name: 'Search tasks' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Notifications' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Back to tasks' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move task' }));
+    expect(screen.getByRole('menuitem', { name: 'In Progress' })).toBeTruthy();
+    expect(screen.queryByRole('menuitem', { name: /Forward|Backward/ })).toBeNull();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'In Progress' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-1', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ state: 'InProgress' }),
+    })));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move task' }));
+    expect(screen.getByRole('menuitem', { name: 'Complete' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'To Do' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-1', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ state: 'ToDo' }),
+    })));
+
+    fireEvent.click(screen.getByRole('button', { name: 'View assignments' }));
+    const assignments = screen.getByRole('dialog', { name: 'Task assignments' });
+    expect(within(assignments).getByLabelText('Board')).toBeTruthy();
+    expect(within(assignments).getByLabelText('Initiatives')).toBeTruthy();
+    expect(within(assignments).getByLabelText('Assigned to')).toBeTruthy();
+    expect(within(assignments).getByLabelText('Complete by')).toBeTruthy();
+    fireEvent.click(within(assignments).getByRole('button', { name: 'Close assignments' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to tasks' }));
+    expect(window.location.pathname).toBe('/');
+  });
 
   it('searches initiatives and assigns the selected initiative from task details', async () => {
     const initiative = {
@@ -990,6 +1096,58 @@ describe('Tasks', () => {
     expect(taskRows()).toHaveLength(16);
     fireEvent.change(screen.getByLabelText('Filter by assignee'), { target: { value: 'unassigned' } });
     expect(taskRows()).toHaveLength(16);
+  });
+
+  it('uses compact task cards and the mobile filter drawer on portrait screens', async () => {
+    const mobileMediaQuery = {
+      matches: true,
+      media: '(max-width: 767px), (orientation: portrait) and (max-width: 1024px)',
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList;
+    const defaultFetch = mockBoardReads();
+    vi.stubGlobal('matchMedia', vi.fn(() => mobileMediaQuery));
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/tasks?board_id=board-1') {
+        return { ok: true, json: async () => [taskResponse({ id: 'portrait-1', title: 'Portrait task one', state: 'InProgress' })] };
+      }
+      if (url === '/api/tasks?board_id=board-2') {
+        return { ok: true, json: async () => [taskResponse({ id: 'portrait-2', title: 'Portrait task two', board_id: 'board-2' })] };
+      }
+      return defaultFetch(url);
+    }));
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open navigation menu' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
+    expect(await screen.findByRole('list', { name: 'Tasks' })).toBeTruthy();
+    expect(await screen.findByText('Portrait task one')).toBeTruthy();
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.getByRole('searchbox', { name: 'Search tasks' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Notifications' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '+ Create' }).parentElement?.className).toContain('mobile-create-menu');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open filters' }));
+    const filters = screen.getByRole('dialog', { name: 'Task filters' });
+    fireEvent.change(within(filters).getByLabelText('Filter by board'), { target: { value: 'board-2' } });
+    expect(screen.queryByText('Portrait task one')).toBeNull();
+    expect(screen.getByText('Portrait task two')).toBeTruthy();
+    fireEvent.click(within(filters).getByRole('button', { name: 'Close filters' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigation menu' }));
+    fireEvent.click(screen.getByRole('button', { name: 'User menu for boardowner' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Profile' }));
+    expect(window.location.pathname).toBe('/profile');
+    expect(screen.getByRole('searchbox', { name: 'Search tasks' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '+ Create' }).parentElement?.className).toContain('mobile-create-menu');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigation menu' }));
+    fireEvent.click(screen.getByRole('button', { name: 'User menu for boardowner' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Settings' }));
+    expect(window.location.pathname).toBe('/settings');
+    expect(screen.getByRole('searchbox', { name: 'Search tasks' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '+ Create' }).parentElement?.className).toContain('mobile-create-menu');
   });
 
   it('hides completed tasks from the home board after 24 hours', async () => {

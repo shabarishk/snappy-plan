@@ -38,9 +38,9 @@ export function SettingsPage() {
   };
 
   return (
-    <section aria-label="Settings" className="mx-auto w-full max-w-5xl">
+    <section aria-label="Settings" className="settings-page mx-auto w-full max-w-5xl">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
-        <nav aria-label="Settings sections" className="rounded-xl bg-white p-2 shadow-sm">
+        <nav aria-label="Settings sections" className="settings-section-nav rounded-xl bg-white p-2 shadow-sm">
           <button
             type="button"
             aria-current={selectedSection === 'profile-settings' ? 'page' : undefined}
@@ -50,7 +50,7 @@ export function SettingsPage() {
             Profile settings
           </button>
         </nav>
-        <div className="rounded-xl bg-white p-6 shadow-sm">
+        <div className="settings-content rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6">
           {selectedSection === 'profile-settings' && (
             <section aria-labelledby="password-settings-title">
               <div className="mb-6 border-b border-gray-100 pb-4">
