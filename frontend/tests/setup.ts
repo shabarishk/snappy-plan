@@ -59,13 +59,13 @@ vi.mock('@dnd-kit/core', async () => {
     PointerSensor: vi.fn(),
     useSensor: () => ({}),
     useSensors: (...sensors: object[]) => sensors,
-    useDraggable: () => ({
+    useDraggable: vi.fn(() => ({
       attributes: {},
       listeners: {},
       setNodeRef: vi.fn(),
       transform: null,
       isDragging: false,
-    }),
+    })),
     useDroppable: () => ({ setNodeRef: vi.fn() }),
   };
 });
