@@ -279,10 +279,20 @@ body {
 
   .app-header {
     display: flex;
+    flex-wrap: wrap;
     min-height: 3.75rem;
     align-items: center;
     gap: 0.5rem;
     padding: max(0.5rem, env(safe-area-inset-top)) 0.625rem 0.5rem;
+  }
+
+  .mobile-brand-row {
+    flex: 0 0 100%;
+    color: #2563eb;
+    font-size: 1.125rem;
+    font-weight: 700;
+    line-height: 1.5rem;
+    text-align: center;
   }
 
   .mobile-menu-button {

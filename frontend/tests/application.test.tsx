@@ -34,6 +34,7 @@ describe('Application', () => {
         }
       }
       expect(screen.queryByRole('heading', { name: 'Backlog' })).toBeNull();
+      expect(screen.queryByRole('heading', { name: 'Snappy-Plan' })).toBeNull();
       expect((screen.getByLabelText('Group tasks by') as HTMLSelectElement).value).toBe('board');
       expect(screen.getAllByText('0 tasks')).toHaveLength(8);
       expect(screen.queryByText('Setup Unraid Docker')).toBeNull();
@@ -77,6 +78,10 @@ describe('Application', () => {
     render(<App />);
 
     const mobileSections = await screen.findByRole('region', { name: 'Mobile active task sections' });
+    const brandRow = screen.getByRole('heading', { name: 'Snappy-Plan' });
+    const searchBar = screen.getByRole('searchbox', { name: 'Search tasks' });
+    expect(brandRow.className).toContain('mobile-brand-row');
+    expect(brandRow.compareDocumentPosition(searchBar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(mobileSections).getByRole('heading', { name: 'To Do' })).toBeTruthy();
     expect(within(mobileSections).getByRole('heading', { name: 'In Progress' })).toBeTruthy();
     expect(within(mobileSections).getByRole('heading', { name: 'Complete' })).toBeTruthy();
