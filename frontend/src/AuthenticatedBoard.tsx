@@ -1146,7 +1146,7 @@ export function AuthenticatedBoard({
       )}
 
       {/* Main content area takes up remaining height */}
-      <main className={`board-main flex-1 p-4 ${isTaskPage ? 'board-main-grouped' : ''} ${currentPage === 'task' ? 'board-main-task-page' : ''}`}>
+      <main className={`board-main flex-1 p-4 ${isTaskPage ? 'board-main-grouped' : ''} ${currentPage === 'task' ? 'board-main-task-page' : ''} ${currentPage === 'tasks' ? 'board-main-scrollable' : ''}`}>
         {currentPage === 'create-task' ? (
           <CreateTaskOverlay
             boards={boards}

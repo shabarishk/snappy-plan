@@ -162,6 +162,10 @@ body {
     overflow-y: auto;
   }
 
+  .board-main.board-main-scrollable {
+    overflow-y: auto;
+  }
+
   .board-main.board-main-grouped {
     overflow-y: auto;
   }
