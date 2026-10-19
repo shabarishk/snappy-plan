@@ -627,6 +627,10 @@ body {
     flex: none;
     overflow: visible;
   }
+
+  .mobile-task-columns .task-card {
+    touch-action: pan-y;
+  }
 }
 
 h1,

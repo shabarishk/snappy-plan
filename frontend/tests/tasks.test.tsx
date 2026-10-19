@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useDraggable } from '@dnd-kit/core';
 import { describe, expect, it, vi } from 'vitest';
 import App, { AuthenticatedBoard } from '../src/App';
 import type { Task } from '../src/App';
@@ -349,11 +350,13 @@ describe('Tasks', () => {
       removeEventListener: vi.fn(),
     } as unknown as MediaQueryList;
     const fetchMock = taskPageFetch();
+    vi.mocked(useDraggable).mockClear();
     vi.stubGlobal('matchMedia', vi.fn(() => mobileMediaQuery));
     vi.stubGlobal('fetch', fetchMock);
     render(<App />);
 
     fireEvent.click(await screen.findByText('Task page sample'));
+    expect(useDraggable).toHaveBeenCalledWith(expect.objectContaining({ disabled: true }));
     expect(window.location.pathname).toBe('/tasks/task-1');
     expect(await screen.findByRole('region', { name: 'Task details' })).toBeTruthy();
     expect(screen.getByRole('searchbox', { name: 'Search tasks' })).toBeTruthy();

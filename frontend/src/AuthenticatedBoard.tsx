@@ -1557,6 +1557,7 @@ export function AuthenticatedBoard({
                     droppableId={`mobile:${column.id}`}
                     taskIdPrefix="mobile"
                     sortByCompleteBy={currentPage === 'backlog'}
+                    disableDrag={isMobileLayout}
                   />
                 ))}
               </div>
@@ -1616,6 +1617,7 @@ export function AuthenticatedBoard({
                           taskIdPrefix={group.id}
                           hideColumnTitle={currentPage === 'backlog'}
                           sortByCompleteBy={currentPage === 'backlog'}
+                          disableDrag={isMobileLayout}
                         />
                       ))}
                     </div>

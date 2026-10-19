@@ -9,15 +9,18 @@ function TaskCard({
   onMoveToTodo,
   onSelect,
   draggableId,
+  disableDrag,
 }: {
   task: Task;
   onMoveToTodo?: (taskId: string) => void;
   onSelect: (task: Task) => void;
   draggableId?: string;
+  disableDrag?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: draggableId ?? task.id,
     data: { type: 'Task', task },
+    disabled: disableDrag,
   });
 
   const style = {
@@ -32,7 +35,9 @@ function TaskCard({
       {...attributes}
       {...listeners}
       onClick={() => onSelect(task)}
-      className="bg-white p-4 mb-3 rounded-lg shadow-sm border border-gray-100 cursor-grab active:cursor-grabbing touch-manipulation hover:shadow-md transition-shadow"
+      className={`task-card mb-3 rounded-lg border border-gray-100 bg-white p-4 shadow-sm hover:shadow-md ${
+        disableDrag ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing touch-manipulation'
+      } transition-shadow`}
     >
       <p className="text-gray-800 text-sm font-medium">{task.title}</p>
       <p className="mt-1 text-xs text-gray-500">Priority: {task.priority}</p>
@@ -66,6 +71,7 @@ export function Column({
   taskIdPrefix,
   hideColumnTitle,
   sortByCompleteBy,
+  disableDrag,
 }: {
   column: ColumnType;
   tasks: Task[];
@@ -75,6 +81,7 @@ export function Column({
   taskIdPrefix?: string;
   hideColumnTitle?: boolean;
   sortByCompleteBy?: boolean;
+  disableDrag?: boolean;
 }) {
   const { setNodeRef } = useDroppable({
     id: droppableId ?? column.id,
@@ -98,6 +105,7 @@ export function Column({
             onMoveToTodo={onMoveToTodo}
             onSelect={onSelectTask}
             draggableId={taskIdPrefix ? `${taskIdPrefix}:${task.id}` : undefined}
+            disableDrag={disableDrag}
           />
         ))}
       </div>
