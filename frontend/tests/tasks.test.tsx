@@ -10,7 +10,7 @@ import { sortTasksByCompleteByAndPriority, sortTasksByPriority } from '../src/ta
 
 import { taskResponse, boardList, mockBoardReads } from './appTestUtils';
 
-const taskPageFetch = () => {
+const taskPageFetch = (initialState: Task['state'] = 'ToDo') => {
   const defaultFetch = mockBoardReads();
   return vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
     if (url === '/api/tasks?board_id=board-1') {
@@ -20,7 +20,7 @@ const taskPageFetch = () => {
           id: 'task-1',
           title: 'Task page sample',
           description: 'Task page description',
-          state: 'ToDo',
+          state: initialState,
           assigned_to_id: 'user-1',
         })],
       };
@@ -339,6 +339,36 @@ describe('Tasks', () => {
 
     expect(await screen.findByRole('region', { name: 'Task details' })).toBeTruthy();
     expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Task page sample');
+  });
+
+  it.each([
+    ['Backlog', 'Backlog'],
+    ['To Do', 'ToDo'],
+  ])('allows a completed task to move to %s', async (optionLabel, state) => {
+    const mobileMediaQuery = {
+      matches: true,
+      media: '(max-width: 767px), (orientation: portrait) and (max-width: 1024px)',
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList;
+    const fetchMock = taskPageFetch('Complete');
+    vi.stubGlobal('matchMedia', vi.fn(() => mobileMediaQuery));
+    vi.stubGlobal('fetch', fetchMock);
+    window.history.replaceState({}, '', '/tasks/task-1');
+    render(<App />);
+
+    expect(await screen.findByRole('region', { name: 'Task details' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Move task' }));
+
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Backlog', 'To Do']);
+    fireEvent.click(screen.getByRole('menuitem', { name: optionLabel }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-1', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ state }),
+    })));
+    await waitFor(() => expect(window.location.pathname).toBe('/'));
   });
 
   it('opens task pages directly on mobile with progression and assignment actions', async () => {

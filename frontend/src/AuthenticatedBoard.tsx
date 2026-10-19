@@ -584,9 +584,14 @@ export function AuthenticatedBoard({
       boardId: taskPageTask.boardId ?? selectedTask?.boardId ?? selectedBoardId,
     }
     : null;
+  const isTaskCompleted = taskPageTask?.state === 'Complete';
   const taskProgressIndex = taskPageTask ? TASK_PROGRESSION.indexOf(taskPageTask.state) : -1;
-  const forwardTaskState = taskProgressIndex >= 0 ? TASK_PROGRESSION[taskProgressIndex + 1] : undefined;
-  const backwardTaskState = taskProgressIndex > 0 ? TASK_PROGRESSION[taskProgressIndex - 1] : undefined;
+  const forwardTaskState = isTaskCompleted
+    ? 'Backlog'
+    : taskProgressIndex >= 0 ? TASK_PROGRESSION[taskProgressIndex + 1] : undefined;
+  const backwardTaskState = isTaskCompleted
+    ? 'ToDo'
+    : taskProgressIndex > 0 ? TASK_PROGRESSION[taskProgressIndex - 1] : undefined;
 
   const moveTaskPageState = async (nextState: TaskState) => {
     if (!taskPageSelection) return;
@@ -846,7 +851,9 @@ export function AuthenticatedBoard({
                 >
                   {isMobileLayout
                     ? forwardTaskState ? TASK_STATE_LABELS[forwardTaskState] : 'No further step'
-                    : forwardTaskState ? `Forward: ${TASK_STATE_LABELS[forwardTaskState]}` : 'Forward: No further step'}
+                    : forwardTaskState
+                      ? `${isTaskCompleted ? '' : 'Forward: '}${TASK_STATE_LABELS[forwardTaskState]}`
+                      : 'Forward: No further step'}
                 </button>
                 <button
                   type="button"
@@ -859,7 +866,9 @@ export function AuthenticatedBoard({
                 >
                   {isMobileLayout
                     ? backwardTaskState ? TASK_STATE_LABELS[backwardTaskState] : 'No earlier step'
-                    : backwardTaskState ? `Backward: ${TASK_STATE_LABELS[backwardTaskState]}` : 'Backward: No earlier step'}
+                    : backwardTaskState
+                      ? `${isTaskCompleted ? '' : 'Backward: '}${TASK_STATE_LABELS[backwardTaskState]}`
+                      : 'Backward: No earlier step'}
                 </button>
               </div>
             )}
