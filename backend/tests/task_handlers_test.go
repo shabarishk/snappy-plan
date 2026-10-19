@@ -889,6 +889,25 @@ func TestTaskReadEndpoints(t *testing.T) {
 		t.Fatalf("assignee profile pictures = %#v", assignableUsers)
 	}
 
+	withoutPictureHandler := newHandler(&fakeDB{
+		session:   dbgen.Session{Token: "token", UserID: ownerID},
+		assignees: []dbgen.GetUsersForAssignmentRow{assignee},
+	}, nil, false)
+	withoutPictureResponse := send(withoutPictureHandler, http.MethodGet, "/api/users", "", cookie)
+	if withoutPictureResponse.Code != http.StatusOK {
+		t.Fatalf("users without profile pictures status = %d, want %d: %s", withoutPictureResponse.Code, http.StatusOK, withoutPictureResponse.Body.String())
+	}
+	var usersWithoutPicture []map[string]json.RawMessage
+	if err := json.Unmarshal(withoutPictureResponse.Body.Bytes(), &usersWithoutPicture); err != nil {
+		t.Fatalf("decode users without profile pictures: %v", err)
+	}
+	if len(usersWithoutPicture) != 1 {
+		t.Fatalf("users without profile pictures = %#v", usersWithoutPicture)
+	}
+	if _, hasProfilePicture := usersWithoutPicture[0]["profile_picture"]; hasProfilePicture {
+		t.Fatalf("assignee without a profile picture includes profile_picture: %#v", usersWithoutPicture[0])
+	}
+
 	for _, test := range []struct {
 		name string
 		db   *fakeDB
