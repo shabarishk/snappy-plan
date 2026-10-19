@@ -78,7 +78,7 @@ export function NotificationBell() {
   const unreadCount = notifications.reduce((count, notification) => count + Number(!notification.read_at), 0);
 
   return (
-    <div className="relative justify-self-end sm:col-start-3 sm:row-start-1">
+    <div className="notification-bell relative justify-self-end sm:col-start-3 sm:row-start-1">
       <button
         type="button"
         aria-label="Notifications"
