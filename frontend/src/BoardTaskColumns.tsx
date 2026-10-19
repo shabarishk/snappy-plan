@@ -1,6 +1,6 @@
 import { DndContext, DragOverlay, closestCorners, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
-import type { Board } from './api';
+import type { Board, Initiative } from './api';
 import type { AppPage } from './navigation';
 import type { ColumnType, Task } from './taskModel';
 import { BOARD_COLUMNS, COLUMNS } from './taskModel';
@@ -24,6 +24,7 @@ type BoardTaskColumnsProps = {
   taskGroups: TaskGroup[];
   visibleColumns: ColumnType[];
   boards: Board[];
+  taskInitiatives: Record<string, Initiative[]>;
   boardFilterOptions: FilterOption[];
   boardFilterIds: FilterSelection;
   groupBy: TaskGroupBy;
@@ -44,6 +45,7 @@ export function BoardTaskColumns({
   taskGroups,
   visibleColumns,
   boards,
+  taskInitiatives,
   boardFilterOptions,
   boardFilterIds,
   groupBy,
@@ -62,6 +64,22 @@ export function BoardTaskColumns({
   );
   const isBacklog = currentPage === 'backlog';
   const moveBacklogTask = isBacklog ? onMoveBacklogTaskToTodo : undefined;
+  const boardNamesById = new Map(boards.map((board) => [board.id, board.title]));
+  const initiativeNamesByTaskId = new Map(
+    Object.entries(taskInitiatives).map(([taskId, initiatives]) => [
+      taskId,
+      initiatives.map((initiative) => initiative.title),
+    ])
+  );
+  const showBoardName = isMobileLayout || groupBy === 'initiative';
+  const showInitiativeNames = isMobileLayout || groupBy === 'board';
+  const taskCardMetadataProps = {
+    boardNamesById,
+    initiativeNamesByTaskId,
+    selectedBoardId,
+    showBoardName,
+    showInitiativeNames,
+  };
 
   return (
     <DndContext
@@ -87,6 +105,7 @@ export function BoardTaskColumns({
               taskIdPrefix="mobile"
               sortByCompleteBy={isBacklog}
               disableDrag={isMobileLayout}
+              {...taskCardMetadataProps}
             />
           ))}
         </div>
@@ -144,6 +163,7 @@ export function BoardTaskColumns({
                       hideColumnTitle={isBacklog}
                       sortByCompleteBy={isBacklog}
                       disableDrag={isMobileLayout}
+                      {...taskCardMetadataProps}
                     />
                   ))}
                 </div>

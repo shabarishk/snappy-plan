@@ -32,12 +32,20 @@ function TaskCard({
   onSelect,
   draggableId,
   disableDrag,
+  boardName,
+  initiativeNames,
+  showBoardName,
+  showInitiativeNames,
 }: {
   task: Task;
   onMoveToTodo?: (taskId: string) => void;
   onSelect: (task: Task) => void;
   draggableId?: string;
   disableDrag?: boolean;
+  boardName?: string;
+  initiativeNames: string[];
+  showBoardName: boolean;
+  showInitiativeNames: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: draggableId ?? task.id,
@@ -62,6 +70,16 @@ function TaskCard({
       } transition-shadow`}
     >
       <p className="text-gray-800 text-sm font-medium">{task.title}</p>
+      {showBoardName && boardName && (
+        <div className="mt-1">
+          <span title={boardName} className="inline-block max-w-full truncate rounded-sm border border-gray-300 bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
+            {boardName}
+          </span>
+        </div>
+      )}
+      {showInitiativeNames && initiativeNames.length > 0 && (
+        <p className="mt-1 text-xs text-gray-500">{initiativeNames.join(', ')}</p>
+      )}
       {task.completedAt && (
         <p className="mt-2 text-xs text-gray-500">
           Completed <time dateTime={task.completedAt}>{new Date(task.completedAt).toLocaleString()}</time>
@@ -96,6 +114,11 @@ export function Column({
   hideColumnTitle,
   sortByCompleteBy,
   disableDrag,
+  boardNamesById,
+  initiativeNamesByTaskId,
+  selectedBoardId,
+  showBoardName,
+  showInitiativeNames,
 }: {
   column: ColumnType;
   tasks: Task[];
@@ -106,6 +129,11 @@ export function Column({
   hideColumnTitle?: boolean;
   sortByCompleteBy?: boolean;
   disableDrag?: boolean;
+  boardNamesById?: ReadonlyMap<string, string>;
+  initiativeNamesByTaskId?: ReadonlyMap<string, string[]>;
+  selectedBoardId?: string;
+  showBoardName?: boolean;
+  showInitiativeNames?: boolean;
 }) {
   const { setNodeRef } = useDroppable({
     id: droppableId ?? column.id,
@@ -130,6 +158,10 @@ export function Column({
             onSelect={onSelectTask}
             draggableId={taskIdPrefix ? `${taskIdPrefix}:${task.id}` : undefined}
             disableDrag={disableDrag}
+            boardName={boardNamesById?.get(task.boardId ?? selectedBoardId ?? '')}
+            initiativeNames={initiativeNamesByTaskId?.get(task.id) ?? []}
+            showBoardName={showBoardName ?? false}
+            showInitiativeNames={showInitiativeNames ?? false}
           />
         ))}
       </div>
