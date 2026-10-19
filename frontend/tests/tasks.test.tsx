@@ -371,6 +371,34 @@ describe('Tasks', () => {
     await waitFor(() => expect(window.location.pathname).toBe('/'));
   });
 
+  it('keeps portrait task details open and reports an error when a state change fails', async () => {
+    const mobileMediaQuery = {
+      matches: true,
+      media: '(max-width: 767px), (orientation: portrait) and (max-width: 1024px)',
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList;
+    const fallbackFetch = taskPageFetch('Complete');
+    const fetchMock = vi.fn().mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === '/api/tasks/task-1' && options?.method === 'PATCH') {
+        return { ok: false, text: async () => 'Unable to move task' };
+      }
+      return fallbackFetch(url, options);
+    });
+    vi.stubGlobal('matchMedia', vi.fn(() => mobileMediaQuery));
+    vi.stubGlobal('fetch', fetchMock);
+    window.history.replaceState({}, '', '/tasks/task-1');
+    render(<App />);
+
+    expect(await screen.findByRole('region', { name: 'Task details' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Move task' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Backlog' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Unable to move task');
+    expect(window.location.pathname).toBe('/tasks/task-1');
+  });
+
   it('opens task pages directly on mobile with progression and assignment actions', async () => {
     const mobileMediaQuery = {
       matches: true,
