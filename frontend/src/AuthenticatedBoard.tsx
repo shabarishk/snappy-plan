@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DndContext, DragOverlay, closestCorners, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
-import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core';
+import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { deleteBoard as persistDeleteBoard, getBoards, getInitiative, getInitiatives, getProfile, getTaskAssignees, getTasks, logout, moveTask as persistMoveTask, updateBoardOrder as persistBoardOrder } from './api';
 import type { Board, Initiative, TaskAssignee, UserProfile } from './api';
 import type { ColumnId, Task, TaskState } from './taskModel';
@@ -14,139 +13,18 @@ import { SettingsPage } from './SettingsPage';
 import { ProfilePage } from './ProfilePage';
 import { CreateInitiativeOverlay, InitiativeDetailPage, InitiativesPage } from './InitiativeComponents';
 import { TaskSearch } from './TaskSearch';
-import { Column } from './TaskBoard';
 import { TasksPage } from './TasksPage';
 import { NotificationBell } from './NotificationBell';
+import { AuthenticatedSidebar } from './AuthenticatedSidebar';
+import { BoardTaskColumns, type TaskGroup, type TaskGroupBy } from './BoardTaskColumns';
+import { CheckboxFilter } from './TaskFilters';
+import { isAllSelected, toggleAllFilter, toggleFilterOption } from './taskFilterUtils';
+import type { FilterOption, FilterSelection } from './taskFilterUtils';
 
 type SelectedTask = {
   task: Task;
   boardId: string;
 };
-
-type TaskGroupBy = 'board' | 'initiative' | 'assignee';
-
-type TaskGroup = {
-  id: string;
-  title: string;
-  tasks: Task[];
-  boardId?: string;
-};
-
-type FilterOption = {
-  value: string;
-  label: string;
-};
-
-type FilterSelection = string[] | null;
-
-function isAllSelected(options: FilterOption[], selectedValues: FilterSelection) {
-  return selectedValues === null
-    || (options.length > 0 && options.every((option) => selectedValues.includes(option.value)));
-}
-
-function toggleFilterOption(
-  options: FilterOption[],
-  selectedValues: FilterSelection,
-  value: string
-): string[] {
-  if (selectedValues === null) {
-    return options.filter((option) => option.value !== value).map((option) => option.value);
-  }
-  return selectedValues.includes(value)
-    ? selectedValues.filter((selected) => selected !== value)
-    : [...selectedValues, value];
-}
-
-function toggleAllFilter(options: FilterOption[], selectedValues: FilterSelection): FilterSelection {
-  return isAllSelected(options, selectedValues) ? [] : null;
-}
-
-function CheckboxFilter({
-  label,
-  ariaLabel,
-  allLabel,
-  options,
-  selectedValues,
-  onToggle,
-  onToggleAll,
-  disabled = false,
-}: {
-  label: string;
-  ariaLabel: string;
-  allLabel: string;
-  options: FilterOption[];
-  selectedValues: FilterSelection;
-  onToggle: (value: string) => void;
-  onToggleAll: () => void;
-  disabled?: boolean;
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-  const filterRef = useRef<HTMLDivElement>(null);
-  const allSelected = isAllSelected(options, selectedValues);
-  const selectedLabel = allSelected
-    ? allLabel
-    : selectedValues?.length === 0
-      ? 'None'
-      : (selectedValues?.length ?? 0) > 1
-      ? 'Multiple'
-      : options.find((option) => option.value === selectedValues?.[0])?.label ?? 'None';
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handlePointerDown = (event: PointerEvent) => {
-    if (event.target instanceof Node && !filterRef.current?.contains(event.target)) {
-      setIsOpen(false);
-    }
-    };
-    document.addEventListener('pointerdown', handlePointerDown);
-    return () => document.removeEventListener('pointerdown', handlePointerDown);
-  }, [isOpen]);
-
-  return (
-    <div ref={filterRef} className="relative">
-      <button
-        type="button"
-        aria-label={ariaLabel}
-        aria-expanded={isOpen}
-        disabled={disabled}
-        onClick={() => setIsOpen((open) => !open)}
-        className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 disabled:opacity-60"
-      >
-        {label}: {selectedLabel}
-        <span aria-hidden="true">▾</span>
-      </button>
-      {isOpen && (
-        <div className="absolute left-0 top-full z-20 mt-1 max-h-64 min-w-full overflow-y-auto rounded-lg border border-gray-200 bg-white p-2 shadow-lg">
-          <div role="group" aria-label={`${label} options`} className="space-y-1">
-            <label className="flex cursor-pointer items-center gap-2 whitespace-nowrap rounded px-2 py-1 text-sm font-medium text-gray-700 hover:bg-gray-100">
-              <input
-                type="checkbox"
-                aria-label={`${label}: All`}
-                checked={allSelected}
-                onChange={onToggleAll}
-                className="accent-blue-600"
-              />
-              All
-            </label>
-            {options.map((option) => (
-              <label key={option.value} className="flex cursor-pointer items-center gap-2 whitespace-nowrap rounded px-2 py-1 text-sm text-gray-700 hover:bg-gray-100">
-                <input
-                  type="checkbox"
-                  aria-label={`${label}: ${option.label}`}
-                  checked={selectedValues === null || selectedValues.includes(option.value)}
-                  onChange={() => onToggle(option.value)}
-                  className="accent-blue-600"
-                />
-                {option.label}
-              </label>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 const TASK_PROGRESSION: TaskState[] = ['Backlog', 'ToDo', 'InProgress', 'Complete'];
 const TASK_STATE_LABELS: Record<TaskState, string> = {
@@ -497,11 +375,6 @@ export function AuthenticatedBoard({
     return () => { cancelled = true; };
   }, [initiativeGroupingRefreshToken, initiativeRefreshToken, isCreateTaskOpen, needsInitiativeGrouping, selectedTask]);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor)
-  );
-
   const onDragStart = (event: DragStartEvent) => {
     if (event.active.data.current?.type === 'Task') {
       setActiveTask(event.active.data.current.task);
@@ -791,148 +664,32 @@ export function AuthenticatedBoard({
     }
   };
 
+  const navigateFromSidebar = (page: AppPage) => {
+    setIsProfileMenuOpen(false);
+    setIsCreateTaskOpen(false);
+    setSelectedTask(null);
+    navigateToPage(page);
+  };
+
   return (
     <div className="app-layout flex h-screen min-h-0 bg-gray-200 font-sans">
-      {isMobileLayout && isMobileSidebarOpen && (
-        <button
-          type="button"
-          aria-label="Close navigation menu"
-          className="mobile-sidebar-backdrop"
-          onClick={() => setIsMobileSidebarOpen(false)}
-        />
-      )}
-      <aside
-        aria-label="Sidebar"
-        aria-hidden={isMobileLayout && !isMobileSidebarOpen}
-        className={`app-sidebar relative z-20 flex w-16 shrink-0 flex-col items-center border-r border-gray-200 bg-white py-4 ${isMobileSidebarOpen ? 'app-sidebar-open' : ''}`}
-      >
-        <button
-          type="button"
-          aria-label="Home"
-          title="Home"
-          aria-current={currentPage === 'board' || currentPage === 'backlog' ? 'page' : undefined}
-          onClick={() => navigateToPage('board')}
-          className={`sidebar-navigation-item flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'board' || currentPage === 'backlog' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
-        >
-          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
-            <path strokeLinecap="round" strokeLinejoin="round" d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V10Z" />
-          </svg>
-          <span className="sidebar-label">Home</span>
-        </button>
-        <button
-          type="button"
-          aria-label="Tasks"
-          title="Tasks"
-          aria-current={currentPage === 'tasks' ? 'page' : undefined}
-          onClick={() => {
-            setIsProfileMenuOpen(false);
-            setIsCreateTaskOpen(false);
-            setSelectedTask(null);
-            navigateToPage('tasks');
-          }}
-          className={`sidebar-navigation-item mt-2 flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'tasks' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
-        >
-          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
-            <rect x="3" y="3" width="18" height="18" rx="3" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="m8 12 3 3 5-6" />
-          </svg>
-          <span className="sidebar-label">Tasks</span>
-        </button>
-        <button
-          type="button"
-          aria-label="Initiatives"
-          title="Initiatives"
-          aria-current={currentPage === 'initiatives' || currentPage === 'initiative' ? 'page' : undefined}
-          onClick={() => {
-            setIsProfileMenuOpen(false);
-            setIsCreateTaskOpen(false);
-            setSelectedTask(null);
-            navigateToPage('initiatives');
-          }}
-          className={`sidebar-navigation-item mt-2 flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'initiatives' || currentPage === 'initiative' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
-        >
-          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13 2 4 14h7l-1 8 10-12h-7l1-8Z" />
-          </svg>
-          <span className="sidebar-label">Initiatives</span>
-        </button>
-        <button
-          type="button"
-          aria-label="Boards"
-          title="Boards"
-          aria-current={currentPage === 'boards' ? 'page' : undefined}
-          onClick={() => {
-            setIsProfileMenuOpen(false);
-            setIsCreateTaskOpen(false);
-            setSelectedTask(null);
-            navigateToPage('boards');
-          }}
-          className={`sidebar-navigation-item mt-2 flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'boards' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
-        >
-          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
-            <rect x="3" y="4" width="18" height="16" rx="2" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 4v16m6-16v16" />
-          </svg>
-          <span className="sidebar-label">Boards</span>
-        </button>
-        <div ref={profileMenuRef} className="mt-auto flex flex-col items-center gap-2">
-          {profile?.role === 'admin' && (
-            <button
-              type="button"
-              aria-label="Admin"
-              title="Admin"
-              aria-current={currentPage === 'admin' ? 'page' : undefined}
-              onClick={() => {
-                setIsProfileMenuOpen(false);
-                setIsCreateTaskOpen(false);
-                setSelectedTask(null);
-                navigateToPage('admin');
-              }}
-              className={`sidebar-navigation-item flex h-11 w-11 items-center justify-center rounded-xl ${currentPage === 'admin' ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'}`}
-            >
-              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3 4.5 6v5.5c0 4.8 3.2 7.8 7.5 9.5 4.3-1.7 7.5-4.7 7.5-9.5V6L12 3Z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="m9 12 2 2 4-4" />
-              </svg>
-              <span className="sidebar-label">Admin</span>
-            </button>
-          )}
-          <button
-            type="button"
-            aria-label={`User menu for ${profile?.username ?? 'user'}`}
-            aria-haspopup="menu"
-            aria-expanded={isProfileMenuOpen}
-            title={profileDisplayName || 'User profile'}
-            onClick={() => setIsProfileMenuOpen((isOpen) => !isOpen)}
-            className="sidebar-user-button flex h-11 w-11 items-center justify-center overflow-hidden rounded-full bg-blue-100 font-bold text-blue-700 hover:bg-blue-200"
-          >
-            {profile?.profile_picture
-              ? <img src={profile.profile_picture} alt="" className="h-full w-full object-cover" />
-              : profileInitial}
-            {isMobileLayout && <span className="sidebar-label">{profileDisplayName || profile?.username || 'Account'}</span>}
-          </button>
-          {isProfileMenuOpen && (
-            <div role="menu" aria-label="User menu" className="sidebar-user-menu absolute bottom-4 left-full ml-2 w-40 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
-              {logoutError && <p role="alert" className="px-3 py-2 text-xs text-red-700">{logoutError}</p>}
-              <button type="button" role="menuitem" onClick={() => {
-                setIsProfileMenuOpen(false);
-                setIsCreateTaskOpen(false);
-                setSelectedTask(null);
-                navigateToPage('profile');
-              }} className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">Profile</button>
-              <button type="button" role="menuitem" onClick={() => {
-                setIsProfileMenuOpen(false);
-                setIsCreateTaskOpen(false);
-                setSelectedTask(null);
-                navigateToPage('settings');
-              }} className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">Settings</button>
-              <button type="button" role="menuitem" disabled={isLoggingOut} onClick={() => void handleLogout()} className="w-full rounded-md px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50 disabled:opacity-50">
-                {isLoggingOut ? 'Logging out…' : 'Log out'}
-              </button>
-            </div>
-          )}
-        </div>
-      </aside>
+      <AuthenticatedSidebar
+        currentPage={currentPage}
+        isMobileLayout={isMobileLayout}
+        isMobileSidebarOpen={isMobileSidebarOpen}
+        profile={profile}
+        profileDisplayName={profileDisplayName}
+        profileInitial={profileInitial}
+        isProfileMenuOpen={isProfileMenuOpen}
+        profileMenuRef={profileMenuRef}
+        logoutError={logoutError}
+        isLoggingOut={isLoggingOut}
+        onCloseMobileSidebar={() => setIsMobileSidebarOpen(false)}
+        onToggleProfileMenu={() => setIsProfileMenuOpen((isOpen) => !isOpen)}
+        onNavigateHome={() => navigateToPage('board')}
+        onNavigateFromMenu={navigateFromSidebar}
+        onLogout={() => void handleLogout()}
+      />
       <div className="app-content flex min-w-0 flex-1 flex-col">
       <header className={`app-header bg-white p-4 shadow-sm z-10 grid grid-cols-1 gap-2 shrink-0 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] sm:items-center ${isTaskPage ? 'home-header' : ''}`}>
         {currentPage === 'task' || isCreatePage ? (
@@ -1535,105 +1292,25 @@ export function AuthenticatedBoard({
             </button>
           </div>
         ) : (
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCorners}
+          <BoardTaskColumns
+            currentPage={currentPage}
+            isMobileLayout={isMobileLayout}
+            filteredTasks={filteredTasks}
+            taskGroups={taskGroups}
+            visibleColumns={visibleColumns}
+            boards={boards}
+            boardFilterOptions={boardFilterOptions}
+            boardFilterIds={boardFilterIds}
+            groupBy={groupBy}
+            isSavingBoardOrder={isSavingBoardOrder}
+            activeTask={activeTask}
+            selectedBoardId={selectedBoardId}
+            onMoveBoard={(boardId, direction) => void moveBoard(boardId, direction)}
+            onMoveBacklogTaskToTodo={moveBacklogTaskToTodo}
+            onSelectTask={handleSelectTask}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
-          >
-            {isMobileLayout ? (
-              <div
-                role="region"
-                aria-label={currentPage === 'backlog' ? 'Mobile backlog tasks' : 'Mobile active task sections'}
-                className="mobile-task-columns pb-4"
-              >
-                {(currentPage === 'backlog' ? COLUMNS.filter((column) => column.id === 'backlog') : BOARD_COLUMNS).map((column) => (
-                  <Column
-                    key={`mobile-${column.id}`}
-                    column={column}
-                    tasks={filteredTasks.filter((task) => task.columnId === column.id)}
-                    onMoveToTodo={currentPage === 'backlog' ? moveBacklogTaskToTodo : undefined}
-                    onSelectTask={(task) => handleSelectTask(task, task.boardId ?? selectedBoardId)}
-                    droppableId={`mobile:${column.id}`}
-                    taskIdPrefix="mobile"
-                    sortByCompleteBy={currentPage === 'backlog'}
-                    disableDrag={isMobileLayout}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div role="region" aria-label={currentPage === 'backlog' ? 'Backlog tasks' : 'Kanban board columns'} className="space-y-6 pb-4">
-                {taskGroups.length === 0 ? (
-                  <p className="py-8 text-center text-sm text-gray-500">No tasks to display.</p>
-                ) : taskGroups.map((group) => {
-                const groupTasks = currentPage === 'backlog'
-                  ? group.tasks.filter((task) => task.columnId === 'backlog')
-                  : group.tasks;
-                return (
-                  <section key={group.id} aria-label={`${group.title} tasks`} className="space-y-2">
-                    <header className="flex items-center justify-between gap-3">
-                      <h2 className="text-lg font-semibold text-gray-800">{group.title}</h2>
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs text-gray-500">{groupTasks.length} tasks</span>
-                        {currentPage === 'board' && groupBy === 'board' && isAllSelected(boardFilterOptions, boardFilterIds) && group.boardId && (
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              aria-label={`Move ${group.title} up`}
-                              title="Move board up"
-                              disabled={isSavingBoardOrder || boards[0]?.id === group.boardId}
-                              onClick={() => {
-                                if (group.boardId) void moveBoard(group.boardId, -1);
-                              }}
-                              className="rounded px-2 py-1 text-sm text-gray-600 hover:bg-gray-200 disabled:opacity-40"
-                            >
-                              ↑
-                            </button>
-                            <button
-                              type="button"
-                              aria-label={`Move ${group.title} down`}
-                              title="Move board down"
-                              disabled={isSavingBoardOrder || boards[boards.length - 1]?.id === group.boardId}
-                              onClick={() => {
-                                if (group.boardId) void moveBoard(group.boardId, 1);
-                              }}
-                              className="rounded px-2 py-1 text-sm text-gray-600 hover:bg-gray-200 disabled:opacity-40"
-                            >
-                              ↓
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </header>
-                    <div className={`grid items-start gap-4 ${currentPage === 'backlog' ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-3'}`}>
-                      {visibleColumns.map((column) => (
-                        <Column
-                          key={`${group.id}-${column.id}`}
-                          column={column}
-                          tasks={groupTasks.filter((task) => task.columnId === column.id)}
-                          onMoveToTodo={currentPage === 'backlog' ? moveBacklogTaskToTodo : undefined}
-                          onSelectTask={(task) => handleSelectTask(task, task.boardId ?? selectedBoardId)}
-                          droppableId={`${group.id}:${column.id}`}
-                          taskIdPrefix={group.id}
-                          hideColumnTitle={currentPage === 'backlog'}
-                          sortByCompleteBy={currentPage === 'backlog'}
-                          disableDrag={isMobileLayout}
-                        />
-                      ))}
-                    </div>
-                  </section>
-                );
-              })}
-              </div>
-            )}
-            <DragOverlay>
-              {activeTask ? (
-                <div className="bg-white p-4 rounded-lg shadow-2xl border-2 border-blue-400 rotate-2 opacity-90 cursor-grabbing">
-                  <p className="text-gray-800 text-sm font-medium">{activeTask.title}</p>
-                </div>
-              ) : null}
-            </DragOverlay>
-          </DndContext>
+          />
         )}
           </>
         )}
