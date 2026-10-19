@@ -699,6 +699,11 @@ export function AuthenticatedBoard({
       />
       <div className="app-content flex min-w-0 flex-1 flex-col">
       <header className={`app-header bg-white p-4 shadow-sm z-10 grid grid-cols-1 gap-2 shrink-0 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] sm:items-center ${isTaskPage ? 'home-header' : ''}`}>
+        {isMobileLayout && (
+          <div role="heading" aria-level={1} className="mobile-brand-row">
+            Snappy-Plan
+          </div>
+        )}
         {currentPage === 'task' || isCreatePage ? (
           <button
             type="button"
