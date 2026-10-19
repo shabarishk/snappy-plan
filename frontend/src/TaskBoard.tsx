@@ -1,21 +1,75 @@
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
+import type { TaskAssignee } from './api';
 import { sortTasksByCompleteByAndPriority, sortTasksByPriority } from './taskPriority';
 import type { ColumnType, Task } from './taskModel';
 
 // --- Sub-Components ---
+function PriorityIcon({ priority }: { priority: Task['priority'] }) {
+  const colorClass = priority === 'High'
+    ? 'text-red-600'
+    : priority === 'Medium'
+      ? 'text-yellow-500'
+      : 'text-blue-600';
+
+  return (
+    <span role="img" aria-label={`${priority} priority`} className={`inline-flex ${colorClass}`}>
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+        {priority === 'Medium' ? (
+          <path d="M5 8h14M5 16h14" />
+        ) : priority === 'High' ? (
+          <path d="M12 19V5m-6 6 6-6 6 6" />
+        ) : (
+          <path d="M12 5v14m6-6-6 6-6-6" />
+        )}
+      </svg>
+    </span>
+  );
+}
+
+function AssigneeProfileTile({ name, profilePicture }: { name: string; profilePicture?: string | null }) {
+  const trimmedName = name.trim();
+  const nameParts = trimmedName.split(/\s+/).filter(Boolean);
+  const initials = nameParts.length > 1
+    ? `${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}`
+    : trimmedName.slice(0, 2);
+
+  return (
+    <span
+      role="img"
+      aria-label={`Assignee: ${name}`}
+      title={name}
+      className="inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-full bg-blue-100 text-[10px] font-bold text-blue-700"
+    >
+      {profilePicture
+        ? <img src={profilePicture} alt="" className="h-full w-full object-cover" />
+        : initials.toLocaleUpperCase() || '?'}
+    </span>
+  );
+}
+
 function TaskCard({
   task,
   onMoveToTodo,
   onSelect,
   draggableId,
   disableDrag,
+  boardName,
+  initiativeNames,
+  showBoardName,
+  showInitiativeNames,
+  assignee,
 }: {
   task: Task;
   onMoveToTodo?: (taskId: string) => void;
   onSelect: (task: Task) => void;
   draggableId?: string;
   disableDrag?: boolean;
+  boardName?: string;
+  initiativeNames: string[];
+  showBoardName: boolean;
+  showInitiativeNames: boolean;
+  assignee?: { name: string; profilePicture?: string | null };
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: draggableId ?? task.id,
@@ -40,7 +94,16 @@ function TaskCard({
       } transition-shadow`}
     >
       <p className="text-gray-800 text-sm font-medium">{task.title}</p>
-      <p className="mt-1 text-xs text-gray-500">Priority: {task.priority}</p>
+      {showBoardName && boardName && (
+        <div className="mt-1">
+          <span title={boardName} className="inline-block max-w-full truncate rounded-sm border border-gray-300 bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
+            {boardName}
+          </span>
+        </div>
+      )}
+      {showInitiativeNames && initiativeNames.length > 0 && (
+        <p className="mt-1 text-xs text-gray-500">{initiativeNames.join(', ')}</p>
+      )}
       {task.completedAt && (
         <p className="mt-2 text-xs text-gray-500">
           Completed <time dateTime={task.completedAt}>{new Date(task.completedAt).toLocaleString()}</time>
@@ -58,6 +121,12 @@ function TaskCard({
           Move to To Do
         </button>
       )}
+      <div className="mt-1 flex items-center justify-end gap-2">
+        <PriorityIcon priority={task.priority} />
+        {assignee && (
+          <AssigneeProfileTile name={assignee.name} profilePicture={assignee.profilePicture} />
+        )}
+      </div>
     </div>
   );
 }
@@ -72,6 +141,12 @@ export function Column({
   hideColumnTitle,
   sortByCompleteBy,
   disableDrag,
+  boardNamesById,
+  initiativeNamesByTaskId,
+  selectedBoardId,
+  showBoardName,
+  showInitiativeNames,
+  assigneesById,
 }: {
   column: ColumnType;
   tasks: Task[];
@@ -82,6 +157,12 @@ export function Column({
   hideColumnTitle?: boolean;
   sortByCompleteBy?: boolean;
   disableDrag?: boolean;
+  boardNamesById?: ReadonlyMap<string, string>;
+  initiativeNamesByTaskId?: ReadonlyMap<string, string[]>;
+  selectedBoardId?: string;
+  showBoardName?: boolean;
+  showInitiativeNames?: boolean;
+  assigneesById?: ReadonlyMap<string, TaskAssignee>;
 }) {
   const { setNodeRef } = useDroppable({
     id: droppableId ?? column.id,
@@ -106,6 +187,16 @@ export function Column({
             onSelect={onSelectTask}
             draggableId={taskIdPrefix ? `${taskIdPrefix}:${task.id}` : undefined}
             disableDrag={disableDrag}
+            boardName={boardNamesById?.get(task.boardId ?? selectedBoardId ?? '')}
+            initiativeNames={initiativeNamesByTaskId?.get(task.id) ?? []}
+            showBoardName={showBoardName ?? false}
+            showInitiativeNames={showInitiativeNames ?? false}
+            assignee={task.assignedToId
+              ? {
+                name: assigneesById?.get(task.assignedToId)?.full_name ?? task.assignedToId,
+                profilePicture: assigneesById?.get(task.assignedToId)?.profile_picture,
+              }
+              : undefined}
           />
         ))}
       </div>

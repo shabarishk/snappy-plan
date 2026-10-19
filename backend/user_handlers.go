@@ -32,7 +32,7 @@ func (api *ApiConfig) handleGetUsersForAssignment(w http.ResponseWriter, r *http
 
 	rows, err := api.DBTX.Query(r.Context(), `
 		SELECT id, COALESCE(NULLIF(preferred_name, ''), full_name) AS full_name,
-		       full_name AS legal_name
+		       full_name AS legal_name, profile_picture
 		FROM users
 		ORDER BY full_name ASC, id ASC
 	`)
@@ -43,16 +43,21 @@ func (api *ApiConfig) handleGetUsersForAssignment(w http.ResponseWriter, r *http
 	defer rows.Close()
 
 	type assignmentUser struct {
-		ID        string `json:"id"`
-		FullName  string `json:"full_name"`
-		LegalName string `json:"legal_name"`
+		ID             string  `json:"id"`
+		FullName       string  `json:"full_name"`
+		LegalName      string  `json:"legal_name"`
+		ProfilePicture *string `json:"profile_picture,omitempty"`
 	}
 	users := make([]assignmentUser, 0)
 	for rows.Next() {
 		var user assignmentUser
-		if err := rows.Scan(&user.ID, &user.FullName, &user.LegalName); err != nil {
+		var profilePicture pgtype.Text
+		if err := rows.Scan(&user.ID, &user.FullName, &user.LegalName, &profilePicture); err != nil {
 			http.Error(w, "Failed to read users", http.StatusInternalServerError)
 			return
+		}
+		if profilePicture.Valid {
+			user.ProfilePicture = &profilePicture.String
 		}
 		users = append(users, user)
 	}

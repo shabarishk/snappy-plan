@@ -846,11 +846,16 @@ func TestTaskReadEndpoints(t *testing.T) {
 		State:    "Backlog",
 		Priority: "Medium",
 	}
-	assignee := dbgen.GetUsersForAssignmentRow{ID: ownerID, FullName: "Board Owner"}
+	assignee := dbgen.GetUsersForAssignmentRow{
+		ID:             ownerID,
+		FullName:       "Board Owner",
+		ProfilePicture: pgtype.Text{String: "data:image/png;base64,AAAA", Valid: true},
+	}
 	db := &fakeDB{
-		session:   dbgen.Session{Token: "token", UserID: ownerID},
-		tasks:     []dbgen.Task{task},
-		assignees: []dbgen.GetUsersForAssignmentRow{assignee},
+		session:                dbgen.Session{Token: "token", UserID: ownerID},
+		tasks:                  []dbgen.Task{task},
+		assignees:              []dbgen.GetUsersForAssignmentRow{assignee},
+		assigneeProfilePicture: assignee.ProfilePicture,
 	}
 	handler := newHandler(db, nil, false)
 	cookie := &http.Cookie{Name: "snappy_session", Value: "token"}
@@ -877,6 +882,34 @@ func TestTaskReadEndpoints(t *testing.T) {
 	}
 	if len(users) != 1 || users[0] != assignee {
 		t.Fatalf("assignable users = %#v", users)
+	}
+	var assignableUsers []struct {
+		ProfilePicture string `json:"profile_picture"`
+	}
+	if err := json.Unmarshal(usersResponse.Body.Bytes(), &assignableUsers); err != nil {
+		t.Fatalf("decode assignee profile pictures: %v", err)
+	}
+	if len(assignableUsers) != 1 || assignableUsers[0].ProfilePicture != "data:image/png;base64,AAAA" {
+		t.Fatalf("assignee profile pictures = %#v", assignableUsers)
+	}
+
+	withoutPictureHandler := newHandler(&fakeDB{
+		session:   dbgen.Session{Token: "token", UserID: ownerID},
+		assignees: []dbgen.GetUsersForAssignmentRow{assignee},
+	}, nil, false)
+	withoutPictureResponse := send(withoutPictureHandler, http.MethodGet, "/api/users", "", cookie)
+	if withoutPictureResponse.Code != http.StatusOK {
+		t.Fatalf("users without profile pictures status = %d, want %d: %s", withoutPictureResponse.Code, http.StatusOK, withoutPictureResponse.Body.String())
+	}
+	var usersWithoutPicture []map[string]json.RawMessage
+	if err := json.Unmarshal(withoutPictureResponse.Body.Bytes(), &usersWithoutPicture); err != nil {
+		t.Fatalf("decode users without profile pictures: %v", err)
+	}
+	if len(usersWithoutPicture) != 1 {
+		t.Fatalf("users without profile pictures = %#v", usersWithoutPicture)
+	}
+	if _, hasProfilePicture := usersWithoutPicture[0]["profile_picture"]; hasProfilePicture {
+		t.Fatalf("assignee without a profile picture includes profile_picture: %#v", usersWithoutPicture[0])
 	}
 
 	for _, test := range []struct {

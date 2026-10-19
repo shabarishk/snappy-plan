@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useDraggable } from '@dnd-kit/core';
 import { describe, expect, it, vi } from 'vitest';
 import App, { AuthenticatedBoard } from '../src/App';
@@ -59,6 +59,7 @@ describe('Tasks', () => {
     fireEvent.click(screen.getByText('Standalone task'));
 
     expect(screen.getByRole('heading', { name: 'To Do' })).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'Medium priority' })).toBeTruthy();
     expect(onSelectTask).toHaveBeenCalledWith(task);
   });
 
@@ -80,6 +81,8 @@ describe('Tasks', () => {
     const renderedTaskTitles = Array.from(container.querySelector('.board-column-tasks')!.children)
       .map((card) => card.querySelector('p')?.textContent);
     expect(renderedTaskTitles).toEqual(['Earlier due', 'Later due']);
+    expect(screen.getByRole('img', { name: 'Low priority' })).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'High priority' })).toBeTruthy();
   });
 
   it('orders tasks from highest to lowest priority', () => {
@@ -180,7 +183,7 @@ describe('Tasks', () => {
       const { rerender } = render(<AuthenticatedBoard tasks={tasks} setTasks={setTasks} />);
       fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
       await screen.findByText('Test task');
-      expect(screen.getByText('Priority: High')).toBeTruthy();
+      expect(screen.getByRole('img', { name: 'High priority' })).toBeTruthy();
       expect(screen.queryByText('Task details')).toBeNull();
   
       fireEvent.click(screen.getByRole('button', { name: 'Move to To Do' }));
@@ -776,10 +779,10 @@ describe('Tasks', () => {
           complete_by: new Date('2026-10-20T02:30').toISOString(),
         }),
       }));
-      expect(await screen.findByText('Priority: High')).toBeTruthy();
+      expect(await screen.findByRole('img', { name: 'High priority' })).toBeTruthy();
     });
 
-  it('groups cross-board tasks by initiative and assignee with ungrouped tasks last in backlog', async () => {
+  it('shows board and initiative metadata based on grouping and screen layout', async () => {
     const initiative: Initiative = {
       id: 'initiative-1',
       title: 'Launch Initiative',
@@ -814,11 +817,32 @@ describe('Tasks', () => {
       state: 'Backlog',
       assigned_to_id: 'user-1',
     });
+    let isPortraitLayout = false;
+    let updateLayout: ((event: MediaQueryListEvent) => void) | undefined;
+    const responsiveMediaQuery = {
+      get matches() {
+        return isPortraitLayout;
+      },
+      media: '(max-width: 767px), (orientation: portrait) and (max-width: 1024px)',
+      onchange: null,
+      addEventListener: vi.fn((_event: string, listener: (event: MediaQueryListEvent) => void) => {
+        updateLayout = listener;
+      }),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList;
+    vi.stubGlobal('matchMedia', vi.fn(() => responsiveMediaQuery));
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
       if (url === '/api/boards') return { ok: true, json: async () => boardList };
       if (url === '/api/tasks?board_id=board-1') return { ok: true, json: async () => [linkedTask, unlinkedTask] };
       if (url === '/api/tasks?board_id=board-2') return { ok: true, json: async () => [secondBoardTask, secondBoardBacklogTask] };
-      if (url === '/api/users') return { ok: true, json: async () => [{ id: 'user-1', full_name: 'Board Owner' }] };
+      if (url === '/api/users') return {
+        ok: true,
+        json: async () => [{
+          id: 'user-1',
+          full_name: 'Board Owner',
+          profile_picture: 'data:image/png;base64,AAAA',
+        }],
+      };
       if (url === '/api/initiatives') return { ok: true, json: async () => [initiative] };
       if (url === '/api/initiatives/initiative-1') {
         return { ok: true, json: async () => ({ initiative, tasks: [linkedTask] }) };
@@ -845,6 +869,18 @@ describe('Tasks', () => {
     fireEvent.click(assigneeFilter);
     expect(await screen.findByRole('checkbox', { name: 'Initiative: Launch Initiative' })).toBeTruthy();
     expect(screen.getByRole('checkbox', { name: 'Assignee: Unassigned' })).toBeTruthy();
+    const linkedBoardCard = screen.getByText('Linked task').closest<HTMLElement>('.task-card')!;
+    expect(within(linkedBoardCard).getByText('Launch Initiative')).toBeTruthy();
+    expect(linkedBoardCard.children[1].textContent).toBe('Launch Initiative');
+    expect(within(linkedBoardCard).queryByText('Board Owner')).toBeNull();
+    const taskCardFooter = linkedBoardCard.lastElementChild as HTMLElement;
+    expect(taskCardFooter.className).toContain('justify-end');
+    expect(taskCardFooter.children[0].getAttribute('aria-label')).toBe('Medium priority');
+    const assigneeTile = taskCardFooter.children[1] as HTMLElement;
+    expect(assigneeTile.getAttribute('aria-label')).toBe('Assignee: Board Owner');
+    expect(assigneeTile.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AAAA');
+    const unlinkedBoardCard = screen.getByText('Second board task').closest<HTMLElement>('.task-card')!;
+    expect(within(unlinkedBoardCard).queryByText('Launch Initiative')).toBeNull();
     for (const allCheckbox of ['Board: All', 'Initiative: All', 'Assignee: All']) {
       expect((screen.getByRole('checkbox', { name: allCheckbox }) as HTMLInputElement).checked).toBe(true);
     }
@@ -887,6 +923,12 @@ describe('Tasks', () => {
       'No Initiative tasks',
     ]);
     expect(within(initiativeGroups[1]).getByText('Second board task')).toBeTruthy();
+    const linkedInitiativeCard = within(initiativeGroups[0]).getByText('Linked task').closest<HTMLElement>('.task-card')!;
+    const linkedBoardName = within(linkedInitiativeCard).getByText('Board Owner');
+    expect(linkedBoardName.className).toContain('bg-gray-100');
+    expect(linkedInitiativeCard.children[1].textContent).toBe('Board Owner');
+    const unlinkedInitiativeCard = within(initiativeGroups[1]).getByText('Second board task').closest<HTMLElement>('.task-card')!;
+    expect(within(unlinkedInitiativeCard).getByText('Project Board').className).toContain('bg-gray-100');
 
     fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'assignee' } });
     const assigneeGroups = await screen.findAllByRole('region', { name: /^(Board Owner|No Assignee) tasks$/ });
@@ -897,6 +939,25 @@ describe('Tasks', () => {
       'Board Owner tasks',
       'No Assignee tasks',
     ]);
+    const linkedAssigneeCard = screen.getByText('Linked task').closest<HTMLElement>('.task-card')!;
+    expect(within(linkedAssigneeCard).queryByText('Board Owner')).toBeNull();
+    expect(within(linkedAssigneeCard).queryByText('Launch Initiative')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'board' } });
+    act(() => {
+      isPortraitLayout = true;
+      updateLayout?.(new Event('change') as MediaQueryListEvent);
+    });
+    const mobileSections = screen.getByRole('region', { name: 'Mobile active task sections' });
+    const linkedPortraitCard = within(mobileSections).getByText('Linked task').closest<HTMLElement>('.task-card')!;
+    expect(within(linkedPortraitCard).getByText('Board Owner').className).toContain('bg-gray-100');
+    expect(within(linkedPortraitCard).getByText('Launch Initiative')).toBeTruthy();
+    expect(linkedPortraitCard.children[1].textContent).toBe('Board Owner');
+    expect(linkedPortraitCard.children[2].textContent).toBe('Launch Initiative');
+    act(() => {
+      isPortraitLayout = false;
+      updateLayout?.(new Event('change') as MediaQueryListEvent);
+    });
+    fireEvent.change(screen.getByLabelText('Group tasks by'), { target: { value: 'assignee' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Backlog' }));
     const backlogGroups = await screen.findAllByRole('region', { name: /^(Board Owner|No Assignee) tasks$/ });
@@ -1300,7 +1361,7 @@ describe('Tasks', () => {
       fireEvent.click(within(backlogNotification).getByRole('button', { name: 'Show task on board' }));
       expect(screen.getByRole('button', { name: 'Backlog' }).getAttribute('aria-current')).toBe('page');
       expect(await screen.findByText('Review the garden plan')).toBeTruthy();
-      expect(screen.getByText('Priority: Medium')).toBeTruthy();
+      expect(screen.getByRole('img', { name: 'Medium priority' })).toBeTruthy();
       expect(fetchMock).toHaveBeenCalledWith('/api/tasks', expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
