@@ -27,6 +27,10 @@ type SelectedTask = {
 };
 
 const MOBILE_LAYOUT_QUERY = '(max-width: 767px), (orientation: portrait) and (max-width: 1024px)';
+const PULL_TO_REFRESH_THRESHOLD = 80;
+const MAX_PULL_DISTANCE = 104;
+const PULL_TO_REFRESH_OVERLAY_SELECTOR = '[aria-modal="true"], [role="dialog"], [role="alertdialog"], [role="menu"]';
+const PULL_TO_REFRESH_BLOCKED_TARGET_SELECTOR = `${PULL_TO_REFRESH_OVERLAY_SELECTOR}, input, textarea, select, [contenteditable="true"]`;
 
 const COMPLETED_TASK_RETENTION_MS = 24 * 60 * 60 * 1000;
 const BACKLOG_TASK_NOTIFICATION_MS = 5_000;
@@ -49,6 +53,9 @@ export function AuthenticatedBoard({
   const [expandedMobileFilter, setExpandedMobileFilter] = useState<'board' | 'initiative' | 'assignee' | null>(null);
   const [isTaskMoveMenuOpen, setIsTaskMoveMenuOpen] = useState(false);
   const [isTaskAssignmentsOpen, setIsTaskAssignmentsOpen] = useState(false);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [isPullRefreshing, setIsPullRefreshing] = useState(false);
+  const mainContentRef = useRef<HTMLElement>(null);
   const isTaskPage = currentPage === 'board' || currentPage === 'backlog';
   const isCreatePage = currentPage === 'create-task'
     || currentPage === 'create-board'
@@ -118,6 +125,86 @@ export function AuthenticatedBoard({
     mediaQuery.addEventListener('change', updateLayout);
     return () => mediaQuery.removeEventListener('change', updateLayout);
   }, []);
+
+  useEffect(() => {
+    const main = mainContentRef.current;
+    if (!isMobileLayout || !main) return;
+
+    let pullStart: { x: number; y: number; target: Element } | null = null;
+    let currentPullDistance = 0;
+    let refreshing = false;
+
+    const isAtTop = (target: Element) => {
+      if (main.scrollTop > 0) return false;
+      let ancestor: Element | null = target;
+      while (ancestor && ancestor !== main) {
+        if (ancestor.scrollTop > 0) return false;
+        ancestor = ancestor.parentElement;
+      }
+      return true;
+    };
+
+    const resetPull = () => {
+      pullStart = null;
+      currentPullDistance = 0;
+      setPullDistance(0);
+    };
+
+    const handleTouchStart = (event: TouchEvent) => {
+      if (refreshing || event.touches.length !== 1 || document.querySelector(PULL_TO_REFRESH_OVERLAY_SELECTOR)) return;
+      const target = event.target;
+      const touch = event.touches[0];
+      if (!(target instanceof Element) || target.closest(PULL_TO_REFRESH_BLOCKED_TARGET_SELECTOR) || !touch || !isAtTop(target)) return;
+
+      pullStart = { x: touch.clientX, y: touch.clientY, target };
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      if (!pullStart) return;
+      if (event.touches.length !== 1 || document.querySelector(PULL_TO_REFRESH_OVERLAY_SELECTOR) || !isAtTop(pullStart.target)) {
+        resetPull();
+        return;
+      }
+
+      const touch = event.touches[0];
+      if (!touch) {
+        resetPull();
+        return;
+      }
+      const deltaX = touch.clientX - pullStart.x;
+      const deltaY = touch.clientY - pullStart.y;
+      if (Math.abs(deltaX) > Math.abs(deltaY) || deltaY <= 0) {
+        resetPull();
+        return;
+      }
+
+      currentPullDistance = Math.min(deltaY, MAX_PULL_DISTANCE);
+      setPullDistance(currentPullDistance);
+      if (event.cancelable) event.preventDefault();
+    };
+
+    const handleTouchEnd = () => {
+      if (!pullStart) return;
+      const shouldRefresh = currentPullDistance >= PULL_TO_REFRESH_THRESHOLD;
+      resetPull();
+      if (!shouldRefresh) return;
+
+      refreshing = true;
+      setIsPullRefreshing(true);
+      window.location.reload();
+    };
+
+    main.addEventListener('touchstart', handleTouchStart, { passive: true });
+    main.addEventListener('touchmove', handleTouchMove, { passive: false });
+    main.addEventListener('touchend', handleTouchEnd);
+    main.addEventListener('touchcancel', resetPull);
+    return () => {
+      main.removeEventListener('touchstart', handleTouchStart);
+      main.removeEventListener('touchmove', handleTouchMove);
+      main.removeEventListener('touchend', handleTouchEnd);
+      main.removeEventListener('touchcancel', resetPull);
+    };
+  }, [isMobileLayout]);
 
   const navigateToPage = (page: AppPage, initiativeId?: string, initiativeTitle?: string) => {
     const path = pathForPage(page, initiativeId, initiativeTitle);
@@ -919,7 +1006,21 @@ export function AuthenticatedBoard({
       )}
 
       {/* Main content area takes up remaining height */}
-      <main className={`board-main flex-1 p-4 ${isTaskPage ? 'board-main-grouped' : ''} ${currentPage === 'task' ? 'board-main-task-page' : ''} ${currentPage === 'tasks' ? 'board-main-scrollable' : ''}`}>
+      <main ref={mainContentRef} className={`board-main flex-1 p-4 ${isTaskPage ? 'board-main-grouped' : ''} ${currentPage === 'task' ? 'board-main-task-page' : ''} ${currentPage === 'tasks' ? 'board-main-scrollable' : ''}`}>
+        {(pullDistance > 0 || isPullRefreshing) && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="pull-to-refresh-indicator"
+            style={{ height: `${isPullRefreshing ? 48 : pullDistance}px` }}
+          >
+            {isPullRefreshing
+              ? 'Refreshing…'
+              : pullDistance >= PULL_TO_REFRESH_THRESHOLD
+                ? 'Release to refresh'
+                : 'Pull to refresh'}
+          </div>
+        )}
         {currentPage === 'create-task' ? (
           <CreateTaskOverlay
             boards={boards}

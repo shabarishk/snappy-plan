@@ -88,6 +88,17 @@ body {
   overflow-y: auto;
 }
 
+.pull-to-refresh-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: #4b5563;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: height 120ms ease-out;
+}
+
 .board-main-task-page {
   overflow-y: auto;
 }
@@ -379,6 +390,7 @@ body {
     padding: 0.75rem 0.75rem calc(5rem + env(safe-area-inset-bottom));
     overflow-x: hidden;
     overflow-y: auto;
+    overscroll-behavior-y: contain;
   }
 
   .task-page-toolbar {
