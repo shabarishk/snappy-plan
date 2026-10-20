@@ -4,6 +4,7 @@ import { addTaskToInitiative, createTask as persistTask, createTaskComment, getI
 import type { ApiTask, Board, Initiative, TaskAssignee, TaskComment } from './api';
 import type { Task, TaskState } from './taskModel';
 import { toBoardTask } from './taskModel';
+import { POPUP_ANIMATION_DURATION_MS } from './useDelayedUnmount';
 
 function InitiativePicker({
   id,
@@ -108,6 +109,7 @@ export function CreateTaskOverlay({
   onClose,
   onCreated,
   isPage = false,
+  isOpen = true,
 }: {
   boards: Board[];
   selectedBoardId: string;
@@ -117,6 +119,7 @@ export function CreateTaskOverlay({
   onClose: () => void;
   onCreated: (task: Task, boardId: string) => void;
   isPage?: boolean;
+  isOpen?: boolean;
 }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -203,14 +206,22 @@ export function CreateTaskOverlay({
   };
 
   return (
-    <div className={isPage ? 'creation-page' : 'fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4'}>
+    <div
+      aria-hidden={!isPage && !isOpen ? true : undefined}
+      inert={!isPage && !isOpen}
+      className={isPage
+        ? 'creation-page'
+        : `popup-modal-backdrop ${isOpen ? 'popup-modal-backdrop-enter' : 'popup-modal-backdrop-exit'} fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm`}
+    >
       <section
-        role={isPage ? 'region' : 'dialog'}
-        aria-modal={isPage ? undefined : 'true'}
+        role={isPage ? 'region' : isOpen ? 'dialog' : undefined}
+        aria-modal={isPage || !isOpen ? undefined : 'true'}
+        aria-hidden={!isPage && !isOpen ? true : undefined}
+        inert={!isPage && !isOpen}
         aria-labelledby="create-task-title"
         className={isPage
           ? 'creation-page-content w-full rounded-xl bg-white p-5 shadow-sm sm:p-6'
-          : 'w-full max-w-lg rounded-xl bg-white p-6 shadow-xl'}
+          : `popup-modal-surface-${isOpen ? 'enter' : 'exit'} w-full max-w-lg rounded-xl bg-white p-6 shadow-xl`}
       >
         <div className="mb-5 flex items-center justify-between">
           <h2 id="create-task-title" className="text-xl font-bold text-gray-800">Create task</h2>
@@ -379,6 +390,8 @@ export function TaskDetailsOverlay({
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionRange, setMentionRange] = useState<{ start: number; end: number } | null>(null);
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
+  const [isClosing, setIsClosing] = useState(false);
+  const closeTimeoutRef = useRef<number | undefined>(undefined);
   const commentInputRef = useRef<HTMLTextAreaElement>(null);
   const initialInitiativeId = linkedInitiatives[0]?.id ?? '';
   const initialInitiativeTitle = linkedInitiatives[0]?.title ?? '';
@@ -524,18 +537,34 @@ export function TaskDetailsOverlay({
     setInitiativeSearchDraft(null);
   };
 
+  const closeOverlay = () => {
+    if (isClosing) return;
+    setIsClosing(true);
+    closeTimeoutRef.current = window.setTimeout(onClose, POPUP_ANIMATION_DURATION_MS);
+  };
+
+  useEffect(() => () => {
+    if (closeTimeoutRef.current !== undefined) window.clearTimeout(closeTimeoutRef.current);
+  }, []);
+
   return (
     <div
-      className={isPage ? 'task-details-page' : 'fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4'}
-      onClick={isPage ? undefined : onClose}
+      aria-hidden={!isPage && isClosing ? true : undefined}
+      inert={!isPage && isClosing}
+      className={isPage
+        ? 'task-details-page'
+        : `popup-modal-backdrop ${isClosing ? 'popup-modal-backdrop-exit' : 'popup-modal-backdrop-enter'} fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4`}
+      onClick={isPage ? undefined : closeOverlay}
     >
       <section
-        role={isPage ? 'region' : 'dialog'}
-        aria-modal={isPage ? undefined : 'true'}
+        role={isPage ? 'region' : isClosing ? undefined : 'dialog'}
+        aria-modal={isPage || isClosing ? undefined : 'true'}
+        aria-hidden={!isPage && isClosing ? true : undefined}
+        inert={!isPage && isClosing}
         aria-labelledby="task-details-title"
         className={isPage
           ? 'task-details-page-content w-full rounded-xl bg-white p-4 sm:p-6'
-          : 'max-h-[90vh] w-full max-w-6xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl'}
+          : `popup-modal-surface-${isClosing ? 'exit' : 'enter'} max-h-[90vh] w-full max-w-6xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl`}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-5 flex items-center justify-between">
@@ -555,7 +584,7 @@ export function TaskDetailsOverlay({
               </button>
             )}
             {!isPage && (
-              <button type="button" aria-label="Close task details" onClick={onClose} className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100">×</button>
+              <button type="button" aria-label="Close task details" onClick={closeOverlay} className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100">×</button>
             )}
           </div>
         </div>
@@ -660,20 +689,25 @@ export function TaskDetailsOverlay({
                 </div>
               </section>
             </div>
-            {isPage && isAssignmentsOpen && (
+            {isPage && (
               <button
                 type="button"
                 aria-label="Close assignments"
-                className="task-assignment-backdrop"
+                aria-hidden={!isAssignmentsOpen}
+                disabled={!isAssignmentsOpen}
+                className={`task-assignment-backdrop ${isAssignmentsOpen ? 'task-assignment-backdrop-open' : ''}`}
                 onClick={onCloseAssignments}
               />
             )}
             <aside
-              hidden={isPage && !isAssignmentsOpen}
-              role={isPage ? 'dialog' : undefined}
+              role={isPage && isAssignmentsOpen ? 'dialog' : undefined}
               aria-modal={isPage && isAssignmentsOpen ? 'true' : undefined}
+              aria-hidden={isPage ? !isAssignmentsOpen : undefined}
+              inert={isPage && !isAssignmentsOpen}
               aria-label={isPage ? 'Task assignments' : 'Task details'}
-              className={isPage ? 'task-assignment-panel' : 'space-y-4 rounded-lg bg-gray-50 p-4'}
+              className={isPage
+                ? `task-assignment-panel ${isAssignmentsOpen ? 'task-assignment-panel-open' : ''}`
+                : 'space-y-4 rounded-lg bg-gray-50 p-4'}
             >
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500">{isPage ? 'Assignments' : 'Details'}</h3>

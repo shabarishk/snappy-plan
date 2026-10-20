@@ -94,6 +94,7 @@ describe('Boards', () => {
       fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
       fireEvent.click(screen.getByRole('menuitem', { name: 'Board' }));
       const dialog = screen.getByRole('dialog', { name: 'Create a new board' });
+      expect(dialog.parentElement?.className).toContain('backdrop-blur-sm');
       fireEvent.change(screen.getByLabelText('Board name'), { target: { value: 'New Shared Board' } });
       fireEvent.click(screen.getByLabelText('Teammate (user-2)'));
       fireEvent.submit(dialog.querySelector('form')!);

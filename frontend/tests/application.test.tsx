@@ -100,6 +100,7 @@ describe('Application', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open filters' }));
     expect(screen.getByRole('dialog', { name: 'Task filters' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Task filters' }).className).toContain('mobile-filter-panel-open');
     fireEvent.click(screen.getByRole('button', { name: 'Board' }));
     expect(screen.getByLabelText('Board: All')).toBeTruthy();
     fireEvent.click(screen.getByLabelText('Board: Board Owner'));
@@ -114,6 +115,55 @@ describe('Application', () => {
     expect(screen.getByLabelText('Assignee: All')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Close task filters' }));
     expect(screen.queryByRole('dialog', { name: 'Task filters' })).toBeNull();
+    expect(document.querySelector('.mobile-filter-panel')?.classList.contains('mobile-filter-panel-open')).toBe(false);
+  });
+
+  it('pulls to refresh portrait pages after a downward gesture at the top', async () => {
+    const mobileMediaQuery = {
+      matches: true,
+      media: '(max-width: 767px), (orientation: portrait) and (max-width: 1024px)',
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList;
+    window.history.replaceState({}, '', '/settings');
+    vi.stubGlobal('matchMedia', vi.fn(() => mobileMediaQuery));
+    vi.stubGlobal('fetch', mockBoardReads());
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Settings', level: 1 });
+    const main = document.querySelector('main');
+    expect(main).not.toBeNull();
+
+    fireEvent.touchStart(main!, { touches: [{ identifier: 1, clientX: 20, clientY: 0 }] });
+    fireEvent.touchMove(main!, { touches: [{ identifier: 1, clientX: 20, clientY: 100 }] });
+    expect(screen.getByRole('status').textContent).toBe('Release to refresh');
+    fireEvent.touchEnd(main!, { touches: [], changedTouches: [{ identifier: 1, clientX: 20, clientY: 100 }] });
+
+    expect(screen.getByRole('status').textContent).toBe('Refreshing…');
+  });
+
+  it('does not pull to refresh from an open overlay', async () => {
+    const mobileMediaQuery = {
+      matches: true,
+      media: '(max-width: 767px), (orientation: portrait) and (max-width: 1024px)',
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList;
+    vi.stubGlobal('matchMedia', vi.fn(() => mobileMediaQuery));
+    vi.stubGlobal('fetch', mockBoardReads());
+    render(<App />);
+
+    await screen.findByRole('region', { name: 'Mobile active task sections' });
+    fireEvent.click(screen.getByRole('button', { name: 'Open filters' }));
+    const filters = screen.getByRole('dialog', { name: 'Task filters' });
+
+    fireEvent.touchStart(filters, { touches: [{ identifier: 1, clientX: 20, clientY: 0 }] });
+    fireEvent.touchMove(filters, { touches: [{ identifier: 1, clientX: 20, clientY: 100 }] });
+    fireEvent.touchEnd(filters, { touches: [], changedTouches: [{ identifier: 1, clientX: 20, clientY: 100 }] });
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
   });
 
   it('keeps a portrait create button fixed and opens a dedicated page for each create option', async () => {
@@ -134,6 +184,7 @@ describe('Application', () => {
     expect(createButton.parentElement?.className).toContain('mobile-create-menu');
 
     fireEvent.click(createButton);
+    expect(screen.getByRole('button', { name: 'Close create menu' }).className).toContain('backdrop-blur-sm');
     expect(screen.getByRole('menu', { name: 'Create' })).toBeTruthy();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Task' }));
     expect(window.location.pathname).toBe('/create/task');

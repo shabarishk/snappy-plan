@@ -1,6 +1,7 @@
 import type { RefObject } from 'react';
 import type { UserProfile } from './api';
 import type { AppPage } from './navigation';
+import { useDelayedUnmount } from './useDelayedUnmount';
 
 type AuthenticatedSidebarProps = {
   currentPage: AppPage;
@@ -37,6 +38,8 @@ export function AuthenticatedSidebar({
   onNavigateFromMenu,
   onLogout,
 }: AuthenticatedSidebarProps) {
+  const shouldRenderProfileMenu = useDelayedUnmount(isProfileMenuOpen);
+
   return (
     <>
       {isMobileLayout && isMobileSidebarOpen && (
@@ -137,8 +140,14 @@ export function AuthenticatedSidebar({
               : profileInitial}
             {isMobileLayout && <span className="sidebar-label">{profileDisplayName || profile?.username || 'Account'}</span>}
           </button>
-          {isProfileMenuOpen && (
-            <div role="menu" aria-label="User menu" className="sidebar-user-menu absolute bottom-4 left-full ml-2 w-40 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
+          {shouldRenderProfileMenu && (
+            <div
+              role={isProfileMenuOpen ? 'menu' : undefined}
+              aria-hidden={!isProfileMenuOpen}
+              inert={!isProfileMenuOpen}
+              aria-label="User menu"
+              className={`sidebar-user-menu absolute bottom-4 left-full ml-2 w-40 rounded-lg border border-gray-200 bg-white p-1 shadow-lg ${isProfileMenuOpen ? 'popup-menu-enter' : 'popup-menu-exit'}`}
+            >
               {logoutError && <p role="alert" className="px-3 py-2 text-xs text-red-700">{logoutError}</p>}
               <button type="button" role="menuitem" onClick={() => onNavigateFromMenu('profile')} className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">Profile</button>
               <button type="button" role="menuitem" onClick={() => onNavigateFromMenu('settings')} className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">Settings</button>

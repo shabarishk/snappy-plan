@@ -88,6 +88,17 @@ body {
   overflow-y: auto;
 }
 
+.pull-to-refresh-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: #4b5563;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: height 120ms ease-out;
+}
+
 .board-main-task-page {
   overflow-y: auto;
 }
@@ -129,6 +140,16 @@ body {
   inset: 0;
   border: 0;
   background: rgb(15 23 42 / 42%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 180ms ease, visibility 180ms ease;
+}
+
+.task-assignment-backdrop-open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
 }
 
 .task-assignment-panel {
@@ -141,6 +162,71 @@ body {
   padding: 1.25rem;
   background: white;
   box-shadow: -12px 0 32px rgb(15 23 42 / 18%);
+  transform: translateX(100%);
+  visibility: hidden;
+  transition: transform 180ms ease, visibility 180ms ease;
+}
+
+.task-assignment-panel-open {
+  transform: translateX(0);
+  visibility: visible;
+}
+
+.popup-modal-backdrop-enter {
+  animation: popup-backdrop-in 180ms ease-out both;
+}
+
+.popup-modal-backdrop-exit {
+  animation: popup-backdrop-out 180ms ease-in both;
+  pointer-events: none;
+}
+
+.popup-modal-surface-enter {
+  animation: popup-surface-in 180ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+.popup-modal-surface-exit {
+  animation: popup-surface-out 180ms ease-in both;
+  pointer-events: none;
+}
+
+.popup-menu-enter {
+  animation: popup-menu-in 150ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+.popup-menu-exit {
+  animation: popup-menu-out 120ms ease-in both;
+  pointer-events: none;
+}
+
+@keyframes popup-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes popup-backdrop-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes popup-surface-in {
+  from { opacity: 0; transform: translateY(0.5rem) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes popup-surface-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(0.25rem) scale(0.98); }
+}
+
+@keyframes popup-menu-in {
+  from { opacity: 0; transform: translateY(-0.25rem) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes popup-menu-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(-0.125rem) scale(0.98); }
 }
 
 .mobile-menu-button,
@@ -379,6 +465,7 @@ body {
     padding: 0.75rem 0.75rem calc(5rem + env(safe-area-inset-bottom));
     overflow-x: hidden;
     overflow-y: auto;
+    overscroll-behavior-y: contain;
   }
 
   .task-page-toolbar {
@@ -610,6 +697,16 @@ body {
     inset: 0;
     border: 0;
     background: rgb(15 23 42 / 42%);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 180ms ease, visibility 180ms ease;
+  }
+
+  .mobile-filter-backdrop-open {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
   }
 
   .mobile-filter-panel {
@@ -623,6 +720,14 @@ body {
     padding-bottom: env(safe-area-inset-bottom);
     background: white;
     box-shadow: -12px 0 32px rgb(15 23 42 / 18%);
+    transform: translateX(100%);
+    visibility: hidden;
+    transition: transform 180ms ease, visibility 180ms ease;
+  }
+
+  .mobile-filter-panel-open {
+    transform: translateX(0);
+    visibility: visible;
   }
 
   .mobile-task-columns {
@@ -640,6 +745,22 @@ body {
   .mobile-task-columns .board-column-tasks {
     flex: none;
     overflow: visible;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-assignment-backdrop,
+  .task-assignment-panel,
+  .mobile-filter-backdrop,
+  .mobile-filter-panel,
+  .popup-modal-backdrop-enter,
+  .popup-modal-backdrop-exit,
+  .popup-modal-surface-enter,
+  .popup-modal-surface-exit,
+  .popup-menu-enter,
+  .popup-menu-exit {
+    transition-duration: 1ms;
+    animation-duration: 1ms;
   }
 
   .mobile-task-columns .task-card {

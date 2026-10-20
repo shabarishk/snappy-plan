@@ -20,6 +20,7 @@ import { BoardTaskColumns, type TaskGroup, type TaskGroupBy } from './BoardTaskC
 import { CheckboxFilter } from './TaskFilters';
 import { isAllSelected, toggleAllFilter, toggleFilterOption } from './taskFilterUtils';
 import type { FilterOption, FilterSelection } from './taskFilterUtils';
+import { useDelayedUnmount } from './useDelayedUnmount';
 
 type SelectedTask = {
   task: Task;
@@ -27,6 +28,10 @@ type SelectedTask = {
 };
 
 const MOBILE_LAYOUT_QUERY = '(max-width: 767px), (orientation: portrait) and (max-width: 1024px)';
+const PULL_TO_REFRESH_THRESHOLD = 80;
+const MAX_PULL_DISTANCE = 104;
+const PULL_TO_REFRESH_OVERLAY_SELECTOR = '[aria-modal="true"], [role="dialog"], [role="alertdialog"], [role="menu"]';
+const PULL_TO_REFRESH_BLOCKED_TARGET_SELECTOR = `${PULL_TO_REFRESH_OVERLAY_SELECTOR}, input, textarea, select, [contenteditable="true"]`;
 
 const COMPLETED_TASK_RETENTION_MS = 24 * 60 * 60 * 1000;
 const BACKLOG_TASK_NOTIFICATION_MS = 5_000;
@@ -49,6 +54,9 @@ export function AuthenticatedBoard({
   const [expandedMobileFilter, setExpandedMobileFilter] = useState<'board' | 'initiative' | 'assignee' | null>(null);
   const [isTaskMoveMenuOpen, setIsTaskMoveMenuOpen] = useState(false);
   const [isTaskAssignmentsOpen, setIsTaskAssignmentsOpen] = useState(false);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [isPullRefreshing, setIsPullRefreshing] = useState(false);
+  const mainContentRef = useRef<HTMLElement>(null);
   const isTaskPage = currentPage === 'board' || currentPage === 'backlog';
   const isCreatePage = currentPage === 'create-task'
     || currentPage === 'create-board'
@@ -56,6 +64,7 @@ export function AuthenticatedBoard({
   const needsInitiativeGrouping = isTaskPage || currentPage === 'tasks' || currentPage === 'task';
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [selectedTask, setSelectedTask] = useState<SelectedTask | null>(null);
+  const [selectedTaskView, setSelectedTaskView] = useState(0);
   const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
   const [boards, setBoards] = useState<Board[]>([]);
   const [selectedBoardId, setSelectedBoardId] = useState('');
@@ -82,6 +91,11 @@ export function AuthenticatedBoard({
   const [isCreateInitiativeOpen, setIsCreateInitiativeOpen] = useState(false);
   const [initiativeRefreshToken, setInitiativeRefreshToken] = useState(0);
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
+  const shouldRenderCreateMenu = useDelayedUnmount(isCreateMenuOpen);
+  const shouldRenderTaskMoveMenu = useDelayedUnmount(isTaskMoveMenuOpen);
+  const shouldRenderCreateTaskOverlay = useDelayedUnmount(isCreateTaskOpen);
+  const shouldRenderCreateBoardOverlay = useDelayedUnmount(isCreateBoardOpen);
+  const shouldRenderCreateInitiativeOverlay = useDelayedUnmount(isCreateInitiativeOpen);
   const [loadError, setLoadError] = useState('');
   const [moveError, setMoveError] = useState('');
   const [boardOrderError, setBoardOrderError] = useState('');
@@ -118,6 +132,86 @@ export function AuthenticatedBoard({
     mediaQuery.addEventListener('change', updateLayout);
     return () => mediaQuery.removeEventListener('change', updateLayout);
   }, []);
+
+  useEffect(() => {
+    const main = mainContentRef.current;
+    if (!isMobileLayout || !main) return;
+
+    let pullStart: { x: number; y: number; target: Element } | null = null;
+    let currentPullDistance = 0;
+    let refreshing = false;
+
+    const isAtTop = (target: Element) => {
+      if (main.scrollTop > 0) return false;
+      let ancestor: Element | null = target;
+      while (ancestor && ancestor !== main) {
+        if (ancestor.scrollTop > 0) return false;
+        ancestor = ancestor.parentElement;
+      }
+      return true;
+    };
+
+    const resetPull = () => {
+      pullStart = null;
+      currentPullDistance = 0;
+      setPullDistance(0);
+    };
+
+    const handleTouchStart = (event: TouchEvent) => {
+      if (refreshing || event.touches.length !== 1 || document.querySelector(PULL_TO_REFRESH_OVERLAY_SELECTOR)) return;
+      const target = event.target;
+      const touch = event.touches[0];
+      if (!(target instanceof Element) || target.closest(PULL_TO_REFRESH_BLOCKED_TARGET_SELECTOR) || !touch || !isAtTop(target)) return;
+
+      pullStart = { x: touch.clientX, y: touch.clientY, target };
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      if (!pullStart) return;
+      if (event.touches.length !== 1 || document.querySelector(PULL_TO_REFRESH_OVERLAY_SELECTOR) || !isAtTop(pullStart.target)) {
+        resetPull();
+        return;
+      }
+
+      const touch = event.touches[0];
+      if (!touch) {
+        resetPull();
+        return;
+      }
+      const deltaX = touch.clientX - pullStart.x;
+      const deltaY = touch.clientY - pullStart.y;
+      if (Math.abs(deltaX) > Math.abs(deltaY) || deltaY <= 0) {
+        resetPull();
+        return;
+      }
+
+      currentPullDistance = Math.min(deltaY, MAX_PULL_DISTANCE);
+      setPullDistance(currentPullDistance);
+      if (event.cancelable) event.preventDefault();
+    };
+
+    const handleTouchEnd = () => {
+      if (!pullStart) return;
+      const shouldRefresh = currentPullDistance >= PULL_TO_REFRESH_THRESHOLD;
+      resetPull();
+      if (!shouldRefresh) return;
+
+      refreshing = true;
+      setIsPullRefreshing(true);
+      window.location.reload();
+    };
+
+    main.addEventListener('touchstart', handleTouchStart, { passive: true });
+    main.addEventListener('touchmove', handleTouchMove, { passive: false });
+    main.addEventListener('touchend', handleTouchEnd);
+    main.addEventListener('touchcancel', resetPull);
+    return () => {
+      main.removeEventListener('touchstart', handleTouchStart);
+      main.removeEventListener('touchmove', handleTouchMove);
+      main.removeEventListener('touchend', handleTouchEnd);
+      main.removeEventListener('touchcancel', resetPull);
+    };
+  }, [isMobileLayout]);
 
   const navigateToPage = (page: AppPage, initiativeId?: string, initiativeTitle?: string) => {
     const path = pathForPage(page, initiativeId, initiativeTitle);
@@ -186,6 +280,7 @@ export function AuthenticatedBoard({
 
   const handleSelectTask = (task: Task, boardId: string) => {
     setSelectedTask({ task, boardId });
+    setSelectedTaskView((version) => version + 1);
     if (isMobileLayout) {
       taskReturnPageRef.current = currentPage;
       navigateToPage('task', task.id);
@@ -742,7 +837,11 @@ export function AuthenticatedBoard({
               onSelectTask={handleSelectTask}
             />
             {!isCreatePage && (isMobileLayout || currentPage !== 'profile' && currentPage !== 'settings') && (
-            <div ref={createMenuRef} className={isMobileLayout ? 'mobile-create-menu' : 'relative shrink-0'}>
+            <div
+              ref={createMenuRef}
+              className={isMobileLayout ? 'mobile-create-menu' : 'relative shrink-0'}
+              style={isCreateMenuOpen ? { zIndex: 101 } : undefined}
+            >
               <button
                 type="button"
                 aria-haspopup="menu"
@@ -754,29 +853,45 @@ export function AuthenticatedBoard({
                 <span aria-hidden="true" className="create-menu-plus">+</span>
                 <span className="create-menu-label">Create</span>
               </button>
-              {isCreateMenuOpen && (
-                <div role="menu" aria-label="Create" className="absolute right-0 top-full z-30 mt-2 w-48 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
-                  <button type="button" role="menuitem" onClick={() => openCreateItem('task')} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
-                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
-                      <rect x="3" y="3" width="18" height="18" rx="3" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="m8 12 3 3 5-6" />
-                    </svg>
-                    Task
-                  </button>
-                  <button type="button" role="menuitem" onClick={() => openCreateItem('board')} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
-                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
-                      <rect x="3" y="4" width="18" height="16" rx="2" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 4v16m6-16v16" />
-                    </svg>
-                    Board
-                  </button>
-                  <button type="button" role="menuitem" onClick={() => openCreateItem('initiative')} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
-                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 2 4 14h7l-1 8 10-12h-7l1-8Z" />
-                    </svg>
-                    Initiative
-                  </button>
-                </div>
+              {shouldRenderCreateMenu && (
+                <>
+                  <button
+                    type="button"
+                    aria-label="Close create menu"
+                    aria-hidden={!isCreateMenuOpen}
+                    disabled={!isCreateMenuOpen}
+                    className={`popup-modal-backdrop ${isCreateMenuOpen ? 'popup-modal-backdrop-enter' : 'popup-modal-backdrop-exit'} fixed inset-0 z-[100] border-0 bg-slate-900/10 backdrop-blur-sm`}
+                    onClick={() => setIsCreateMenuOpen(false)}
+                  />
+                  <div
+                    role={isCreateMenuOpen ? 'menu' : undefined}
+                    aria-hidden={!isCreateMenuOpen}
+                    inert={!isCreateMenuOpen}
+                    aria-label="Create"
+                    className={`absolute right-0 top-full z-[101] mt-2 w-48 rounded-lg border border-gray-200 bg-white p-1 shadow-lg ${isCreateMenuOpen ? 'popup-menu-enter' : 'popup-menu-exit'}`}
+                  >
+                    <button type="button" role="menuitem" onClick={() => openCreateItem('task')} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
+                      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
+                        <rect x="3" y="3" width="18" height="18" rx="3" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m8 12 3 3 5-6" />
+                      </svg>
+                      Task
+                    </button>
+                    <button type="button" role="menuitem" onClick={() => openCreateItem('board')} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
+                      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
+                        <rect x="3" y="4" width="18" height="16" rx="2" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 4v16m6-16v16" />
+                      </svg>
+                      Board
+                    </button>
+                    <button type="button" role="menuitem" onClick={() => openCreateItem('initiative')} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
+                      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 2 4 14h7l-1 8 10-12h-7l1-8Z" />
+                      </svg>
+                      Initiative
+                    </button>
+                  </div>
+                </>
               )}
             </div>
             )}
@@ -784,7 +899,7 @@ export function AuthenticatedBoard({
         )}
         <NotificationBell />
       </header>
-      {currentPage !== 'profile' && currentPage !== 'settings' && !isCreatePage && isCreateTaskOpen && (
+      {currentPage !== 'profile' && currentPage !== 'settings' && !isCreatePage && shouldRenderCreateTaskOverlay && (
         <CreateTaskOverlay
           boards={boards}
           selectedBoardId={selectedBoardId}
@@ -793,6 +908,7 @@ export function AuthenticatedBoard({
           boardInitiatives={initiativesByBoardId}
           onClose={() => setIsCreateTaskOpen(false)}
           onCreated={handleTaskCreated}
+          isOpen={isCreateTaskOpen}
         />
       )}
       {backlogTaskNotification && (
@@ -813,18 +929,20 @@ export function AuthenticatedBoard({
           </button>
         </div>
       )}
-      {currentPage !== 'profile' && currentPage !== 'settings' && !isCreatePage && isCreateBoardOpen && (
+      {currentPage !== 'profile' && currentPage !== 'settings' && !isCreatePage && shouldRenderCreateBoardOverlay && (
         <CreateBoardOverlay
           users={assignees}
           onClose={() => setIsCreateBoardOpen(false)}
           onCreated={handleBoardCreated}
+          isOpen={isCreateBoardOpen}
         />
       )}
-      {currentPage !== 'profile' && currentPage !== 'settings' && !isCreatePage && isCreateInitiativeOpen && (
+      {currentPage !== 'profile' && currentPage !== 'settings' && !isCreatePage && shouldRenderCreateInitiativeOverlay && (
         <CreateInitiativeOverlay
           users={assignees}
           onClose={() => setIsCreateInitiativeOpen(false)}
           onCreated={handleInitiativeCreated}
+          isOpen={isCreateInitiativeOpen}
         />
       )}
       {currentPage === 'task' && taskPageSelection && (
@@ -842,45 +960,61 @@ export function AuthenticatedBoard({
                 <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
               </svg>
             </button>
-            {isTaskMoveMenuOpen && (
-              <div role="menu" aria-label="Move task" className="absolute left-0 top-full z-30 mt-2 w-56 rounded-lg border border-gray-200 bg-white p-1 shadow-xl">
+            {shouldRenderTaskMoveMenu && (
+              <>
                 <button
                   type="button"
-                  role="menuitem"
-                  disabled={!forwardTaskState}
-                  onClick={() => {
-                    if (forwardTaskState) moveTaskPageState(forwardTaskState);
-                  }}
-                  className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                  aria-label="Close task move menu"
+                  aria-hidden={!isTaskMoveMenuOpen}
+                  disabled={!isTaskMoveMenuOpen}
+                  className={`popup-modal-backdrop ${isTaskMoveMenuOpen ? 'popup-modal-backdrop-enter' : 'popup-modal-backdrop-exit'} fixed inset-0 z-[100] border-0 bg-slate-900/10 backdrop-blur-sm`}
+                  onClick={() => setIsTaskMoveMenuOpen(false)}
+                />
+                <div
+                  role={isTaskMoveMenuOpen ? 'menu' : undefined}
+                  aria-hidden={!isTaskMoveMenuOpen}
+                  inert={!isTaskMoveMenuOpen}
+                  aria-label="Move task"
+                  className={`absolute left-0 top-full z-[101] mt-2 w-56 rounded-lg border border-gray-200 bg-white p-1 shadow-xl ${isTaskMoveMenuOpen ? 'popup-menu-enter' : 'popup-menu-exit'}`}
                 >
-                  {isMobileLayout
-                    ? forwardTaskState ? TASK_STATE_LABELS[forwardTaskState] : 'No further step'
-                    : forwardTaskState
-                      ? `${isTaskCompleted ? '' : 'Forward: '}${TASK_STATE_LABELS[forwardTaskState]}`
-                      : 'Forward: No further step'}
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  disabled={!backwardTaskState}
-                  onClick={() => {
-                    if (backwardTaskState) moveTaskPageState(backwardTaskState);
-                  }}
-                  className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
-                >
-                  {isMobileLayout
-                    ? backwardTaskState ? TASK_STATE_LABELS[backwardTaskState] : 'No earlier step'
-                    : backwardTaskState
-                      ? `${isTaskCompleted ? '' : 'Backward: '}${TASK_STATE_LABELS[backwardTaskState]}`
-                      : 'Backward: No earlier step'}
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!forwardTaskState}
+                    onClick={() => {
+                      if (forwardTaskState) moveTaskPageState(forwardTaskState);
+                    }}
+                    className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                  >
+                    {isMobileLayout
+                      ? forwardTaskState ? TASK_STATE_LABELS[forwardTaskState] : 'No further step'
+                      : forwardTaskState
+                        ? `${isTaskCompleted ? '' : 'Forward: '}${TASK_STATE_LABELS[forwardTaskState]}`
+                        : 'Forward: No further step'}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!backwardTaskState}
+                    onClick={() => {
+                      if (backwardTaskState) moveTaskPageState(backwardTaskState);
+                    }}
+                    className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                  >
+                    {isMobileLayout
+                      ? backwardTaskState ? TASK_STATE_LABELS[backwardTaskState] : 'No earlier step'
+                      : backwardTaskState
+                        ? `${isTaskCompleted ? '' : 'Backward: '}${TASK_STATE_LABELS[backwardTaskState]}`
+                        : 'Backward: No earlier step'}
+                  </button>
+                </div>
+              </>
             )}
           </div>
           <button
             type="button"
             onClick={() => setIsTaskAssignmentsOpen(true)}
-            className="min-h-10 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+            className="ml-auto min-h-10 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
           >
             View assignments
           </button>
@@ -889,7 +1023,7 @@ export function AuthenticatedBoard({
       )}
       {selectedTask && currentPage !== 'task' && currentPage !== 'profile' && currentPage !== 'settings' && (
         <TaskDetailsOverlay
-          key={selectedTask.task.id}
+          key={`${selectedTask.task.id}-${selectedTaskView}`}
           task={selectedTask.task}
           boards={boards}
           assignees={assignees}
@@ -919,7 +1053,21 @@ export function AuthenticatedBoard({
       )}
 
       {/* Main content area takes up remaining height */}
-      <main className={`board-main flex-1 p-4 ${isTaskPage ? 'board-main-grouped' : ''} ${currentPage === 'task' ? 'board-main-task-page' : ''} ${currentPage === 'tasks' ? 'board-main-scrollable' : ''}`}>
+      <main ref={mainContentRef} className={`board-main flex-1 p-4 ${isTaskPage ? 'board-main-grouped' : ''} ${currentPage === 'task' ? 'board-main-task-page' : ''} ${currentPage === 'tasks' ? 'board-main-scrollable' : ''}`}>
+        {(pullDistance > 0 || isPullRefreshing) && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="pull-to-refresh-indicator"
+            style={{ height: `${isPullRefreshing ? 48 : pullDistance}px` }}
+          >
+            {isPullRefreshing
+              ? 'Refreshing…'
+              : pullDistance >= PULL_TO_REFRESH_THRESHOLD
+                ? 'Release to refresh'
+                : 'Pull to refresh'}
+          </div>
+        )}
         {currentPage === 'create-task' ? (
           <CreateTaskOverlay
             boards={boards}
@@ -1186,15 +1334,24 @@ export function AuthenticatedBoard({
             </label>
           </div>
         )}
-        {isMobileLayout && isMobileFiltersOpen && (
+        {isMobileLayout && (
           <>
             <button
               type="button"
               aria-label="Close task filters"
-              className="mobile-filter-backdrop"
+              aria-hidden={!isMobileFiltersOpen}
+              disabled={!isMobileFiltersOpen}
+              className={`mobile-filter-backdrop ${isMobileFiltersOpen ? 'mobile-filter-backdrop-open' : ''}`}
               onClick={closeMobileFilters}
             />
-            <section role="dialog" aria-modal="true" aria-label="Task filters" className="mobile-filter-panel">
+            <section
+              role={isMobileFiltersOpen ? 'dialog' : undefined}
+              aria-modal={isMobileFiltersOpen ? 'true' : undefined}
+              aria-hidden={!isMobileFiltersOpen}
+              inert={!isMobileFiltersOpen}
+              aria-label="Task filters"
+              className={`mobile-filter-panel ${isMobileFiltersOpen ? 'mobile-filter-panel-open' : ''}`}
+            >
               <header className="flex items-center justify-between border-b border-gray-200 px-4 py-4">
                 <h2 className="text-lg font-semibold text-gray-900">Filters</h2>
                 <button
