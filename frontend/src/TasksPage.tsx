@@ -205,15 +205,24 @@ export function TasksPage({
       </div>
 
       {!isMobileLayout && <div className="tasks-page-filters flex flex-wrap items-center gap-3">{filterControls}</div>}
-      {isMobileLayout && isMobileFiltersOpen && (
+      {isMobileLayout && (
         <>
           <button
             type="button"
             aria-label="Close task filters"
-            className="mobile-filter-backdrop"
+            aria-hidden={!isMobileFiltersOpen}
+            disabled={!isMobileFiltersOpen}
+            className={`mobile-filter-backdrop ${isMobileFiltersOpen ? 'mobile-filter-backdrop-open' : ''}`}
             onClick={() => setIsMobileFiltersOpen(false)}
           />
-          <section role="dialog" aria-modal="true" aria-label="Task filters" className="mobile-filter-panel">
+          <section
+            role={isMobileFiltersOpen ? 'dialog' : undefined}
+            aria-modal={isMobileFiltersOpen ? 'true' : undefined}
+            aria-hidden={!isMobileFiltersOpen}
+            inert={!isMobileFiltersOpen}
+            aria-label="Task filters"
+            className={`mobile-filter-panel ${isMobileFiltersOpen ? 'mobile-filter-panel-open' : ''}`}
+          >
             <header className="flex items-center justify-between border-b border-gray-200 px-4 py-4">
               <h2 className="text-lg font-semibold text-gray-900">Filters</h2>
               <button

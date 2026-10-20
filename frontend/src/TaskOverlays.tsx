@@ -660,20 +660,25 @@ export function TaskDetailsOverlay({
                 </div>
               </section>
             </div>
-            {isPage && isAssignmentsOpen && (
+            {isPage && (
               <button
                 type="button"
                 aria-label="Close assignments"
-                className="task-assignment-backdrop"
+                aria-hidden={!isAssignmentsOpen}
+                disabled={!isAssignmentsOpen}
+                className={`task-assignment-backdrop ${isAssignmentsOpen ? 'task-assignment-backdrop-open' : ''}`}
                 onClick={onCloseAssignments}
               />
             )}
             <aside
-              hidden={isPage && !isAssignmentsOpen}
-              role={isPage ? 'dialog' : undefined}
+              role={isPage && isAssignmentsOpen ? 'dialog' : undefined}
               aria-modal={isPage && isAssignmentsOpen ? 'true' : undefined}
+              aria-hidden={isPage ? !isAssignmentsOpen : undefined}
+              inert={isPage && !isAssignmentsOpen}
               aria-label={isPage ? 'Task assignments' : 'Task details'}
-              className={isPage ? 'task-assignment-panel' : 'space-y-4 rounded-lg bg-gray-50 p-4'}
+              className={isPage
+                ? `task-assignment-panel ${isAssignmentsOpen ? 'task-assignment-panel-open' : ''}`
+                : 'space-y-4 rounded-lg bg-gray-50 p-4'}
             >
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500">{isPage ? 'Assignments' : 'Details'}</h3>

@@ -100,6 +100,7 @@ describe('Application', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open filters' }));
     expect(screen.getByRole('dialog', { name: 'Task filters' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Task filters' }).className).toContain('mobile-filter-panel-open');
     fireEvent.click(screen.getByRole('button', { name: 'Board' }));
     expect(screen.getByLabelText('Board: All')).toBeTruthy();
     fireEvent.click(screen.getByLabelText('Board: Board Owner'));
@@ -114,6 +115,7 @@ describe('Application', () => {
     expect(screen.getByLabelText('Assignee: All')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Close task filters' }));
     expect(screen.queryByRole('dialog', { name: 'Task filters' })).toBeNull();
+    expect(document.querySelector('.mobile-filter-panel')?.classList.contains('mobile-filter-panel-open')).toBe(false);
   });
 
   it('pulls to refresh portrait pages after a downward gesture at the top', async () => {

@@ -450,11 +450,14 @@ describe('Tasks', () => {
     expect(await screen.findByRole('region', { name: 'Task details' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'View assignments' }));
     const assignments = screen.getByRole('dialog', { name: 'Task assignments' });
+    expect(assignments.className).toContain('task-assignment-panel-open');
     expect(within(assignments).getByLabelText('Board')).toBeTruthy();
     expect(within(assignments).getByLabelText('Initiatives')).toBeTruthy();
     expect(within(assignments).getByLabelText('Assigned to')).toBeTruthy();
     expect(within(assignments).getByLabelText('Complete by')).toBeTruthy();
     fireEvent.click(within(assignments).getByRole('button', { name: 'Close assignments' }));
+    expect(assignments.className).not.toContain('task-assignment-panel-open');
+    expect(assignments.getAttribute('aria-hidden')).toBe('true');
     fireEvent.click(screen.getByRole('button', { name: 'Back to tasks' }));
     expect(window.location.pathname).toBe('/');
   });
@@ -1276,10 +1279,13 @@ describe('Tasks', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open filters' }));
     const filters = screen.getByRole('dialog', { name: 'Task filters' });
+    expect(filters.className).toContain('mobile-filter-panel-open');
     fireEvent.change(within(filters).getByLabelText('Filter by board'), { target: { value: 'board-2' } });
     expect(screen.queryByText('Portrait task one')).toBeNull();
     expect(screen.getByText('Portrait task two')).toBeTruthy();
     fireEvent.click(within(filters).getByRole('button', { name: 'Close filters' }));
+    expect(screen.queryByRole('dialog', { name: 'Task filters' })).toBeNull();
+    expect(filters.className).not.toContain('mobile-filter-panel-open');
 
     fireEvent.click(screen.getByRole('button', { name: 'Open navigation menu' }));
     fireEvent.click(screen.getByRole('button', { name: 'User menu for boardowner' }));

@@ -140,6 +140,16 @@ body {
   inset: 0;
   border: 0;
   background: rgb(15 23 42 / 42%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 180ms ease, visibility 180ms ease;
+}
+
+.task-assignment-backdrop-open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
 }
 
 .task-assignment-panel {
@@ -152,6 +162,14 @@ body {
   padding: 1.25rem;
   background: white;
   box-shadow: -12px 0 32px rgb(15 23 42 / 18%);
+  transform: translateX(100%);
+  visibility: hidden;
+  transition: transform 180ms ease, visibility 180ms ease;
+}
+
+.task-assignment-panel-open {
+  transform: translateX(0);
+  visibility: visible;
 }
 
 .mobile-menu-button,
@@ -622,6 +640,16 @@ body {
     inset: 0;
     border: 0;
     background: rgb(15 23 42 / 42%);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 180ms ease, visibility 180ms ease;
+  }
+
+  .mobile-filter-backdrop-open {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
   }
 
   .mobile-filter-panel {
@@ -635,6 +663,14 @@ body {
     padding-bottom: env(safe-area-inset-bottom);
     background: white;
     box-shadow: -12px 0 32px rgb(15 23 42 / 18%);
+    transform: translateX(100%);
+    visibility: hidden;
+    transition: transform 180ms ease, visibility 180ms ease;
+  }
+
+  .mobile-filter-panel-open {
+    transform: translateX(0);
+    visibility: visible;
   }
 
   .mobile-task-columns {
@@ -652,6 +688,15 @@ body {
   .mobile-task-columns .board-column-tasks {
     flex: none;
     overflow: visible;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-assignment-backdrop,
+  .task-assignment-panel,
+  .mobile-filter-backdrop,
+  .mobile-filter-panel {
+    transition-duration: 1ms;
   }
 
   .mobile-task-columns .task-card {
