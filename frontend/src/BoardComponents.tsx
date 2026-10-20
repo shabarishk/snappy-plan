@@ -39,7 +39,7 @@ export function CreateBoardOverlay({
       inert={!isPage && !isOpen}
       className={isPage
         ? 'creation-page'
-        : `popup-modal-backdrop ${isOpen ? 'popup-modal-backdrop-enter' : 'popup-modal-backdrop-exit'} fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4`}
+        : `popup-modal-backdrop ${isOpen ? 'popup-modal-backdrop-enter' : 'popup-modal-backdrop-exit'} fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm`}
     >
       <section
         role={isPage ? 'region' : isOpen ? 'dialog' : undefined}

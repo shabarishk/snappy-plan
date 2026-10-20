@@ -82,6 +82,7 @@ describe('Initiatives', () => {
     fireEvent.click(screen.getByRole('button', { name: '+ New initiative' }));
     const createInitiativeDialog = screen.getByRole('dialog', { name: 'Create initiative' });
     expect(createInitiativeDialog.getAttribute('aria-modal')).toBe('true');
+    expect(createInitiativeDialog.parentElement?.className).toContain('backdrop-blur-sm');
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Launch planning' } });
     fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Coordinate launch work' } });
     fireEvent.change(screen.getByLabelText('Complete by'), { target: { value: '2026-12-01' } });

@@ -425,6 +425,11 @@ describe('Tasks', () => {
     expect(screen.getByRole('button', { name: 'Back to tasks' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Move task' }));
+    const moveBackdrop = screen.getByRole('button', { name: 'Close task move menu' });
+    expect(moveBackdrop.className).toContain('backdrop-blur-sm');
+    fireEvent.click(moveBackdrop);
+    expect(screen.queryByRole('menu', { name: 'Move task' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Move task' }));
     expect(screen.getByRole('menuitem', { name: 'In Progress' })).toBeTruthy();
     expect(screen.queryByRole('menuitem', { name: /Forward|Backward/ })).toBeNull();
     fireEvent.click(screen.getByRole('menuitem', { name: 'In Progress' }));
@@ -448,7 +453,9 @@ describe('Tasks', () => {
 
     fireEvent.click(await screen.findByText('Task page sample'));
     expect(await screen.findByRole('region', { name: 'Task details' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'View assignments' }));
+    const viewAssignmentsButton = screen.getByRole('button', { name: 'View assignments' });
+    expect(viewAssignmentsButton.className).toContain('ml-auto');
+    fireEvent.click(viewAssignmentsButton);
     const assignments = screen.getByRole('dialog', { name: 'Task assignments' });
     expect(assignments.className).toContain('task-assignment-panel-open');
     expect(within(assignments).getByLabelText('Board')).toBeTruthy();
@@ -1428,6 +1435,7 @@ describe('Tasks', () => {
     fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Task' }));
     const createTaskDialog = screen.getByRole('dialog', { name: 'Create task' });
+    expect(createTaskDialog.parentElement?.className).toContain('backdrop-blur-sm');
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Plan launch' } });
     const initiativeCombo = within(createTaskDialog).getByRole('combobox', { name: 'Initiative' });
     fireEvent.change(initiativeCombo, { target: { value: 'Launch' } });
@@ -1567,6 +1575,7 @@ describe('Tasks', () => {
 
     await screen.findByRole('heading', { name: 'Board Owner' });
     fireEvent.click(screen.getByRole('button', { name: '+ Create' }));
+    expect(screen.getByRole('button', { name: 'Close create menu' }).className).toContain('backdrop-blur-sm');
     expect(screen.getByRole('menuitem', { name: 'Task' })).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: 'Board' })).toBeTruthy();
     expect(screen.getByRole('menuitem', { name: 'Initiative' })).toBeTruthy();

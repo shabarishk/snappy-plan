@@ -184,6 +184,7 @@ describe('Application', () => {
     expect(createButton.parentElement?.className).toContain('mobile-create-menu');
 
     fireEvent.click(createButton);
+    expect(screen.getByRole('button', { name: 'Close create menu' }).className).toContain('backdrop-blur-sm');
     expect(screen.getByRole('menu', { name: 'Create' })).toBeTruthy();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Task' }));
     expect(window.location.pathname).toBe('/create/task');
