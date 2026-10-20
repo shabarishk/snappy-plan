@@ -7,11 +7,13 @@ export function CreateBoardOverlay({
   onClose,
   onCreated,
   isPage = false,
+  isOpen = true,
 }: {
   users: TaskAssignee[];
   onClose: () => void;
   onCreated: (board: Board) => void;
   isPage?: boolean;
+  isOpen?: boolean;
 }) {
   const [title, setTitle] = useState('');
   const [userIds, setUserIds] = useState<string[]>([]);
@@ -32,14 +34,22 @@ export function CreateBoardOverlay({
   };
 
   return (
-    <div className={isPage ? 'creation-page' : 'fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4'}>
+    <div
+      aria-hidden={!isPage && !isOpen ? true : undefined}
+      inert={!isPage && !isOpen}
+      className={isPage
+        ? 'creation-page'
+        : `popup-modal-backdrop ${isOpen ? 'popup-modal-backdrop-enter' : 'popup-modal-backdrop-exit'} fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-4`}
+    >
       <section
-        role={isPage ? 'region' : 'dialog'}
-        aria-modal={isPage ? undefined : 'true'}
+        role={isPage ? 'region' : isOpen ? 'dialog' : undefined}
+        aria-modal={isPage || !isOpen ? undefined : 'true'}
+        aria-hidden={!isPage && !isOpen ? true : undefined}
+        inert={!isPage && !isOpen}
         aria-labelledby="create-board-title"
         className={isPage
           ? 'creation-page-content w-full rounded-xl bg-white p-5 shadow-sm sm:p-6'
-          : 'w-full max-w-lg rounded-xl bg-white p-6 shadow-xl'}
+          : `popup-modal-surface-${isOpen ? 'enter' : 'exit'} w-full max-w-lg rounded-xl bg-white p-6 shadow-xl`}
       >
         <div className="mb-5 flex items-center justify-between">
           <h2 id="create-board-title" className="text-xl font-bold text-gray-800">Create a new board</h2>

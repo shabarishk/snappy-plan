@@ -7,6 +7,7 @@ import type { TaskAssignee } from './api';
 import { sortTasksByCompleteByAndPriority, sortTasksByPriority } from './taskPriority';
 import { getTaskStateMoves, TASK_STATE_LABELS } from './taskModel';
 import type { ColumnType, Task, TaskState } from './taskModel';
+import { useDelayedUnmount } from './useDelayedUnmount';
 
 // --- Sub-Components ---
 function PriorityIcon({ priority }: { priority: Task['priority'] }) {
@@ -80,6 +81,7 @@ function TaskCard({
   onMoveTaskToState?: (task: Task, nextState: TaskState) => void;
 }) {
   const [isMoveMenuOpen, setIsMoveMenuOpen] = useState(false);
+  const shouldRenderMoveMenu = useDelayedUnmount(isMoveMenuOpen);
   const [moveMenuPosition, setMoveMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const moveButtonRef = useRef<HTMLButtonElement>(null);
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -199,12 +201,14 @@ function TaskCard({
         )}
       </div>
     </div>
-    {showTaskMoveButton && onMoveTaskToState && isMoveMenuOpen && moveMenuPosition && createPortal(
+    {showTaskMoveButton && onMoveTaskToState && shouldRenderMoveMenu && moveMenuPosition && createPortal(
       <>
         <button
           type="button"
           aria-label={`Close move menu for ${task.title}`}
-          className="fixed inset-0 z-[100] border-0 bg-slate-900/10 backdrop-blur-sm"
+          aria-hidden={!isMoveMenuOpen}
+          disabled={!isMoveMenuOpen}
+          className={`popup-modal-backdrop ${isMoveMenuOpen ? 'popup-modal-backdrop-enter' : 'popup-modal-backdrop-exit'} fixed inset-0 z-[100] border-0 bg-slate-900/10 backdrop-blur-sm`}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => {
             event.stopPropagation();
@@ -212,9 +216,11 @@ function TaskCard({
           }}
         />
         <div
-          role="menu"
+          role={isMoveMenuOpen ? 'menu' : undefined}
+          aria-hidden={!isMoveMenuOpen}
+          inert={!isMoveMenuOpen}
           aria-label="Move task"
-          className="fixed z-[101] w-56 rounded-lg border border-gray-200 bg-white p-1 shadow-xl"
+          className={`fixed z-[101] w-56 rounded-lg border border-gray-200 bg-white p-1 shadow-xl ${isMoveMenuOpen ? 'popup-menu-enter' : 'popup-menu-exit'}`}
           style={moveMenuPosition}
           onPointerDown={(event) => event.stopPropagation()}
         >

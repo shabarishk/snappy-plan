@@ -20,6 +20,7 @@ import { BoardTaskColumns, type TaskGroup, type TaskGroupBy } from './BoardTaskC
 import { CheckboxFilter } from './TaskFilters';
 import { isAllSelected, toggleAllFilter, toggleFilterOption } from './taskFilterUtils';
 import type { FilterOption, FilterSelection } from './taskFilterUtils';
+import { useDelayedUnmount } from './useDelayedUnmount';
 
 type SelectedTask = {
   task: Task;
@@ -63,6 +64,7 @@ export function AuthenticatedBoard({
   const needsInitiativeGrouping = isTaskPage || currentPage === 'tasks' || currentPage === 'task';
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [selectedTask, setSelectedTask] = useState<SelectedTask | null>(null);
+  const [selectedTaskView, setSelectedTaskView] = useState(0);
   const [assignees, setAssignees] = useState<TaskAssignee[]>([]);
   const [boards, setBoards] = useState<Board[]>([]);
   const [selectedBoardId, setSelectedBoardId] = useState('');
@@ -89,6 +91,11 @@ export function AuthenticatedBoard({
   const [isCreateInitiativeOpen, setIsCreateInitiativeOpen] = useState(false);
   const [initiativeRefreshToken, setInitiativeRefreshToken] = useState(0);
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
+  const shouldRenderCreateMenu = useDelayedUnmount(isCreateMenuOpen);
+  const shouldRenderTaskMoveMenu = useDelayedUnmount(isTaskMoveMenuOpen);
+  const shouldRenderCreateTaskOverlay = useDelayedUnmount(isCreateTaskOpen);
+  const shouldRenderCreateBoardOverlay = useDelayedUnmount(isCreateBoardOpen);
+  const shouldRenderCreateInitiativeOverlay = useDelayedUnmount(isCreateInitiativeOpen);
   const [loadError, setLoadError] = useState('');
   const [moveError, setMoveError] = useState('');
   const [boardOrderError, setBoardOrderError] = useState('');
@@ -273,6 +280,7 @@ export function AuthenticatedBoard({
 
   const handleSelectTask = (task: Task, boardId: string) => {
     setSelectedTask({ task, boardId });
+    setSelectedTaskView((version) => version + 1);
     if (isMobileLayout) {
       taskReturnPageRef.current = currentPage;
       navigateToPage('task', task.id);
@@ -841,8 +849,14 @@ export function AuthenticatedBoard({
                 <span aria-hidden="true" className="create-menu-plus">+</span>
                 <span className="create-menu-label">Create</span>
               </button>
-              {isCreateMenuOpen && (
-                <div role="menu" aria-label="Create" className="absolute right-0 top-full z-30 mt-2 w-48 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
+              {shouldRenderCreateMenu && (
+                <div
+                  role={isCreateMenuOpen ? 'menu' : undefined}
+                  aria-hidden={!isCreateMenuOpen}
+                  inert={!isCreateMenuOpen}
+                  aria-label="Create"
+                  className={`absolute right-0 top-full z-30 mt-2 w-48 rounded-lg border border-gray-200 bg-white p-1 shadow-lg ${isCreateMenuOpen ? 'popup-menu-enter' : 'popup-menu-exit'}`}
+                >
                   <button type="button" role="menuitem" onClick={() => openCreateItem('task')} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100">
                     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
                       <rect x="3" y="3" width="18" height="18" rx="3" />
@@ -871,7 +885,7 @@ export function AuthenticatedBoard({
         )}
         <NotificationBell />
       </header>
-      {currentPage !== 'profile' && currentPage !== 'settings' && !isCreatePage && isCreateTaskOpen && (
+      {currentPage !== 'profile' && currentPage !== 'settings' && !isCreatePage && shouldRenderCreateTaskOverlay && (
         <CreateTaskOverlay
           boards={boards}
           selectedBoardId={selectedBoardId}
@@ -880,6 +894,7 @@ export function AuthenticatedBoard({
           boardInitiatives={initiativesByBoardId}
           onClose={() => setIsCreateTaskOpen(false)}
           onCreated={handleTaskCreated}
+          isOpen={isCreateTaskOpen}
         />
       )}
       {backlogTaskNotification && (
@@ -900,18 +915,20 @@ export function AuthenticatedBoard({
           </button>
         </div>
       )}
-      {currentPage !== 'profile' && currentPage !== 'settings' && !isCreatePage && isCreateBoardOpen && (
+      {currentPage !== 'profile' && currentPage !== 'settings' && !isCreatePage && shouldRenderCreateBoardOverlay && (
         <CreateBoardOverlay
           users={assignees}
           onClose={() => setIsCreateBoardOpen(false)}
           onCreated={handleBoardCreated}
+          isOpen={isCreateBoardOpen}
         />
       )}
-      {currentPage !== 'profile' && currentPage !== 'settings' && !isCreatePage && isCreateInitiativeOpen && (
+      {currentPage !== 'profile' && currentPage !== 'settings' && !isCreatePage && shouldRenderCreateInitiativeOverlay && (
         <CreateInitiativeOverlay
           users={assignees}
           onClose={() => setIsCreateInitiativeOpen(false)}
           onCreated={handleInitiativeCreated}
+          isOpen={isCreateInitiativeOpen}
         />
       )}
       {currentPage === 'task' && taskPageSelection && (
@@ -929,8 +946,14 @@ export function AuthenticatedBoard({
                 <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
               </svg>
             </button>
-            {isTaskMoveMenuOpen && (
-              <div role="menu" aria-label="Move task" className="absolute left-0 top-full z-30 mt-2 w-56 rounded-lg border border-gray-200 bg-white p-1 shadow-xl">
+            {shouldRenderTaskMoveMenu && (
+              <div
+                role={isTaskMoveMenuOpen ? 'menu' : undefined}
+                aria-hidden={!isTaskMoveMenuOpen}
+                inert={!isTaskMoveMenuOpen}
+                aria-label="Move task"
+                className={`absolute left-0 top-full z-30 mt-2 w-56 rounded-lg border border-gray-200 bg-white p-1 shadow-xl ${isTaskMoveMenuOpen ? 'popup-menu-enter' : 'popup-menu-exit'}`}
+              >
                 <button
                   type="button"
                   role="menuitem"
@@ -976,7 +999,7 @@ export function AuthenticatedBoard({
       )}
       {selectedTask && currentPage !== 'task' && currentPage !== 'profile' && currentPage !== 'settings' && (
         <TaskDetailsOverlay
-          key={selectedTask.task.id}
+          key={`${selectedTask.task.id}-${selectedTaskView}`}
           task={selectedTask.task}
           boards={boards}
           assignees={assignees}

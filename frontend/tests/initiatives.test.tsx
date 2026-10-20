@@ -98,6 +98,7 @@ describe('Initiatives', () => {
         assigned_to_id: 'boardowner',
       }),
     }));
+    await waitFor(() => expect(document.querySelector('.popup-modal-backdrop-exit')).toBeNull());
 
     fireEvent.click(screen.getByRole('button', { name: /Launch planning/ }));
     expect(await screen.findByRole('heading', { name: 'Tasks' })).toBeTruthy();
